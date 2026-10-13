@@ -257,3 +257,13 @@ def test_import_can_assign_an_initial_group_without_replacing_authoritative_sess
     assert service.vault.secret(service.vault.account(first['id']))['cookie'] == 'session=person'
     result = client.post('/api/accounts/import', json={'cookie': 'session=person:other', 'label': 'Alice', 'group_id': 43, 'group_name': 'Group B'})
     assert result.json()['group_id'] == 42
+
+
+def test_cookie_renewal_does_not_restore_a_stale_phone_group(setup):
+    client, service, _, _ = setup
+    first = service.vault.upsert('person', 'Alice', {'cookie': 'session=person'}, group_id=43, group_name='Group B')
+    result = client.post('/api/accounts/import', json={'cookie': 'session=person:new', 'label': 'Alice', 'expected_session_version': first['session_version'], 'group_id': 42, 'group_name': 'Old group'})
+    assert result.status_code == 200
+    assert result.json()['group_id'] == 43
+    assert result.json()['group_name'] == 'Group B'
+    assert result.json()['session_version'] == first['session_version'] + 1

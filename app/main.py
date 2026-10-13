@@ -349,7 +349,7 @@ def create_app(directory=None, password=None, transport=None, background=True):
                 return metadata
             return vault.public(existing)
         expected = body.expected_version if body.expected_version is not None else (None if body.expected_session_version is not None else (existing['version'] if existing else 0))
-        account = vault.upsert(uid, body.label, {'cookie': cookie}, account_id=body.account_id, expected=expected, group_id=body.group_id, group_name=body.group_name, session_expected=body.expected_session_version)
+        account = vault.upsert(uid, body.label, {'cookie': cookie}, account_id=body.account_id, expected=expected, group_id=body.group_id if existing is None or existing['group_id'] is None else None, group_name=body.group_name if existing is None or existing['group_id'] is None else None, session_expected=body.expected_session_version)
         await service.changed()
         return vault.public(account)
 
