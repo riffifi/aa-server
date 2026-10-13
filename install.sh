@@ -12,7 +12,7 @@ usage() {
 Usage: ./install.sh [--url http://PRIVATE-IP:8080] [--bind IP] [--port PORT]
                     [--domain sessions.example.org] [--check]
 HTTP defaults to loopback. Use --bind 0.0.0.0 for a private LAN/VPN listener.
---domain enables Caddy automatic HTTPS (DNS must point to this server).
+Nginx fronts the service. --domain sets an HTTP hostname; configure HTTPS in host Nginx.
 --check validates configuration without installing or starting anything.
 Existing credentials and the Docker data volume are preserved on reruns.
 HELP
@@ -37,8 +37,8 @@ done
 [[ "$server_url" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]{1,5})?/?$ ]] || { echo 'Use an HTTP(S) URL without paths or credentials' >&2; exit 2; }
 if [[ -n "$server_domain" ]]; then
   [[ "$server_domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ && "$server_domain" == *.* ]] || { echo 'Invalid domain' >&2; exit 2; }
-  server_url="https://$server_domain"
-  bind_address='127.0.0.1'
+  server_url="http://$server_domain:$server_port"
+  bind_address='0.0.0.0'
 fi
 if $check_only; then
   echo "Configuration valid: $server_url (bind $bind_address:$server_port)"
@@ -92,10 +92,6 @@ else
   echo 'Preserving existing server/.env. Edit it to change URL or binding.'
 fi
 # Do not source .env as shell code. Docker Compose parses it as configuration.
-compose_args=()
-if [[ -n "$server_domain" ]] || awk -F= '$1 == "DOMAIN" && length($2) > 0 { found=1 } END { exit !found }' .env; then
-  compose_args+=(--profile https)
-fi
-docker compose "${compose_args[@]}" up -d --build --wait --wait-timeout 180
+docker compose up -d --build --remove-orphans --wait --wait-timeout 180
 printf 'Server started. Open the PUBLIC_URL from %s/.env.\n' "$server_dir"
-echo 'Use ADMIN_PASSWORD from that file to open the panel. Create a separate device key for each phone.'
+echo 'Use ADMIN_PASSWORD from that file to open the panel. Phones only need PUBLIC_URL; synchronization is automatic.'

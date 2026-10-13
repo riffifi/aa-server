@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -51,13 +52,13 @@ class Vault:
             label TEXT NOT NULL, group_id INTEGER, group_name TEXT, secret TEXT NOT NULL,
             state TEXT NOT NULL, expires_at REAL, checked_at REAL NOT NULL, version INTEGER NOT NULL,
             pass_version INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL);
-          CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, name TEXT NOT NULL,
-            key_hash TEXT UNIQUE NOT NULL, scopes TEXT NOT NULL, publisher INTEGER NOT NULL,
-            revoked INTEGER NOT NULL DEFAULT 0, last_seen REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS panel_sessions(key_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL,
             version INTEGER NOT NULL, kind TEXT NOT NULL, created REAL NOT NULL);
         ''')
+        columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
+        if 'session_version' not in columns:
+            self.db.execute('ALTER TABLE accounts ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
         with self.lock, self.db:
             if self.db.execute("SELECT 1 FROM config WHERE key='admin_password'").fetchone() is None:
                 if not password or len(password) < 16:
@@ -94,33 +95,6 @@ class Vault:
         with self.transaction() as db:
             db.execute('DELETE FROM panel_sessions WHERE key_hash=?', (digest(token),))
 
-    def device(self, key):
-        with self.transaction() as db:
-            row = db.execute('SELECT * FROM devices WHERE key_hash=? AND revoked=0', (digest(key),)).fetchone()
-            if row:
-                db.execute('UPDATE devices SET last_seen=? WHERE id=?', (time.time(), row['id']))
-            return row
-
-    def create_device(self, name, scopes, publisher=False):
-        key, device_id = secrets.token_urlsafe(32), str(uuid.uuid4())
-        with self.transaction() as db:
-            db.execute('INSERT INTO devices(id,name,key_hash,scopes,publisher,last_seen) VALUES(?,?,?,?,?,?)',
-                (device_id, name, digest(key), json.dumps(scopes), publisher, time.time()))
-        return device_id, key
-
-    def devices(self):
-        with self.transaction() as db:
-            return [dict(row) for row in db.execute('SELECT id,name,scopes,publisher,revoked,last_seen FROM devices ORDER BY name')]
-
-    def revoke(self, device_id):
-        with self.transaction() as db:
-            db.execute('UPDATE devices SET revoked=1 WHERE id=?', (device_id,))
-
-    @staticmethod
-    def allowed(device, account_id):
-        scopes = json.loads(device['scopes'])
-        return '*' in scopes or account_id in scopes
-
     def accounts(self):
         with self.transaction() as db:
             return [dict(row) for row in db.execute('SELECT * FROM accounts ORDER BY label')]
@@ -131,13 +105,13 @@ class Vault:
             return dict(row) if row else None
 
     def public(self, row):
-        return {key: row[key] for key in ('id', 'label', 'group_id', 'group_name', 'state', 'expires_at', 'checked_at', 'version', 'pass_version', 'updated_at')}
+        return {key: row[key] for key in ('id', 'label', 'group_id', 'group_name', 'state', 'expires_at', 'checked_at', 'version', 'session_version', 'pass_version', 'updated_at')}
 
     def _event(self, db, account_id, version, kind):
         db.execute('INSERT INTO events(account_id,version,kind,created) VALUES(?,?,?,?)', (account_id, version, kind, time.time()))
         db.execute('DELETE FROM events WHERE created < ?', (time.time() - 7 * 86400,))
 
-    def upsert(self, pulse_id, label, credentials, account_id=None, expected=None, group_id=None, group_name=None):
+    def upsert(self, pulse_id, label, credentials, account_id=None, expected=None, group_id=None, group_name=None, session_expected=None):
         with self.transaction() as db:
             row = db.execute('SELECT * FROM accounts WHERE pulse_id=?', (pulse_id,)).fetchone()
             if account_id and (row is None or row['id'] != account_id):
@@ -145,16 +119,18 @@ class Vault:
             if row is not None:
                 if expected is not None and expected != row['version']:
                     raise Conflict('A newer version is already stored; refresh before publishing')
+                if session_expected is not None and session_expected != row['session_version']:
+                    raise Conflict('A newer session is already stored')
                 secret = self.secret(row)
                 # Keep the enrolled identifier across cookie renewal; every
                 # activation still obtains a fresh account-bound access token.
                 secret.update(credentials)
                 account_id = row['id']
                 version = row['version'] + 1
-                db.execute('UPDATE accounts SET label=?,group_id=COALESCE(?,group_id),group_name=COALESCE(?,group_name),secret=?,state=?,expires_at=?,checked_at=?,version=?,updated_at=? WHERE id=?',
+                db.execute('UPDATE accounts SET label=?,group_id=COALESCE(?,group_id),group_name=COALESCE(?,group_name),secret=?,state=?,expires_at=?,checked_at=?,version=?,session_version=session_version+1,updated_at=? WHERE id=?',
                     (label or row['label'], group_id, group_name, self.seal(secret), 'valid', credentials.get('expires_at'), time.time(), version, time.time(), account_id))
             else:
-                if expected not in (None, 0):
+                if expected not in (None, 0) or session_expected not in (None, 0):
                     raise Conflict('Account does not exist')
                 account_id, version = str(uuid.uuid4()), 1
                 db.execute('INSERT INTO accounts(id,pulse_id,label,group_id,group_name,secret,state,expires_at,checked_at,version,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
@@ -175,7 +151,7 @@ class Vault:
                 db.execute('UPDATE accounts SET checked_at=? WHERE id=?', (time.time(),account_id))
 
     def save_pass(self, account_id, number, expected=None):
-        if not isinstance(number, str) or not number.isdecimal() or not 0 < int(number) <= 9223372036854775807:
+        if not isinstance(number, str) or not re.fullmatch(r'[1-9][0-9]{0,18}', number) or not 0 < int(number) <= 9223372036854775807:
             raise ValueError('Invalid pass identifier')
         with self.transaction() as db:
             row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
@@ -197,11 +173,11 @@ class Vault:
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
             self._event(db, account_id, 0, 'deleted')
 
-    def events(self, after, device):
+    def events(self, after):
         with self.transaction() as db:
             rows = db.execute('SELECT * FROM events WHERE id>? ORDER BY id LIMIT 1000', (after,)).fetchall()
             cursor = rows[-1]['id'] if rows else after
-            values = [dict(row) for row in rows if self.allowed(device, row['account_id'])]
+            values = [dict(row) for row in rows]
             return values, cursor
 
     def cursor(self):

@@ -14,25 +14,22 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Run install.sh first}
       PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
       REFRESH_SECONDS: ${REFRESH_SECONDS:-300}
-    ports:
-      - ${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8080
     volumes:
       - session_data:/data
-  https:
-    image: caddy:2.10.2-alpine
-    profiles: [https]
+  nginx:
+    image: nginx:1.28-alpine
     restart: unless-stopped
-    ports: ['80:80', '443:443', '443:443/udp']
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - ${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:80
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/health']
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
     depends_on:
       sessions:
         condition: service_healthy
 volumes:
   session_data:
-  caddy_data:
-  caddy_config:

@@ -149,7 +149,7 @@ class BrowserLogins:
             raise ValueError('Too many active logins')
         capability = secrets.token_urlsafe(32)
         existing = self.vault.account(account_id) if account_id else None
-        job = LoginJob(secrets.token_urlsafe(18), digest(capability), label, account_id, time.time(), expected_version=existing['version'] if existing else None)
+        job = LoginJob(secrets.token_urlsafe(18), digest(capability), label, account_id, time.time(), expected_version=existing['session_version'] if existing else None)
         self.jobs[job.id] = job
         job.task = asyncio.create_task(self._login(job))
         return job, capability
@@ -170,7 +170,7 @@ class BrowserLogins:
                         captured = await self.capture(context)
                         if captured:
                             uid, credentials = captured
-                            account = self.vault.upsert(uid, job.label, credentials, account_id=job.account_id, expected=job.expected_version)
+                            account = self.vault.upsert(uid, job.label, credentials, account_id=job.account_id, session_expected=job.expected_version)
                             job.result_id, job.status, job.qr = account['id'], 'complete', None
                             await self.changed()
                             return
@@ -217,7 +217,7 @@ class BrowserLogins:
                         captured = await self.capture(context)
                         if captured:
                             uid, credentials = captured
-                            self.vault.upsert(uid, account['label'], credentials, account_id=account['id'], expected=account['version'])
+                            self.vault.upsert(uid, account['label'], credentials, account_id=account['id'], session_expected=account['session_version'])
                             await self.changed()
                             return True
                     await asyncio.sleep(1)

@@ -6,6 +6,7 @@ async function api(path, method = 'GET', body) {
   const headers = { 'Content-Type': 'application/json' };
   if (method !== 'GET') headers['X-CSRF-Token'] = csrf;
   const response = await fetch('/panel/api/' + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
+  if (response.status === 401 && path !== 'login') { csrf = ''; currentJob = null; $('panel').hidden = true; $('sign-in').hidden = false; $('enroll-card').hidden = true; }
   const result = await response.json();
   if (!response.ok) throw Error(typeof result.detail === 'string' ? result.detail : 'Request failed');
   return result;
@@ -35,13 +36,7 @@ async function refresh() {
     $('sign-in').hidden = true; $('panel').hidden = false;
     $('account-count').textContent = String(accounts.length); $('empty-accounts').hidden = accounts.length > 0;
     $('accounts').replaceChildren(...accounts.map(renderAccount));
-    $('devices').replaceChildren(...data.devices.map(device => {
-      const row = el('div', null, 'row'), details = el('div', null, 'row-body');
-      details.append(el('strong', device.name), el('div', `${device.revoked ? 'Revoked' : 'Active'} · ${device.publisher ? 'Can publish' : 'Read and use'} · last seen ${date(device.last_seen)}`, 'meta'));
-      row.append(details);
-      if (!device.revoked) row.append(action('Revoke', async () => { if (confirm('Revoke this phone’s access?')) { await api('devices/' + device.id, 'DELETE'); await refresh(); } }, 'quiet danger'));
-      return row;
-    }));
+    $('server-url').value = location.origin;
   } catch (error) { if ($('panel').hidden === false) notice(error.message); }
   finally { syncing = false; }
 }
@@ -72,18 +67,8 @@ async function copy(input) {
 $('login-form').addEventListener('submit', async event => { event.preventDefault(); try { csrf = (await api('login', 'POST', { password: $('password').value })).csrf; $('password').value = ''; notice(''); await refresh(); } catch (error) { notice(error.message); } });
 $('new-account').onclick = () => $('account-dialog').showModal();
 $('account-form').addEventListener('submit', async event => { event.preventDefault(); try { await startLogin($('account-label').value); $('account-dialog').close(); $('account-form').reset(); } catch (error) { notice(error.message); } });
-$('new-device').onclick = () => {
-  $('device-scopes').replaceChildren(...accounts.map(account => { const label = el('label', null, 'check'), input = document.createElement('input'); input.type = 'checkbox'; input.value = account.id; input.className = 'scope'; label.append(input, document.createTextNode(account.label)); return label; }));
-  $('device-scopes').hidden = $('all-accounts').checked; $('device-dialog').showModal();
-};
-$('all-accounts').onchange = () => { $('device-scopes').hidden = $('all-accounts').checked; };
-$('device-form').addEventListener('submit', async event => { event.preventDefault(); try {
-  const scopes = $('all-accounts').checked ? ['*'] : [...document.querySelectorAll('.scope:checked')].map(input => input.value);
-  const result = await api('devices', 'POST', { name: $('device-name').value, scopes, publisher: $('publisher').checked });
-  $('device-dialog').close(); $('server-url').value = location.origin; $('device-key').value = result.key; $('key-dialog').showModal(); await refresh();
-} catch (error) { notice(error.message); } });
-$('copy-key').onclick = () => copy('device-key'); $('copy-owner').onclick = () => copy('owner-link');
+$('copy-server').onclick = () => copy('server-url'); $('copy-owner').onclick = () => copy('owner-link');
 $('close-enroll').onclick = async () => { if (currentJob) await api('logins/' + currentJob, 'DELETE').catch(error => notice(error.message)); currentJob = null; $('enroll-card').hidden = true; };
 $('sign-out').onclick = async () => { try { await api('logout', 'POST'); $('panel').hidden = true; $('sign-in').hidden = false; $('enroll-card').hidden = true; currentJob = null; csrf = ''; } catch (error) { notice(error.message); } };
-document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => { if (button.closest('dialog').id === 'key-dialog') $('device-key').value = ''; button.closest('dialog').close(); }; });
+document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => { button.closest('dialog').close(); }; });
 refresh(); setInterval(() => { if (!$('panel').hidden) refresh(); }, 5000);

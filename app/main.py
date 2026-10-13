@@ -44,10 +44,6 @@ class BodyLimitMiddleware:
 
 class LoginBody(BaseModel):
     password: str = Field(min_length=1, max_length=256)
-class DeviceBody(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-    scopes: list[str] = Field(default_factory=lambda: ['*'], max_length=500)
-    publisher: bool = False
 class LoginStart(BaseModel):
     label: str = Field(min_length=1, max_length=60)
     account_id: str | None = None
@@ -56,6 +52,7 @@ class ImportBody(BaseModel):
     label: str = Field(min_length=1, max_length=60)
     account_id: str | None = None
     expected_version: int | None = Field(default=None, ge=0)
+    expected_session_version: int | None = Field(default=None, ge=0)
     group_id: int | None = None
     group_name: str | None = Field(default=None, max_length=100)
 class PassBody(BaseModel):
@@ -133,6 +130,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
         size = request.headers.get('content-length')
         if size and (not size.isdigit() or int(size) > 200000):
             return JSONResponse({'detail': 'Request too large'}, status_code=413)
+        if request.url.path.startswith('/api/') and request.method not in ('GET', 'HEAD'):
+            origin = request.headers.get('origin')
+            if origin and urlparse(origin).netloc != request.headers.get('host'):
+                return JSONResponse({'detail': 'Invalid origin'}, status_code=403)
         response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -149,17 +150,6 @@ def create_app(directory=None, password=None, transport=None, background=True):
             raise HTTPException(403, 'Invalid CSRF token')
         return row
 
-    def device(request, account_id=None, write=False):
-        header = request.headers.get('authorization', '')
-        row = vault.device(header[7:]) if header.startswith('Bearer ') else None
-        if row is None:
-            raise HTTPException(401, 'Device key is invalid or revoked')
-        if account_id and not vault.allowed(row, account_id):
-            raise HTTPException(403, 'Account not granted to this device')
-        if write and not row['publisher']:
-            raise HTTPException(403, 'This device cannot publish updates')
-        return row
-
     async def bounded_body(request, limit=65536):
         result = bytearray()
         async for part in request.stream():
@@ -174,7 +164,7 @@ def create_app(directory=None, password=None, transport=None, background=True):
 
     @app.get('/health')
     async def health():
-        return {'ok': True, 'protocol': 1}
+        return {'ok': True, 'protocol': 2, 'sync': 'automatic'}
 
     @app.get('/')
     async def index():
@@ -205,7 +195,7 @@ def create_app(directory=None, password=None, transport=None, background=True):
     @app.get('/panel/api/state')
     async def panel_state(request: Request):
         session = panel(request)
-        return {'csrf': session['csrf'], 'accounts': [vault.public(row) for row in vault.accounts()], 'devices': vault.devices(), 'cursor': vault.cursor()}
+        return {'csrf': session['csrf'], 'accounts': [vault.public(row) for row in vault.accounts()], 'cursor': vault.cursor()}
 
     @app.post('/panel/api/logout')
     async def logout(request: Request):
@@ -214,21 +204,6 @@ def create_app(directory=None, password=None, transport=None, background=True):
         response = JSONResponse({'ok': True})
         response.delete_cookie('panel_session', path='/panel')
         return response
-
-    @app.post('/panel/api/devices')
-    async def make_device(body: DeviceBody, request: Request):
-        panel(request, True)
-        if not body.scopes or any(scope != '*' and vault.account(scope) is None for scope in body.scopes):
-            raise HTTPException(400, 'Choose valid account scopes')
-        identifier, key = vault.create_device(body.name.strip(), body.scopes, body.publisher)
-        return {'id': identifier, 'key': key}
-
-    @app.delete('/panel/api/devices/{identifier}')
-    async def revoke_device(identifier: str, request: Request):
-        panel(request, True)
-        vault.revoke(identifier)
-        await service.changed()
-        return {'ok': True}
 
     @app.post('/panel/api/logins')
     async def start_login(body: LoginStart, request: Request):
@@ -310,14 +285,12 @@ def create_app(directory=None, password=None, transport=None, background=True):
 
     @app.get('/api/accounts')
     async def accounts(request: Request):
-        actor = device(request)
-        rows = [row for row in vault.accounts() if vault.allowed(actor, row['id'])]
+        rows = vault.accounts()
         passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number'), 'version': row['pass_version']} for row in rows]
-        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'publisher': bool(actor['publisher'])}
+        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic'}
 
     @app.post('/api/accounts/import')
     async def import_account(body: ImportBody, request: Request):
-        actor = device(request, body.account_id, write=True)
         try:
             cookie = validate_header(body.cookie)
         except ValueError:
@@ -326,22 +299,19 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if state != 'valid':
             raise HTTPException(422, 'Pulse did not confirm this session')
         existing = next((row for row in vault.accounts() if row['pulse_id'] == uid), None)
-        if existing and not vault.allowed(actor, existing['id']):
-            raise HTTPException(403, 'Account not granted to this device')
-        if existing and body.expected_version is None and existing['state'] == 'valid':
+        if body.account_id and (existing is None or existing['id'] != body.account_id):
+            raise Conflict('This session belongs to a different Pulse account')
+        if existing and body.expected_version is None and body.expected_session_version is None and existing['state'] == 'valid':
             # An unlinked phone must adopt the authoritative server session,
             # not overwrite it with an indistinguishable opaque old cookie.
             return vault.public(existing)
-        if not existing and '*' not in json.loads(actor['scopes']):
-            raise HTTPException(403, 'This device cannot add new accounts')
-        expected = body.expected_version if body.expected_version is not None else (existing['version'] if existing else 0)
-        account = vault.upsert(uid, body.label, {'cookie': cookie}, account_id=body.account_id, expected=expected, group_id=body.group_id, group_name=body.group_name)
+        expected = body.expected_version if body.expected_version is not None else (None if body.expected_session_version is not None else (existing['version'] if existing else 0))
+        account = vault.upsert(uid, body.label, {'cookie': cookie}, account_id=body.account_id, expected=expected, group_id=body.group_id, group_name=body.group_name, session_expected=body.expected_session_version)
         await service.changed()
         return vault.public(account)
 
     @app.put('/api/accounts/{identifier}/pass')
     async def publish_pass(identifier: str, body: PassBody, request: Request):
-        device(request, identifier, write=True)
         if vault.account(identifier) is None:
             raise HTTPException(404, 'Account not found')
         try:
@@ -357,11 +327,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
             raise HTTPException(400, 'Invalid event cursor')
         deadline = time.monotonic() + wait
         while True:
-            actor = device(request)
             # Hold the condition while checking the database so a publisher
             # cannot signal between the check and the subscription.
             async with service.condition:
-                values, cursor = vault.events(after, actor)
+                values, cursor = vault.events(after)
                 if values or cursor != after or time.monotonic() >= deadline:
                     return {'events': values, 'cursor': cursor}
                 try:
@@ -371,14 +340,13 @@ def create_app(directory=None, password=None, transport=None, background=True):
 
     @app.post('/api/accounts/{identifier}/rpc/{method}')
     async def rpc(identifier: str, method: str, request: Request):
-        actor = device(request, identifier, write=method in ('pass-code', 'pass-issue'))
         if method not in protocol.METHODS:
             raise HTTPException(404, 'RPC not allowed')
         row = vault.account(identifier)
         if row is None:
             raise HTTPException(404, 'Account not found')
         if method in ('pass-code', 'pass-issue'):
-            limit_key = (actor['id'], method, identifier)
+            limit_key = (method, identifier)
             queue = attempts[limit_key]
             now = time.time()
             while queue and queue[0] < now - 600:
@@ -424,9 +392,9 @@ def create_app(directory=None, password=None, transport=None, background=True):
                     elif 1 in values:
                         number = protocol.fields(values[1]).get(1)
                         if type(number) is int and number > 0:
-                            vault.save_pass(identifier, str(number))
+                            vault.save_pass(identifier, str(number), expected=row['pass_version'])
                             await service.changed()
-            except (ValueError, KeyError, TypeError, UnicodeError):
+            except (Conflict, ValueError, KeyError, TypeError, UnicodeError):
                 pass
         headers = {key: reply.headers[key] for key in ('content-type', 'grpc-status', 'grpc-message', 'location') if key in reply.headers}
         # Device authentication errors above use HTTP 401. Pulse's auth rejection

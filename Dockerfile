@@ -1,8 +1,10 @@
-FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DATA_DIR=/data
+FROM python:3.12-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DATA_DIR=/data PLAYWRIGHT_BROWSERS_PATH=/ms-playwright XDG_CACHE_HOME=/tmp/cache
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
+    playwright install --with-deps --only-shell chromium && \
+    rm -rf /var/lib/apt/lists/* && \
     useradd --create-home --uid 10001 sessionserver && \
     mkdir -p /data && chown sessionserver:sessionserver /data
 COPY --chown=sessionserver:sessionserver app ./app
