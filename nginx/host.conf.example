@@ -2,7 +2,7 @@
 # Keep the Docker Nginx listener bound to 127.0.0.1:8080.
 server {
     listen 80;
-    server_name sessions.example.org;
+    server_name aa.yellowteacrew.ru;
     access_log off;
     client_max_body_size 200000;
     location / {

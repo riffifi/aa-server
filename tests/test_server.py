@@ -179,3 +179,18 @@ def test_existing_database_migrates_without_losing_credentials(tmp_path):
     assert stored['session_version'] == 1
     assert migrated.secret(stored) == {'cookie': 'session=keep-this-cookie', 'pass_number': '777'}
     migrated.close()
+
+
+def test_late_pass_issuance_response_cannot_overwrite_a_newer_pass(setup):
+    from app.vault import digest
+    client, service, pulse, _ = setup
+    row = account(service)
+    service.issued_tokens[row['id']][digest('issued-token')] = time.time() + 300
+    async def delayed_reply(cookie, method, body, authorization=None):
+        service.vault.save_pass(row['id'], '9999')
+        return reply(protocol.field(1, b'\x08' + protocol.varint(1111)))
+    pulse.rpc = delayed_reply
+    response = client.post('/api/accounts/' + row['id'] + '/rpc/pass-issue',
+        headers={'X-Pulse-Token': 'issued-token'}, content=protocol.frame(b''))
+    assert response.status_code == 200
+    assert service.vault.secret(service.vault.account(row['id']))['pass_number'] == '9999'

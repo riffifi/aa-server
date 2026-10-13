@@ -24,14 +24,14 @@ phone authentication. Plain HTTP is supported.
 Clone or copy this separate server repository, then run inside its directory:
 
 ```sh
-sudo ./install.sh --url http://94.29.36.13:8080 --bind 0.0.0.0 --port 8080
+sudo ./install.sh
 ```
 
-Replace the address and port with your server’s reachable address. The installer
-supports Ubuntu/Debian, installs Docker Engine and Compose when needed, generates
-`.env` only on first install, and starts the Python service plus an Nginx reverse
-proxy. The default binding is loopback; `--bind 0.0.0.0` makes Nginx reachable
-on the host’s interfaces. The Python service has no published host port. Its image installs only the
+The default public URL is **http://aa.yellowteacrew.ru**. Point its DNS record at
+94.29.36.13 and allow incoming port 80. The installer installs Docker, Compose,
+Nginx and Python 3 when needed on Ubuntu/Debian. Docker's proxy listens only on
+127.0.0.1:8080; the host Nginx serves the domain on port 80.
+The Python service has no published host port. Its image installs only the
 [headless Chromium runtime](https://playwright.dev/python/docs/browsers#chromium-headless-shell)
 used for MIREA login, rather than downloading all browser engines.
 
@@ -53,18 +53,34 @@ and the encrypted Docker data volume are preserved on reruns. Phone setup only
 needs the URL. Check arguments without making changes:
 
 ```sh
-./install.sh --check --url http://94.29.36.13:8080 --bind 0.0.0.0 --port 8080
+./install.sh --check
 ```
 
 ## Existing host Nginx / HTTPS
 
-If Nginx already serves your domain, keep the Docker Nginx listener bound to
-`127.0.0.1:8080` and use `nginx/host.conf.example` in your host configuration.
-Configure your existing TLS certificates there if using HTTPS. Set `PUBLIC_URL`
-in `.env` to the external origin, for example `https://sessions.example.org`;
-then enter that external URL in the app. The installer does not overwrite host
-Nginx configuration or issue certificates. `--domain` sets an HTTP hostname;
-automatic Caddy HTTPS is no longer part of this stack.
+The installer discovers the global configuration using `nginx -T`, creates
+`antiattendance-managed/sessions.conf` next to it, and inserts one managed include
+inside its `http` block. Existing sites are preserved. Repeat installs do not
+append duplicate includes. Global configuration backups are saved next to the
+original file. Both configuration validation and reload must succeed; otherwise
+the previous configuration and managed site are restored.
+
+For a custom global config use `sudo ./install.sh --nginx-conf /path/nginx.conf`.
+An existing unmanaged server block for the same domain is reported as a conflict
+rather than overwritten. Host mode updates only PUBLIC_URL, BIND_ADDRESS, PORT
+and DOMAIN in `.env`; panel credentials and stored accounts remain intact.
+
+For direct Docker access without host Nginx:
+
+```sh
+sudo ./install.sh --no-host-nginx --url http://94.29.36.13:8080 --bind 0.0.0.0
+```
+
+HTTP is configured by default; no certificate is issued. If you add HTTPS to the
+managed site, set PUBLIC_URL to your HTTPS origin in `.env` and use that address
+in the app. Rerunning host setup regenerates the managed HTTP site, so maintain
+custom TLS configuration separately and use `--no-host-nginx` for subsequent
+application upgrades.
 
 ## Upgrade from the device-key server
 
