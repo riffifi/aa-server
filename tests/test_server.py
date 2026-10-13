@@ -194,3 +194,66 @@ def test_late_pass_issuance_response_cannot_overwrite_a_newer_pass(setup):
         headers={'X-Pulse-Token': 'issued-token'}, content=protocol.frame(b''))
     assert response.status_code == 200
     assert service.vault.secret(service.vault.account(row['id']))['pass_number'] == '9999'
+
+
+def test_group_filtered_accounts_passes_and_group_discovery(setup):
+    client, service, _, _ = setup
+    first = service.vault.upsert('a', 'Alice', {'cookie': 'session=a'}, group_id=42, group_name='Group A')
+    second = service.vault.upsert('b', 'Bob', {'cookie': 'session=b'}, group_id=43, group_name='Group B')
+    service.vault.save_pass(first['id'], '111')
+    service.vault.save_pass(second['id'], '222')
+    result = client.get('/api/accounts?group_id=42').json()
+    assert result['group_filter'] == 42
+    assert [a['id'] for a in result['accounts']] == [first['id']]
+    assert [p['number'] for p in result['passes']] == ['111']
+    assert {g['id'] for g in client.get('/api/groups').json()['groups']} == {42, 43}
+    assert client.get('/api/accounts?group_id=0').status_code == 400
+    assert client.get('/api/events?group_id=-1').status_code == 400
+
+
+def test_group_move_notifies_both_groups_and_keeps_session_pass(setup):
+    client, service, _, _ = setup
+    first = service.vault.upsert('a', 'Alice', {'cookie': 'session=a'}, group_id=42, group_name='Group A')
+    service.vault.save_pass(first['id'], '111')
+    before = service.vault.account(first['id'])
+    cursor = service.vault.cursor()
+    moved = client.put(f"/api/accounts/{first['id']}/group", json={'group_id': 43, 'group_name': 'Group B', 'expected_version': before['version']})
+    assert moved.status_code == 200
+    assert moved.json()['session_version'] == before['session_version']
+    assert moved.json()['pass_version'] == before['pass_version']
+    assert service.vault.secret(service.vault.account(first['id']))['pass_number'] == '111'
+    for group in (42, 43):
+        events = client.get(f'/api/events?group_id={group}&after={cursor}&wait=0').json()['events']
+        assert [e['kind'] for e in events] == ['group']
+    assert client.get('/api/accounts?group_id=42').json()['accounts'] == []
+    assert len(client.get('/api/accounts?group_id=43').json()['accounts']) == 1
+    cursor = service.vault.cursor()
+    service.vault.delete_account(first['id'])
+    assert client.get(f'/api/events?group_id=43&after={cursor}&wait=0').json()['events'][0]['kind'] == 'deleted'
+
+
+def test_group_updates_validate_cas_clear_and_panel_csrf(setup):
+    client, service, _, _ = setup
+    first = account(service)
+    path = f"/api/accounts/{first['id']}/group"
+    body = {'group_id': 42, 'group_name': 'Group A', 'expected_version': first['version']}
+    assert client.put(path, json={**body, 'group_id': -1}).status_code == 422
+    assert client.put(path, json=body).status_code == 200
+    assert client.put(path, json=body).status_code == 409
+    login = client.post('/panel/api/login', json={'password': PASSWORD}).json()
+    panel_path = f"/panel/api/accounts/{first['id']}/group"
+    cleared = {'group_id': None, 'group_name': None, 'expected_version': first['version'] + 1}
+    assert client.put(panel_path, json=cleared).status_code == 403
+    assert client.put(panel_path, json=cleared, headers={'X-CSRF-Token': login['csrf']}).json()['group_id'] is None
+
+
+def test_import_can_assign_an_initial_group_without_replacing_authoritative_session(setup):
+    client, service, _, _ = setup
+    first = account(service, 'person')
+    result = client.post('/api/accounts/import', json={'cookie': 'session=person:older', 'label': 'Alice', 'group_id': 42, 'group_name': 'Group A'})
+    assert result.status_code == 200
+    assert result.json()['group_id'] == 42
+    assert result.json()['session_version'] == first['session_version']
+    assert service.vault.secret(service.vault.account(first['id']))['cookie'] == 'session=person'
+    result = client.post('/api/accounts/import', json={'cookie': 'session=person:other', 'label': 'Alice', 'group_id': 43, 'group_name': 'Group B'})
+    assert result.json()['group_id'] == 42

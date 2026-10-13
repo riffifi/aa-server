@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let csrf = '', currentJob = null, accounts = [], syncing = false;
+let csrf = '', currentJob = null, accounts = [], syncing = false, editingGroup = null;
 function notice(message) { $('notice').textContent = message; }
 async function api(path, method = 'GET', body) {
   const headers = { 'Content-Type': 'application/json' };
@@ -24,6 +24,8 @@ function renderAccount(account) {
   if (account.pass_version) detail.append(el('span', 'Pass synced · v' + account.pass_version, 'badge'));
   detail.append(el('div', `Session expiry: ${date(account.expires_at)} · checked: ${date(account.checked_at)}`, 'meta'));
   detail.append(el('div', account.automatic_renewal ? `Automatic renewal enabled · last renewal: ${date(account.renewed_at)}` : 'Re-login here once to enable automatic renewal.', 'meta'));
+  detail.append(el('div', account.group_id ? `Group: ${account.group_name || account.group_id}` : 'No group assigned', 'meta'));
+  actions.append(action('Group', async () => { editingGroup = account; $('group-account').textContent = account.label; $('group-id').value = account.group_id || ''; $('group-name').value = account.group_name || ''; $('group-dialog').showModal(); }));
   actions.append(action('Check', async () => { await api('accounts/' + account.id + '/refresh', 'POST'); await refresh(); }));
   actions.append(action('Re-login', () => startLogin(account.label, account.id)));
   actions.append(action('Remove', async () => { if (confirm('Remove this account and its stored pass from this server?')) { await api('accounts/' + account.id, 'DELETE'); await refresh(); } }, 'quiet danger'));
@@ -66,6 +68,16 @@ async function copy(input) {
   try { if (navigator.clipboard) await navigator.clipboard.writeText(element.value); else { element.select(); if (!document.execCommand('copy')) throw Error(); } notice('Copied'); }
   catch (_) { element.focus(); element.select(); notice('Select and copy the text.'); }
 }
+$('group-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!editingGroup) return;
+  const raw = $('group-id').value.trim(), id = raw ? Number(raw) : null;
+  if (id !== null && (!Number.isSafeInteger(id) || id <= 0)) { notice('Enter a valid schedule group ID.'); return; }
+  try {
+    await api('accounts/' + editingGroup.id + '/group', 'PUT', { group_id: id, group_name: id === null ? null : $('group-name').value.trim(), expected_version: editingGroup.version });
+    $('group-dialog').close(); editingGroup = null; await refresh(); notice('Group saved. Phones will sync the change.');
+  } catch (error) { notice(error.message); }
+});
 $('login-form').addEventListener('submit', async event => { event.preventDefault(); try { csrf = (await api('login', 'POST', { password: $('password').value })).csrf; $('password').value = ''; notice(''); await refresh(); } catch (error) { notice(error.message); } });
 $('new-account').onclick = () => $('account-dialog').showModal();
 $('account-form').addEventListener('submit', async event => { event.preventDefault(); try { await startLogin($('account-label').value); $('account-dialog').close(); $('account-form').reset(); } catch (error) { notice(error.message); } });

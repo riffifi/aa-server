@@ -19,6 +19,29 @@ The administration panel still requires its own password and CSRF token for
 account removal and login management. HTTPS encrypts traffic; it does not add
 phone authentication. Plain HTTP is supported.
 
+## Groups
+
+Assign university schedule group IDs and names from an account’s **Group** action
+in the panel, or **Assign group** in the app. Group edits sync without a new login
+and preserve session and pass revisions. The panel checks the account revision
+before saving; refresh and retry if another client changed it.
+
+In **Settings → My group**, choose a group to fetch only its accounts and passes.
+**All groups** clears the preference. The Attendance selector filters the accounts
+already available on the phone and scopes selection to that group. Newly added
+local accounts without a group inherit the phone’s preferred group. Existing
+local accounts from other groups remain stored when hidden.
+
+`GET /api/groups` lists group IDs, names and account counts. Account snapshots and
+long-poll events accept `group_id`; moving an account notifies both its old and new
+groups. `PUT /api/accounts/{id}/group` accepts `group_id`, `group_name` and
+`expected_version`. A null group removes an assignment. Filtering is a sync
+preference, not an API access restriction.
+
+Deploy the updated server before using group-only fetches in the updated app.
+Rerun `sudo ./install.sh` after copying/pulling these changes; existing encrypted
+accounts are preserved, and event columns migrate automatically at startup.
+
 ## Docker + Nginx installation
 
 Clone or copy this separate server repository, then run inside its directory:

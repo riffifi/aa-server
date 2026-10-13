@@ -53,8 +53,12 @@ class ImportBody(BaseModel):
     account_id: str | None = None
     expected_version: int | None = Field(default=None, ge=0)
     expected_session_version: int | None = Field(default=None, ge=0)
-    group_id: int | None = None
+    group_id: int | None = Field(default=None, gt=0, le=2**63 - 1)
     group_name: str | None = Field(default=None, max_length=100)
+class GroupBody(BaseModel):
+    group_id: int | None = Field(default=None, gt=0, le=2**63 - 1)
+    group_name: str | None = Field(default=None, max_length=100)
+    expected_version: int = Field(ge=0)
 class PassBody(BaseModel):
     number: str = Field(min_length=1, max_length=19)
     expected_version: int = Field(ge=0)
@@ -301,10 +305,28 @@ def create_app(directory=None, password=None, transport=None, background=True):
         return {'ok': True}
 
     @app.get('/api/accounts')
-    async def accounts(request: Request):
-        rows = vault.accounts()
+    async def accounts(request: Request, group_id: int | None = None):
+        if group_id is not None and not 0 < group_id <= 2**63 - 1:
+            raise HTTPException(400, 'Invalid group')
+        rows = vault.accounts(group_id)
         passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number'), 'version': row['pass_version']} for row in rows]
-        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic'}
+        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id}
+
+    @app.get('/api/groups')
+    async def groups():
+        return {'groups': vault.groups()}
+
+    @app.put('/api/accounts/{identifier}/group')
+    @app.put('/panel/api/accounts/{identifier}/group')
+    async def assign_group(identifier: str, body: GroupBody, request: Request):
+        if request.url.path.startswith('/panel/'):
+            panel(request, True)
+        try:
+            account = vault.update_group(identifier, body.group_id, body.group_name, body.expected_version)
+        except KeyError:
+            raise HTTPException(404, 'Account not found') from None
+        await service.changed()
+        return account
 
     @app.post('/api/accounts/import')
     async def import_account(body: ImportBody, request: Request):
@@ -321,6 +343,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if existing and body.expected_version is None and body.expected_session_version is None and existing['state'] == 'valid':
             # An unlinked phone must adopt the authoritative server session,
             # not overwrite it with an indistinguishable opaque old cookie.
+            if existing['group_id'] is None and body.group_id is not None:
+                metadata = vault.update_group(existing['id'], body.group_id, body.group_name, existing['version'])
+                await service.changed()
+                return metadata
             return vault.public(existing)
         expected = body.expected_version if body.expected_version is not None else (None if body.expected_session_version is not None else (existing['version'] if existing else 0))
         account = vault.upsert(uid, body.label, {'cookie': cookie}, account_id=body.account_id, expected=expected, group_id=body.group_id, group_name=body.group_name, session_expected=body.expected_session_version)
@@ -339,15 +365,17 @@ def create_app(directory=None, password=None, transport=None, background=True):
         return account
 
     @app.get('/api/events')
-    async def events(request: Request, after: int = 0, wait: int = 25):
+    async def events(request: Request, after: int = 0, wait: int = 25, group_id: int | None = None):
         if after < 0 or after > 2**63 - 1 or not 0 <= wait <= 25:
             raise HTTPException(400, 'Invalid event cursor')
+        if group_id is not None and not 0 < group_id <= 2**63 - 1:
+            raise HTTPException(400, 'Invalid group')
         deadline = time.monotonic() + wait
         while True:
             # Hold the condition while checking the database so a publisher
             # cannot signal between the check and the subscription.
             async with service.condition:
-                values, cursor = vault.events(after)
+                values, cursor = vault.events(after, group_id)
                 if values or cursor != after or time.monotonic() >= deadline:
                     return {'events': values, 'cursor': cursor}
                 try:

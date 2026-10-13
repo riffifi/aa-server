@@ -59,6 +59,11 @@ class Vault:
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
             self.db.execute('ALTER TABLE accounts ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
+        event_columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
+        for column in ('group_id', 'previous_group_id'):
+            if column not in event_columns:
+                self.db.execute(f'ALTER TABLE events ADD COLUMN {column} INTEGER')
+        self.db.execute('CREATE INDEX IF NOT EXISTS accounts_group ON accounts(group_id)')
         with self.lock, self.db:
             if self.db.execute("SELECT 1 FROM config WHERE key='admin_password'").fetchone() is None:
                 if not password or len(password) < 16:
@@ -95,9 +100,9 @@ class Vault:
         with self.transaction() as db:
             db.execute('DELETE FROM panel_sessions WHERE key_hash=?', (digest(token),))
 
-    def accounts(self):
+    def accounts(self, group_id=None):
         with self.transaction() as db:
-            return [dict(row) for row in db.execute('SELECT * FROM accounts ORDER BY label')]
+            return [dict(row) for row in db.execute('SELECT * FROM accounts WHERE (? IS NULL OR group_id=?) ORDER BY label', (group_id, group_id))]
 
     def account(self, account_id):
         with self.transaction() as db:
@@ -107,8 +112,9 @@ class Vault:
     def public(self, row):
         return {key: row[key] for key in ('id', 'label', 'group_id', 'group_name', 'state', 'expires_at', 'checked_at', 'version', 'session_version', 'pass_version', 'updated_at')}
 
-    def _event(self, db, account_id, version, kind):
-        db.execute('INSERT INTO events(account_id,version,kind,created) VALUES(?,?,?,?)', (account_id, version, kind, time.time()))
+    def _event(self, db, account_id, version, kind, previous_group_id=None):
+        row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
+        db.execute('INSERT INTO events(account_id,version,kind,created,group_id,previous_group_id) VALUES(?,?,?,?,?,?)', (account_id, version, kind, time.time(), row['group_id'] if row else None, previous_group_id))
         db.execute('DELETE FROM events WHERE created < ?', (time.time() - 7 * 86400,))
 
     def upsert(self, pulse_id, label, credentials, account_id=None, expected=None, group_id=None, group_name=None, session_expected=None):
@@ -127,16 +133,39 @@ class Vault:
                 secret.update(credentials)
                 account_id = row['id']
                 version = row['version'] + 1
-                db.execute('UPDATE accounts SET label=?,group_id=COALESCE(?,group_id),group_name=COALESCE(?,group_name),secret=?,state=?,expires_at=?,checked_at=?,version=?,session_version=session_version+1,updated_at=? WHERE id=?',
-                    (label or row['label'], group_id, group_name, self.seal(secret), 'valid', credentials.get('expires_at'), time.time(), version, time.time(), account_id))
+                effective_group = group_id if group_id is not None else row['group_id']
+                effective_name = group_name if group_name is not None else (row['group_name'] if effective_group == row['group_id'] else None)
+                db.execute('UPDATE accounts SET label=?,group_id=?,group_name=?,secret=?,state=?,expires_at=?,checked_at=?,version=?,session_version=session_version+1,updated_at=? WHERE id=?',
+                    (label or row['label'], effective_group, effective_name, self.seal(secret), 'valid', credentials.get('expires_at'), time.time(), version, time.time(), account_id))
             else:
                 if expected not in (None, 0) or session_expected not in (None, 0):
                     raise Conflict('Account does not exist')
                 account_id, version = str(uuid.uuid4()), 1
                 db.execute('INSERT INTO accounts(id,pulse_id,label,group_id,group_name,secret,state,expires_at,checked_at,version,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                     (account_id, pulse_id, label or 'Account', group_id, group_name, self.seal(credentials), 'valid', credentials.get('expires_at'), time.time(), version, time.time()))
-            self._event(db, account_id, version, 'session')
+            self._event(db, account_id, version, 'session', row['group_id'] if row else None)
         return self.account(account_id)
+
+    def update_group(self, account_id, group_id, group_name, expected):
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None:
+                raise KeyError(account_id)
+            if row['version'] != expected:
+                raise Conflict('Account changed; refresh before assigning a group')
+            group_name = group_name.strip() if group_id is not None and group_name else None
+            if row['group_id'] == group_id and row['group_name'] == group_name:
+                return self.public(row)
+            version = row['version'] + 1
+            db.execute('UPDATE accounts SET group_id=?,group_name=?,version=?,updated_at=? WHERE id=?',
+                       (group_id, group_name, version, time.time(), account_id))
+            self._event(db, account_id, version, 'group', row['group_id'])
+        return self.public(self.account(account_id))
+
+    def groups(self):
+        with self.transaction() as db:
+            return [dict(row) for row in db.execute(
+                'SELECT group_id AS id, MAX(group_name) AS name, COUNT(*) AS accounts FROM accounts WHERE group_id IS NOT NULL GROUP BY group_id ORDER BY name')]
 
     def update_state(self, account_id, state, expected_version):
         with self.transaction() as db:
@@ -170,14 +199,15 @@ class Vault:
 
     def delete_account(self, account_id):
         with self.transaction() as db:
+            row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
-            self._event(db, account_id, 0, 'deleted')
+            self._event(db, account_id, 0, 'deleted', row['group_id'] if row else None)
 
-    def events(self, after):
+    def events(self, after, group_id=None):
         with self.transaction() as db:
             rows = db.execute('SELECT * FROM events WHERE id>? ORDER BY id LIMIT 1000', (after,)).fetchall()
             cursor = rows[-1]['id'] if rows else after
-            values = [dict(row) for row in rows]
+            values = [dict(row) for row in rows if group_id is None or row['group_id'] == group_id or row['previous_group_id'] == group_id]
             return values, cursor
 
     def cursor(self):
