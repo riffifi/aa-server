@@ -1,0 +1,38 @@
+name: antiattendance-sessions
+services:
+  sessions:
+    build: .
+    restart: unless-stopped
+    init: true
+    shm_size: 512mb
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Run install.sh first}
+      PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
+      REFRESH_SECONDS: ${REFRESH_SECONDS:-300}
+    ports:
+      - ${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8080
+    volumes:
+      - session_data:/data
+  https:
+    image: caddy:2.10.2-alpine
+    profiles: [https]
+    restart: unless-stopped
+    ports: ['80:80', '443:443', '443:443/udp']
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      sessions:
+        condition: service_healthy
+volumes:
+  session_data:
+  caddy_data:
+  caddy_config:

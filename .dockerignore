@@ -1,0 +1,10 @@
+.env
+*.sqlite*
+master.key
+.venv
+__pycache__
+.pytest_cache
+tests
+README.md
+
+.git
