@@ -23,6 +23,7 @@ function renderAccount(account) {
   detail.append(el('strong', account.label), el('span', account.state, 'badge ' + account.state));
   if (account.pass_version) detail.append(el('span', 'Pass synced · v' + account.pass_version, 'badge'));
   detail.append(el('div', `Session expiry: ${date(account.expires_at)} · checked: ${date(account.checked_at)}`, 'meta'));
+  detail.append(el('div', account.automatic_renewal ? `Automatic renewal enabled · last renewal: ${date(account.renewed_at)}` : 'Re-login here once to enable automatic renewal.', 'meta'));
   actions.append(action('Check', async () => { await api('accounts/' + account.id + '/refresh', 'POST'); await refresh(); }));
   actions.append(action('Re-login', () => startLogin(account.label, account.id)));
   actions.append(action('Remove', async () => { if (confirm('Remove this account and its stored pass from this server?')) { await api('accounts/' + account.id, 'DELETE'); await refresh(); } }, 'quiet danger'));
@@ -53,8 +54,9 @@ async function pollLogin() {
   try {
     const result = await api('logins/' + job);
     if (job !== currentJob) return;
-    $('enroll-status').textContent = result.error || ({ waiting: 'Waiting for a browser slot…', login: 'Waiting for the account owner’s approval…', complete: 'Account connected. Phones will fetch the update.', expired: 'QR login expired. Start a new login.', failed: 'Login failed. Try again.' }[result.status] || result.status);
+    $('enroll-status').textContent = result.error || ({ waiting: 'Waiting for a browser slot…', login: 'Waiting for the account owner’s approval…', finishing: 'Approval received. Confirming the Pulse session…', complete: 'Account connected. Phones will fetch the update.', expired: 'QR login expired. Start a new login.', failed: 'Login failed. Try again.' }[result.status] || result.status);
     if (result.qr) { $('qr').src = '/panel/api/logins/' + job + '/qr'; $('qr').hidden = false; $('qr-link').href = result.qr; $('qr-link').hidden = false; }
+    if (!result.qr) { $('qr').hidden = true; $('qr-link').hidden = true; }
     if (['complete', 'expired', 'failed', 'cancelled'].includes(result.status)) { currentJob = null; $('qr').hidden = true; $('qr-link').hidden = true; await refresh(); return; }
   } catch (error) { notice(error.message); }
   if (currentJob === job) setTimeout(pollLogin, 2000);

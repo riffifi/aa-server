@@ -68,6 +68,7 @@ class Service:
         self.issued_tokens = defaultdict(dict)
         self.refresh_task = None
         self.started = time.time()
+        self.renewal_attempts = {}
 
     async def changed(self):
         async with self.condition:
@@ -82,8 +83,17 @@ class Service:
             state, uid = await self.transport.identity(secret['cookie'])
             if state == 'valid' and uid != row['pulse_id']:
                 state = 'forbidden'
-            if state == 'expired' and await self.browser.refresh(row):
-                return self.vault.account(account_id)
+            now = time.time()
+            # Browser SSO must be exercised before its idle expiry, not only
+            # after the Pulse cookie has already stopped working.
+            expiry = row['expires_at']
+            due = state == 'expired' or (state == 'valid' and (
+                (expiry is not None and expiry <= now + 600) or now - secret.get('renewed_at', 0) >= 1800))
+            last_attempt = self.renewal_attempts.get(account_id, 0)
+            if due and secret.get('storage_state') and now - last_attempt >= 300:
+                self.renewal_attempts[account_id] = now
+                if await self.browser.refresh(row):
+                    return self.vault.account(account_id)
             self.vault.update_state(account_id, state, row['version'])
             await self.changed()
             return self.vault.account(account_id)
@@ -195,7 +205,14 @@ def create_app(directory=None, password=None, transport=None, background=True):
     @app.get('/panel/api/state')
     async def panel_state(request: Request):
         session = panel(request)
-        return {'csrf': session['csrf'], 'accounts': [vault.public(row) for row in vault.accounts()], 'cursor': vault.cursor()}
+        accounts = []
+        for row in vault.accounts():
+            metadata = vault.public(row)
+            secret = vault.secret(row)
+            metadata['automatic_renewal'] = bool(secret.get('storage_state'))
+            metadata['renewed_at'] = secret.get('renewed_at')
+            accounts.append(metadata)
+        return {'csrf': session['csrf'], 'accounts': accounts, 'cursor': vault.cursor()}
 
     @app.post('/panel/api/logout')
     async def logout(request: Request):

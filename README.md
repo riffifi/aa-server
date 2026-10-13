@@ -119,8 +119,16 @@ recovery; the sync journal contains hashes, revisions, and pending pass numbers.
 
 Account owners can also sign in from the panel’s MIREA QR or a temporary ten-minute
 enrollment link. Browser login is confirmed by the read-only Pulse identity RPC.
-MFA and forced logout still apply. The server can renew from saved MIREA SSO
-state while the university permits it, but cannot make sessions permanent.
+MFA and forced logout still apply. Panel enrollment saves encrypted MIREA browser state. The server attempts renewal
+when a known expiry is within ten minutes, every thirty minutes for active
+sessions, and after a confirmed expiry. Failed attempts back off for five minutes;
+a failed proactive renewal keeps the still-valid credentials and enrolled pass.
+The panel indicates which accounts have saved state for automatic renewal.
+Cookie-only phone uploads need one panel re-login to enable this behavior.
+The server can renew while MIREA accepts the saved SSO state, but cannot make
+sessions permanent. QR approval is polled by one worker and submitted exactly
+once; redirect-time profile failures are retried, and approval without a confirmed
+Pulse session produces an actionable error after ninety seconds.
 HTTP 403, network outages and gateway HTML do not falsely expire sessions.
 
 ## Storage and operations

@@ -5,7 +5,7 @@ import re
 import secrets
 import time
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 import httpx
 import qrcode
 from pathlib import Path
@@ -87,6 +87,8 @@ class LoginJob:
     error: str | None = None
     result_id: str | None = None
     task: object = None
+    approval_submitted: bool = False
+    approved_at: float | None = None
 
 class BrowserLogins:
     def __init__(self, vault, changed):
@@ -137,7 +139,62 @@ class BrowserLogins:
         header = cookie_header(cookies)
         # Only cookies with a known authentication-expiry meaning contribute.
         expiry = [c['expires'] for c in cookies if re.fullmatch(r'\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?', c['name']) and c.get('expires', -1) > time.time()]
-        return uid, {'cookie': header, 'storage_state': await context.storage_state(), 'expires_at': min(expiry) if expiry else None}
+        return uid, {'cookie': header, 'storage_state': await context.storage_state(), 'expires_at': min(expiry) if expiry else None,
+                     'renewed_at': time.time()}
+
+    async def qr_step(self, context, page, job):
+        data = await page.evaluate(self.script)
+        if not isinstance(data, dict):
+            return
+        if data.get('error') or data.get('pageId') == 'error.ftl':
+            raise ValueError('MIREA rejected the login; start a fresh QR login.')
+        if job.approval_submitted:
+            return
+        qr = urlparse(data.get('qr') or '')
+        if qr.scheme == 'https' and qr.hostname == 'sso.mirea.ru' and qr.path == '/realms/mirea/qr-code-auth/scan':
+            job.qr = data['qr']
+        else:
+            alternative = page.locator('a, button').filter(has_text=re.compile(r'QR', re.IGNORECASE)).first
+            if await alternative.count() and await alternative.is_visible():
+                await alternative.click(timeout=3000)
+            return
+        if not data.get('sessionId') or not data.get('tabId'):
+            return
+        endpoint = 'https://sso.mirea.ru/realms/mirea/qr-code-auth/check-status?' + urlencode(
+            {'sessionId': data['sessionId'], 'tabId': data['tabId']})
+        response = await context.request.get(endpoint, timeout=15000, max_redirects=0)
+        if response.status != 200:
+            return
+        body = await response.body()
+        if len(body) > MAX_RESPONSE:
+            return
+        try:
+            result = json.loads(body)
+        except (ValueError, UnicodeError):
+            return  # A gateway response must not consume a valid approval.
+        if not isinstance(result, dict):
+            return
+        if result.get('status') in ('timeout', 'rejected', 'session_not_found'):
+            raise ValueError('The QR approval expired or was rejected. Start a new login.')
+        if result.get('authenticated') is not True:
+            return
+        action = urlparse(data.get('action') or '')
+        if action.scheme != 'https' or action.hostname != 'sso.mirea.ru' or action.port not in (None, 443) or action.path != '/realms/mirea/login-actions/authenticate' or not data.get('execution'):
+            raise ValueError('MIREA changed its QR completion form. Update the server.')
+        # Only this worker submits approval. The theme's own polling is blocked
+        # on this page, preventing two competing POSTs consuming the same login.
+        job.qr = None
+        job.approval_submitted = True
+        job.approved_at = time.time()
+        job.status = 'finishing'
+        await page.evaluate('''data => {
+          const form = document.createElement('form');
+          form.method = 'post'; form.action = data.action;
+          const input = document.createElement('input');
+          input.type = 'hidden'; input.name = 'authenticationExecution'; input.value = data.execution;
+          form.appendChild(input); document.body.appendChild(form);
+          HTMLFormElement.prototype.submit.call(form);
+        }''', {'action': data['action'], 'execution': data['execution']})
 
     def start(self, label, account_id=None):
         for job_id, job in list(self.jobs.items()):
@@ -145,7 +202,7 @@ class BrowserLogins:
                 if job.task and not job.task.done():
                     job.task.cancel()
                 del self.jobs[job_id]
-        if sum(j.status in ('waiting', 'login') for j in self.jobs.values()) >= 20:
+        if sum(j.status in ('waiting', 'login', 'finishing') for j in self.jobs.values()) >= 20:
             raise ValueError('Too many active logins')
         capability = secrets.token_urlsafe(32)
         existing = self.vault.account(account_id) if account_id else None
@@ -163,11 +220,18 @@ class BrowserLogins:
                     return
                 context = await self._context()
                 page = await context.new_page()
+                await page.route('**/qr-code-auth/check-status?*', lambda route: route.abort())
                 job.status = 'login'
                 await page.goto(protocol.LOGIN_URL, wait_until='domcontentloaded', timeout=45000)
                 while time.time() - job.created < 600:
+                    if job.approved_at and time.time() - job.approved_at > 90:
+                        job.status, job.error = 'failed', 'MIREA approved the QR, but Pulse did not confirm the session. Start a new login.'
+                        return
                     if urlparse(page.url).hostname == 'pulse.mirea.ru':
-                        captured = await self.capture(context)
+                        try:
+                            captured = await self.capture(context)
+                        except Exception:
+                            captured = None  # Cookies/profile can lag behind the redirect.
                         if captured:
                             uid, credentials = captured
                             account = self.vault.upsert(uid, job.label, credentials, account_id=job.account_id, session_expected=job.expected_version)
@@ -176,15 +240,10 @@ class BrowserLogins:
                             return
                     elif urlparse(page.url).hostname == 'sso.mirea.ru':
                         try:
-                            raw = await page.evaluate(self.script)
-                            qr = json.loads(raw).get('qr') if isinstance(raw, str) else None
-                            if qr is None:
-                                alternative = page.locator('a, button').filter(has_text=re.compile(r'QR', re.IGNORECASE)).first
-                                if await alternative.count() and await alternative.is_visible():
-                                    await alternative.click(timeout=3000)
-                            parsed = urlparse(qr or '')
-                            if parsed.scheme == 'https' and parsed.hostname == 'sso.mirea.ru' and parsed.path == '/realms/mirea/qr-code-auth/scan':
-                                job.qr = qr
+                            await self.qr_step(context, page, job)
+                        except ValueError as error:
+                            job.status, job.error, job.qr = 'failed', str(error), None
+                            return
                         except Exception:
                             # A successful QR submit destroys the previous JS context.
                             pass
