@@ -79,6 +79,8 @@ class PassBody(BaseModel):
 class PassPermissionBody(BaseModel):
     allowed: bool
     expected_version: int | None = Field(default=None, ge=0)
+class PagePasswordBody(BaseModel):
+    password: str = Field(min_length=4, max_length=128)
 
 class Service:
     def __init__(self, vault, transport=None):
@@ -207,6 +209,14 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if write and not hmac.compare_digest(request.headers.get('x-csrf-token', ''), row['csrf']):
             raise HTTPException(403, 'Invalid CSRF token')
         return row
+
+    def page_authed(request, account_id):
+        return vault.page_session_account(request.cookies.get('page_session', '')) == account_id
+
+    def set_page_cookie(response, token):
+        secure = os.environ.get('PUBLIC_URL', '').startswith('https://')
+        response.set_cookie('page_session', token, max_age=2592000, httponly=True, secure=secure, samesite='lax', path='/')
+        return response
 
     async def bounded_body(request, limit=65536):
         result = bytearray()
@@ -368,6 +378,16 @@ def create_app(directory=None, password=None, transport=None, background=True):
             raise HTTPException(404, 'QR is not ready')
         return Response(png, media_type='image/png')
 
+    @app.post('/enroll/{identifier}/{token}/claim')
+    async def owner_claim(identifier: str, token: str):
+        # After "sign in via university" completes, the holder of this enrollment
+        # token (who just approved the login in MIREA) gets a page session for the
+        # account it produced, and is sent to that account's page.
+        job = public_job(identifier, token)
+        if job.status != 'complete' or not job.result_id:
+            raise HTTPException(409, 'Login is not complete yet')
+        return set_page_cookie(JSONResponse({'account_id': job.result_id}), vault.create_page_session(job.result_id))
+
     @app.post('/panel/api/accounts/{identifier}/refresh')
     async def refresh_account(identifier: str, request: Request):
         panel(request, True)
@@ -425,17 +445,66 @@ def create_app(directory=None, password=None, transport=None, background=True):
         return {'grpc_status': status, 'fields': protocol.decode_tree(message) if message is not None else {}}
 
     @app.get('/api/accounts/{identifier}')
-    async def account_detail(identifier: str):
+    async def account_detail(identifier: str, request: Request):
         row = vault.account(identifier)
         if row is None:
             raise HTTPException(404, 'Account not found')
+        if not page_authed(request, identifier):
+            raise HTTPException(401, 'Sign in to this account first')
         return vault.public(row)
+
+    @app.get('/api/accounts/{identifier}/page')
+    async def account_page_state(identifier: str, request: Request):
+        row = vault.account(identifier)
+        if row is None:
+            raise HTTPException(404, 'Account not found')
+        if page_authed(request, identifier):
+            data = vault.public(row)
+            data['authed'] = True
+            data['has_password'] = vault.has_page_password(identifier)
+            return data
+        return {'authed': False, 'has_password': vault.has_page_password(identifier),
+                'id': identifier, 'label': row['label']}
+
+    @app.post('/api/accounts/{identifier}/page/password')
+    async def account_set_page_password(identifier: str, body: PagePasswordBody, request: Request):
+        if vault.account(identifier) is None:
+            raise HTTPException(404, 'Account not found')
+        if vault.has_page_password(identifier) and not page_authed(request, identifier):
+            raise HTTPException(403, 'A password is already set; sign in first')
+        vault.set_page_password(identifier, body.password)
+        return set_page_cookie(JSONResponse({'ok': True, 'authed': True}), vault.create_page_session(identifier))
+
+    @app.post('/api/accounts/{identifier}/page/login')
+    async def account_page_login(identifier: str, body: PagePasswordBody, request: Request):
+        if vault.account(identifier) is None:
+            raise HTTPException(404, 'Account not found')
+        address = request.client.host if request.client else 'unknown'
+        queue = attempts[('page-login', identifier, address)]
+        now = time.time()
+        while queue and queue[0] < now - 300:
+            queue.popleft()
+        if len(queue) >= 10:
+            raise HTTPException(429, 'Too many attempts; wait a few minutes')
+        queue.append(now)
+        if not vault.verify_page_password(identifier, body.password):
+            raise HTTPException(401, 'Wrong password')
+        return set_page_cookie(JSONResponse({'ok': True, 'authed': True}), vault.create_page_session(identifier))
+
+    @app.post('/api/accounts/{identifier}/page/logout')
+    async def account_page_logout(identifier: str, request: Request):
+        vault.delete_page_session(request.cookies.get('page_session', ''))
+        response = JSONResponse({'ok': True})
+        response.delete_cookie('page_session', path='/')
+        return response
 
     @app.put('/api/accounts/{identifier}/pass-allowed')
     @app.put('/panel/api/accounts/{identifier}/pass-allowed')
     async def set_pass_permission(identifier: str, body: PassPermissionBody, request: Request):
         if request.url.path.startswith('/panel/'):
             panel(request, True)
+        elif not page_authed(request, identifier):
+            raise HTTPException(401, 'Sign in to this account first')
         try:
             account = vault.set_pass_allowed(identifier, body.allowed, body.expected_version)
         except KeyError:

@@ -57,6 +57,7 @@ class Vault:
             version INTEGER NOT NULL, kind TEXT NOT NULL, created REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS telegram_links(chat_id INTEGER NOT NULL, account_id TEXT NOT NULL,
             created REAL NOT NULL, PRIMARY KEY(chat_id, account_id));
+          CREATE TABLE IF NOT EXISTS page_sessions(key_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires REAL NOT NULL);
         ''')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
@@ -225,7 +226,48 @@ class Vault:
             row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
             db.execute('DELETE FROM telegram_links WHERE account_id=?', (account_id,))
+            db.execute('DELETE FROM page_sessions WHERE account_id=?', (account_id,))
             self._event(db, account_id, 0, 'deleted', row['group_id'] if row else None)
+
+    def set_page_password(self, account_id, password):
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None:
+                raise KeyError(account_id)
+            secret = self.secret(row)
+            secret['page_password'] = password_hash(password)
+            db.execute('UPDATE accounts SET secret=? WHERE id=?', (self.seal(secret), account_id))
+
+    def has_page_password(self, account_id):
+        row = self.account(account_id)
+        return bool(row and self.secret(row).get('page_password'))
+
+    def verify_page_password(self, account_id, password):
+        row = self.account(account_id)
+        if row is None:
+            return False
+        record = self.secret(row).get('page_password')
+        return bool(record) and password_matches(password, record)
+
+    def create_page_session(self, account_id, ttl=2592000):
+        token = secrets.token_urlsafe(32)
+        with self.transaction() as db:
+            db.execute('DELETE FROM page_sessions WHERE expires < ?', (time.time(),))
+            db.execute('INSERT INTO page_sessions VALUES(?,?,?)', (digest(token), account_id, time.time() + ttl))
+        return token
+
+    def page_session_account(self, token):
+        if not token:
+            return None
+        with self.transaction() as db:
+            row = db.execute('SELECT account_id FROM page_sessions WHERE key_hash=? AND expires>?', (digest(token), time.time())).fetchone()
+            return row[0] if row else None
+
+    def delete_page_session(self, token):
+        if not token:
+            return
+        with self.transaction() as db:
+            db.execute('DELETE FROM page_sessions WHERE key_hash=?', (digest(token),))
 
     def link_telegram(self, chat_id, account_id):
         with self.transaction() as db:

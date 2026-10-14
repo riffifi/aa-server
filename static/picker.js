@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let currentJob = null, currentBase = null;
+let currentJob = null, currentBase = null, claimMode = false;
 
 // Telegram injects window.Telegram.WebApp only when the page is opened as a mini
 // app (and its script is reachable). Everything below works as a normal web page
@@ -50,8 +50,13 @@ function renderAccount(account) {
   return row;
 }
 
-async function startLogin(label, accountId) {
+async function ssoLogin() {
+  await startLogin('Вход через университет', null, true);
+}
+
+async function startLogin(label, accountId, claim = false) {
   notice('');
+  claimMode = claim;
   $('login-card').hidden = false;
   $('login-title').textContent = label;
   $('login-status').textContent = 'Preparing a secure login…';
@@ -91,7 +96,16 @@ async function pollLogin() {
     else { image.hidden = true; link.hidden = true; }
     if (['complete', 'expired', 'failed', 'cancelled'].includes(result.status)) {
       currentJob = null;
-      if (result.status === 'complete') { notice('Account connected.'); await loadAccounts(); }
+      if (result.status === 'complete') {
+        if (claimMode) {
+          try {
+            const claimed = await fetch(base + '/claim', { method: 'POST', cache: 'no-store' });
+            const data = await claimed.json();
+            if (claimed.ok && data.account_id) { location.href = '/u/' + encodeURIComponent(data.account_id); return; }
+          } catch (_) { /* fall through to list */ }
+        }
+        notice('Аккаунт подключён.'); await loadAccounts();
+      }
       return;
     }
   } catch (error) {
@@ -102,6 +116,7 @@ async function pollLogin() {
   if (currentJob === job) setTimeout(pollLogin, 2000);
 }
 
+$('sso').onclick = () => ssoLogin();
 $('add-account').onclick = () => $('name-dialog').showModal();
 $('reload').onclick = () => loadAccounts();
 $('close-login').onclick = () => { currentJob = null; $('login-card').hidden = true; };

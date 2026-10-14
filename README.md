@@ -37,12 +37,26 @@ The QR login now presses through Pulse's post-approval "continue"/consent page
 automatically, so a sign-in no longer stalls at *confirming the session*; the same
 step runs during silent renewal.
 
-### Per-account page
+### Per-account page (password-protected)
 
-Every account also has its own page at `/u/{account_id}` — a focused view with just
-that account's status, a Renew button, and the pass permission below. The account's
-opaque UUID is the capability for the page under the URL-only model. The picker links
-each row to its page, and the bot offers a direct link / mini-app button to it.
+Every account has its own page at `/u/{account_id}` showing the session status, a Renew
+button and the pass permission. The page is **protected by a per-account password**: on
+the first visit the owner sets one, and after that it must be entered (or a session
+obtained by signing in via the university — see below). The password is scrypt-hashed in
+the account's encrypted secret; a `page_session` cookie (30 days) unlocks the page and
+gates the account-detail read and the pass toggle. Endpoints: `GET /…/page` (status),
+`POST /…/page/password` (set on first visit, or change while signed in),
+`POST /…/page/login`, `POST /…/page/logout`. Manual group entry is **not** on this page —
+it lives only in the admin panel.
+
+### Sign in via the university (home page)
+
+The home page keeps the account list and adds a **"Войти через университет"** button:
+it starts the normal MIREA QR login and, on completion, `POST /enroll/{id}/{token}/claim`
+issues a page session for the account that login produced and sends the user to
+`/u/{account_id}`. Because that login also captures and stores the session, signing in
+this way renews it at the same time. First-time users are prompted to set a page password
+so they can return without the QR.
 
 ### Pass permission
 
