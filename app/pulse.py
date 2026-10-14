@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import os
 import re
 import secrets
 import time
@@ -97,7 +98,21 @@ class BrowserLogins:
         self.playwright = None
         self.browser = None
         self.start_lock = asyncio.Lock()
-        self.slots = asyncio.Semaphore(2)
+        # Interactive logins and background renewals use SEPARATE browser budgets.
+        # An interactive login holds its slot for the whole human QR wait, so with a
+        # single shared pool a few people enrolling (or renewals firing as accounts
+        # pile up) starved everyone else and logins timed out. Renewals get their own
+        # small budget so they can never consume the interactive pool. Tune via env
+        # if the host has little memory (each slot is one headless browser context).
+        def _pos(name, default):
+            try:
+                return max(1, int(os.environ.get(name, str(default))))
+            except (TypeError, ValueError):
+                return default
+        self.login_slots = asyncio.Semaphore(_pos('LOGIN_SLOTS', 6))
+        self.renew_slots = asyncio.Semaphore(_pos('RENEW_SLOTS', 2))
+        self.max_active = _pos('MAX_ACTIVE_LOGINS', 24)
+        self.login_ttl = _pos('LOGIN_TTL_SECONDS', 600)
         self.script = Path(__file__).with_name('mirea_qr.js').read_text()
 
     async def _browser(self):
@@ -239,13 +254,14 @@ class BrowserLogins:
         }''', {'action': data['action'], 'execution': data['execution']})
 
     def start(self, label, account_id=None):
+        retain = max(900, self.login_ttl + 300)
         for job_id, job in list(self.jobs.items()):
-            if time.time() - job.created > 900:
+            if time.time() - job.created > retain:
                 if job.task and not job.task.done():
                     job.task.cancel()
                 del self.jobs[job_id]
-        if sum(j.status in ('waiting', 'login', 'finishing') for j in self.jobs.values()) >= 20:
-            raise ValueError('Too many active logins')
+        if sum(j.status in ('waiting', 'login', 'finishing') for j in self.jobs.values()) >= self.max_active:
+            raise ValueError('The server is busy with other logins right now; try again in a minute')
         capability = secrets.token_urlsafe(32)
         existing = self.vault.account(account_id) if account_id else None
         job = LoginJob(secrets.token_urlsafe(18), digest(capability), label, account_id, time.time(), expected_version=existing['session_version'] if existing else None)
@@ -256,8 +272,8 @@ class BrowserLogins:
     async def _login(self, job):
         context = None
         try:
-            async with self.slots:
-                if time.time() - job.created > 600:
+            async with self.login_slots:
+                if time.time() - job.created > self.login_ttl:
                     job.status = 'expired'
                     return
                 context = await self._context()
@@ -265,7 +281,7 @@ class BrowserLogins:
                 await page.route('**/qr-code-auth/check-status?*', lambda route: route.abort())
                 job.status = 'login'
                 await page.goto(protocol.LOGIN_URL, wait_until='domcontentloaded', timeout=45000)
-                while time.time() - job.created < 600:
+                while time.time() - job.created < self.login_ttl:
                     if job.approved_at and time.time() - job.approved_at > 90:
                         job.status, job.error = 'failed', 'MIREA approved the QR, but Pulse did not confirm the session. Start a new login.'
                         return
@@ -319,7 +335,7 @@ class BrowserLogins:
             return False
         context = None
         try:
-            async with self.slots:
+            async with self.renew_slots:
                 context = await self._context(secret['storage_state'])
                 page = await context.new_page()
                 await page.goto(protocol.LOGIN_URL, wait_until='domcontentloaded', timeout=30000)

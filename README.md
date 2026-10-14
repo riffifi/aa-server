@@ -56,6 +56,19 @@ picker in a browser instead.
 Rotate the token with BotFather's `/revoke` if it has ever been shared, since the
 token alone controls the bot. Never commit `.env`.
 
+## Concurrency and self-service load
+
+Interactive logins and background renewals use **separate browser budgets**, so a
+burst of people enrolling through the picker can no longer be starved by renewals
+(or by each other). An interactive login holds its browser slot for the whole QR
+wait, so the pool — not a single shared pair of slots — sets how many people can
+enroll at once. Defaults, all env-tunable: `LOGIN_SLOTS=6` interactive logins,
+`RENEW_SLOTS=2` background renewals, `MAX_ACTIVE_LOGINS=24` before new starts are
+refused with a "server is busy" message, and `LOGIN_TTL_SECONDS=600` before an
+unfinished login releases its slot. Each slot is one headless browser context, so
+on a small host lower `LOGIN_SLOTS` (and raise `shm_size` in `compose.yaml` if you
+raise it); on a larger host raise it to let more of a class enroll simultaneously.
+
 ## Automatic renewal
 
 The server keeps each active SSO state warm and rolls it forward without any user
