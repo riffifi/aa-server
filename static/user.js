@@ -52,6 +52,7 @@ function showAccount() {
     : 'Нажмите «Продлить» и подтвердите вход в приложении MIREA.';
   $('renew').textContent = account.state === 'valid' ? 'Продлить сейчас' : 'Продлить';
   if (!savingPass) $('pass-allowed').checked = account.pass_allowed !== false;
+  if (document.activeElement !== $('rename-input')) $('rename-input').value = account.label;
   if (account.has_password === false) notice('Задайте пароль ниже, чтобы в следующий раз входить без университета.');
 }
 
@@ -132,6 +133,19 @@ $('logout').onclick = async () => {
   await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/page/logout', { method: 'POST', cache: 'no-store' }).catch(() => {});
   account = null; await load();
 };
+$('rename-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const label = $('rename-input').value.trim();
+  if (!label) { notice('Введите название.'); return; }
+  try {
+    const response = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/label', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, expected_version: account ? account.version : null }), cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw Error(typeof result.detail === 'string' ? result.detail : 'Не удалось переименовать.');
+    account = result; showAccount(); notice('Название сохранено.');
+  } catch (error) { notice(error.message); }
+});
 $('pw-form').addEventListener('submit', async e => {
   e.preventDefault();
   const p = $('pw-new').value;

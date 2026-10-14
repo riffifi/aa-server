@@ -155,6 +155,23 @@ class Vault:
             self._event(db, account_id, version, 'session', row['group_id'] if row else None)
         return self.account(account_id)
 
+    def rename(self, account_id, label, expected=None):
+        label = (label or '').strip()
+        if not label or len(label) > 60:
+            raise ValueError('Invalid label')
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None:
+                raise KeyError(account_id)
+            if expected is not None and expected != row['version']:
+                raise Conflict('Account changed; refresh and retry')
+            if row['label'] == label:
+                return self.public(row)
+            version = row['version'] + 1
+            db.execute('UPDATE accounts SET label=?,version=?,updated_at=? WHERE id=?', (label, version, time.time(), account_id))
+            self._event(db, account_id, version, 'label')
+        return self.public(self.account(account_id))
+
     def update_group(self, account_id, group_id, group_name, expected):
         with self.transaction() as db:
             row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()

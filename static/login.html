@@ -1,0 +1,13 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AntiAttendance · Вход через университет</title><link rel="stylesheet" href="/static/panel.css"><script src="/static/login.js" defer></script></head><body><main class="owner">
+<header><div class="eyebrow">ANTIATTENDANCE</div><h1>Вход через университет</h1><p>Войдите своим аккаунтом MIREA — откроется ваша личная страница. Если сессия была просрочена, она обновится автоматически.</p></header>
+
+<section class="card">
+  <p id="status" role="status">Готовим безопасный вход…</p>
+  <img id="qr" width="280" height="280" alt="QR для входа MIREA" hidden>
+  <a id="qr-link" target="_blank" rel="noopener" hidden>Открыть страницу подтверждения MIREA</a>
+  <p class="meta">Отсканируйте код в приложении MIREA или откройте ссылку выше в браузере, где вы вошли в MIREA. Подтверждайте только свой вход.</p>
+  <div class="actions gap-top"><button id="retry" hidden>Начать заново</button><a href="/" class="inline">← На главную</a></div>
+</section>
+
+<p id="notice" role="status" aria-live="polite"></p>
+</main></body></html>

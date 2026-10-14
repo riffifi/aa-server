@@ -59,7 +59,9 @@ class BodyLimitMiddleware:
 class LoginBody(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 class LoginStart(BaseModel):
-    label: str = Field(min_length=1, max_length=60)
+    # Optional: the university sign-in flow sends no label, so it never overwrites
+    # an existing account's name (and a new one falls back to a default).
+    label: str | None = Field(default=None, max_length=60)
     account_id: str | None = None
 class ImportBody(BaseModel):
     cookie: str = Field(min_length=1, max_length=65536)
@@ -81,6 +83,9 @@ class PassPermissionBody(BaseModel):
     expected_version: int | None = Field(default=None, ge=0)
 class PagePasswordBody(BaseModel):
     password: str = Field(min_length=4, max_length=128)
+class LabelBody(BaseModel):
+    label: str = Field(min_length=1, max_length=60)
+    expected_version: int | None = Field(default=None, ge=0)
 
 class Service:
     def __init__(self, vault, transport=None):
@@ -241,6 +246,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
     @app.get('/panel')
     async def panel_page():
         return FileResponse(static / 'panel.html')
+
+    @app.get('/login')
+    async def login_page():
+        return FileResponse(static / 'login.html')
 
     @app.get('/u/{identifier}')
     async def user_page(identifier: str):
@@ -501,6 +510,24 @@ def create_app(directory=None, password=None, transport=None, background=True):
         response = JSONResponse({'ok': True})
         response.delete_cookie('page_session', path='/')
         return response
+
+    @app.put('/api/accounts/{identifier}/label')
+    @app.put('/panel/api/accounts/{identifier}/label')
+    async def rename_account(identifier: str, body: LabelBody, request: Request):
+        # Renaming is allowed only from the admin panel or from the owner's own
+        # page (a valid page session for this account).
+        if request.url.path.startswith('/panel/'):
+            panel(request, True)
+        elif not page_authed(request, identifier):
+            raise HTTPException(401, 'Sign in to this account first')
+        try:
+            account = vault.rename(identifier, body.label, body.expected_version)
+        except KeyError:
+            raise HTTPException(404, 'Account not found') from None
+        except ValueError:
+            raise HTTPException(400, 'Invalid name') from None
+        await service.changed()
+        return account
 
     @app.put('/api/accounts/{identifier}/pass-allowed')
     @app.put('/panel/api/accounts/{identifier}/pass-allowed')

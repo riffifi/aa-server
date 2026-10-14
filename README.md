@@ -51,14 +51,22 @@ session comes from signing in via the university),
 `POST /…/page/login`, `POST /…/page/logout`. Manual group entry is **not** on this page —
 it lives only in the admin panel.
 
-### Sign in via the university (home page)
+### Sign in via the university (dedicated page)
 
-The home page keeps the account list and adds a **"Войти через университет"** button:
-it starts the normal MIREA QR login and, on completion, `POST /enroll/{id}/{token}/claim`
-issues a page session for the account that login produced and sends the user to
-`/u/{account_id}`. Because that login also captures and stores the session, signing in
-this way renews it at the same time. First-time users are prompted to set a page password
-so they can return without the QR.
+The home page keeps the account list and adds a **"Войти через университет"** button
+that links to a dedicated page at **`/login`**. That page runs the normal MIREA QR
+login and, on completion, `POST /enroll/{id}/{token}/claim` issues a page session for
+the account the login produced and sends the user to `/u/{account_id}`. Because the
+login also captures and stores the session, signing in this way renews it at the same
+time. The sign-in sends **no label**, so it never overwrites an existing account's name.
+
+### Renaming
+
+An account is renamed via `PUT /api/accounts/{id}/label` (`{label, expected_version?}`) —
+allowed only from the admin panel (the `/panel/...` variant, password + CSRF) or from the
+owner's own page (a valid page session). Renames bump the version and emit a `label` sync
+event. The owner's page and the panel both expose it. Page passwords are set and changed
+from the owner's page (always under a session).
 
 ### Pass permission
 

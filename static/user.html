@@ -19,6 +19,11 @@
   <label class="check gap-top"><input type="checkbox" id="pass-allowed"><span>Разрешить использовать мой пропуск в приложении</span></label>
   <p class="meta">Когда выключено, приложение не может использовать и выпускать ваш пропуск. На сессию и посещаемость не влияет.</p>
 
+  <details class="gap-top"><summary>Переименовать аккаунт</summary>
+    <form id="rename-form"><label>Название<input id="rename-input" maxlength="60" autocomplete="off"></label>
+    <div class="actions"><button class="secondary">Сохранить название</button></div></form>
+  </details>
+
   <details class="gap-top"><summary>Сменить пароль страницы</summary>
     <form id="pw-form"><label>Новый пароль<input id="pw-new" type="password" minlength="4" maxlength="128" autocomplete="new-password"></label>
     <div class="actions"><button class="secondary">Сохранить пароль</button></div></form>
