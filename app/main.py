@@ -14,7 +14,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .vault import Vault, Conflict, digest
 from .pulse import PulseTransport, BrowserLogins, validate_header
+from .telegram import TelegramBot
 from . import protocol
+
+def _seconds(name, default):
+    try:
+        return max(60, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+# Renew a valid session when its known expiry is within this window, re-exercise
+# an active SSO state at least this often to keep it from going idle, and never
+# retry a single account more often than the backoff after a failed attempt.
+RENEW_BEFORE = _seconds('RENEW_BEFORE_SECONDS', 900)
+RENEW_INTERVAL = _seconds('RENEW_INTERVAL_SECONDS', 900)
+RENEW_BACKOFF = _seconds('RENEW_BACKOFF_SECONDS', 300)
 
 class BodyLimitMiddleware:
     def __init__(self, app):
@@ -88,13 +102,15 @@ class Service:
             if state == 'valid' and uid != row['pulse_id']:
                 state = 'forbidden'
             now = time.time()
-            # Browser SSO must be exercised before its idle expiry, not only
-            # after the Pulse cookie has already stopped working.
+            # Browser SSO must be exercised well before its idle expiry, not only
+            # after the Pulse cookie has already stopped working. Keeping it warm
+            # and rolling the saved state forward on every pass is what lets a
+            # session stay alive for days without any human re-login.
             expiry = row['expires_at']
             due = state == 'expired' or (state == 'valid' and (
-                (expiry is not None and expiry <= now + 600) or now - secret.get('renewed_at', 0) >= 1800))
+                (expiry is not None and expiry <= now + RENEW_BEFORE) or now - secret.get('renewed_at', 0) >= RENEW_INTERVAL))
             last_attempt = self.renewal_attempts.get(account_id, 0)
-            if due and secret.get('storage_state') and now - last_attempt >= 300:
+            if due and secret.get('storage_state') and now - last_attempt >= RENEW_BACKOFF:
                 self.renewal_attempts[account_id] = now
                 if await self.browser.refresh(row):
                     return self.vault.account(account_id)
@@ -112,7 +128,7 @@ class Service:
                 except Exception:
                     # Leave last-known credentials intact after transient failures.
                     pass
-            await asyncio.sleep(max(60, int(os.environ.get('REFRESH_SECONDS', '300'))))
+            await asyncio.sleep(max(60, int(os.environ.get('REFRESH_SECONDS', '180'))))
 
     async def close(self):
         if self.refresh_task:
@@ -126,11 +142,24 @@ class Service:
 def create_app(directory=None, password=None, transport=None, background=True):
     vault = Vault(directory or os.environ.get('DATA_DIR', '/data'), password or os.environ.get('ADMIN_PASSWORD', ''))
     service = Service(vault, transport)
+    bot = None
     @asynccontextmanager
     async def lifespan(app):
+        nonlocal bot
         if background:
             service.refresh_task = asyncio.create_task(service.refresh_loop())
+            token = os.environ.get('TELEGRAM_TOKEN', '').strip()
+            if token:
+                bot = TelegramBot(token, service, os.environ.get('PUBLIC_URL', ''))
+                app.state.telegram = bot
+                bot.task = asyncio.create_task(bot.run())
         yield
+        if bot is not None:
+            bot.running = False
+            bot.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await bot.task
+            await bot.close()
         await service.close()
     app = FastAPI(title='AntiAttendance session server', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.add_middleware(BodyLimitMiddleware)
@@ -182,6 +211,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
 
     @app.get('/')
     async def index():
+        return FileResponse(static / 'picker.html')
+
+    @app.get('/panel')
+    async def panel_page():
         return FileResponse(static / 'panel.html')
 
     @app.post('/panel/api/login')
@@ -229,6 +262,31 @@ def create_app(directory=None, password=None, transport=None, background=True):
     @app.post('/panel/api/logins')
     async def start_login(body: LoginStart, request: Request):
         panel(request, True)
+        if body.account_id and vault.account(body.account_id) is None:
+            raise HTTPException(404, 'Account not found')
+        try:
+            job, token = service.browser.start(body.label, body.account_id)
+        except ValueError as error:
+            raise HTTPException(429, str(error)) from None
+        return {'id': job.id, 'enrollment_path': '/enroll/' + job.id + '/' + token, 'expires_in': 600}
+
+    @app.post('/api/logins')
+    async def public_start_login(body: LoginStart, request: Request):
+        # Self-service: an account owner opens the picker, chooses their account
+        # (or adds a new one) and starts a login without the panel password. This
+        # matches the URL-is-the-capability model; destructive actions still need
+        # the panel. The enrollment job is reached through the public /enroll token.
+        # Soft anti-spam only. Behind the bundled Nginx every caller shares one
+        # source address, so this is effectively a global burst limit; the real
+        # resource guard is the browser's active-login cap below.
+        address = request.client.host if request.client else 'unknown'
+        queue = attempts[('public-login', address)]
+        now = time.time()
+        while queue and queue[0] < now - 180:
+            queue.popleft()
+        if len(queue) >= 40:
+            raise HTTPException(429, 'Too many login attempts right now; wait a minute')
+        queue.append(now)
         if body.account_id and vault.account(body.account_id) is None:
             raise HTTPException(404, 'Account not found')
         try:

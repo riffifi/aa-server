@@ -142,6 +142,48 @@ class BrowserLogins:
         return uid, {'cookie': header, 'storage_state': await context.storage_state(), 'expires_at': min(expiry) if expiry else None,
                      'renewed_at': time.time()}
 
+    # Words on a post-approval "continue"/consent control that is safe to press,
+    # and words that must never be pressed (they abort or sign the session out).
+    ACCEPT = re.compile(r'продолж|подтверд|разреш|войт|вход|accept|allow|authoriz|continu|confirm|proceed|grant|submit|ок\b|ok\b', re.I)
+    REJECT = re.compile(r'отмен|отклон|запрет|назад|cancel|deny|reject|decline|\bback\b|logout|выход|выйти', re.I)
+
+    async def advance(self, page):
+        # After the QR is approved, Pulse/SSO can land on an interstitial — an
+        # OAuth consent screen or a plain "continue" page — whose button must be
+        # pressed before the Pulse session cookie is issued. Press it ourselves so
+        # the login completes without a human. The context route guard confines
+        # every navigation to the Pulse/SSO/DDoS-Guard hosts, so a click here can
+        # never leave those origins.
+        try:
+            controls = page.locator('button:visible, input[type=submit]:visible, input[type=button]:visible, a[role=button]:visible')
+            count = min(await controls.count(), 25)
+        except Exception:
+            return
+        fallback = None
+        for index in range(count):
+            control = controls.nth(index)
+            try:
+                label = ((await control.get_attribute('value')) or (await control.inner_text()) or (await control.get_attribute('aria-label')) or '').strip()
+            except Exception:
+                continue
+            if self.REJECT.search(label):
+                continue
+            if self.ACCEPT.search(label):
+                try:
+                    await control.click(timeout=3000)
+                except Exception:
+                    pass
+                return
+            if fallback is None:
+                fallback = control
+        # No accept-labelled control. Only submit when the page offers a single
+        # safe control, so an ambiguous multi-button page is left for a human.
+        if fallback is not None and count == 1:
+            try:
+                await fallback.click(timeout=3000)
+            except Exception:
+                pass
+
     async def qr_step(self, context, page, job):
         data = await page.evaluate(self.script)
         if not isinstance(data, dict):
@@ -227,7 +269,8 @@ class BrowserLogins:
                     if job.approved_at and time.time() - job.approved_at > 90:
                         job.status, job.error = 'failed', 'MIREA approved the QR, but Pulse did not confirm the session. Start a new login.'
                         return
-                    if urlparse(page.url).hostname == 'pulse.mirea.ru':
+                    host = urlparse(page.url).hostname
+                    if host == 'pulse.mirea.ru':
                         try:
                             captured = await self.capture(context)
                         except Exception:
@@ -238,15 +281,24 @@ class BrowserLogins:
                             job.result_id, job.status, job.qr = account['id'], 'complete', None
                             await self.changed()
                             return
-                    elif urlparse(page.url).hostname == 'sso.mirea.ru':
-                        try:
-                            await self.qr_step(context, page, job)
-                        except ValueError as error:
-                            job.status, job.error, job.qr = 'failed', str(error), None
-                            return
-                        except Exception:
-                            # A successful QR submit destroys the previous JS context.
-                            pass
+                        # Not confirmed yet: clear any Pulse "continue"/consent page
+                        # that is holding the OAuth callback open.
+                        await self.advance(page)
+                    elif host == 'sso.mirea.ru':
+                        if job.approval_submitted:
+                            # Authentication is already done; press through any
+                            # post-login consent or required-action page SSO shows
+                            # before it redirects back to Pulse.
+                            await self.advance(page)
+                        else:
+                            try:
+                                await self.qr_step(context, page, job)
+                            except ValueError as error:
+                                job.status, job.error, job.qr = 'failed', str(error), None
+                                return
+                            except Exception:
+                                # A successful QR submit destroys the previous JS context.
+                                pass
                     await asyncio.sleep(2)
                 job.status, job.qr = 'expired', None
         except Conflict:
@@ -271,14 +323,21 @@ class BrowserLogins:
                 context = await self._context(secret['storage_state'])
                 page = await context.new_page()
                 await page.goto(protocol.LOGIN_URL, wait_until='domcontentloaded', timeout=30000)
-                for _ in range(8):
-                    if urlparse(page.url).hostname == 'pulse.mirea.ru':
+                for _ in range(10):
+                    host = urlparse(page.url).hostname
+                    if host == 'pulse.mirea.ru':
                         captured = await self.capture(context)
                         if captured:
                             uid, credentials = captured
                             self.vault.upsert(uid, account['label'], credentials, account_id=account['id'], session_expected=account['session_version'])
                             await self.changed()
                             return True
+                        # A silent renewal can also hit the consent/continue page.
+                        await self.advance(page)
+                    elif host == 'sso.mirea.ru':
+                        # Replaying the saved SSO state may surface a consent page
+                        # but never a QR challenge, so only press a safe control.
+                        await self.advance(page)
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
             raise

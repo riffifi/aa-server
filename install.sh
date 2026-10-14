@@ -107,7 +107,8 @@ BIND_ADDRESS=$bind_address
 PORT=$server_port
 DOMAIN=$server_domain
 ADMIN_PASSWORD=$admin_password
-REFRESH_SECONDS=300
+REFRESH_SECONDS=180
+TELEGRAM_TOKEN=
 CONFIG
   chmod 600 .env
   echo 'Generated panel credentials in server/.env (mode 600).'
@@ -139,3 +140,5 @@ if $host_nginx; then
 fi
 printf 'Server started. Open the PUBLIC_URL from %s/.env.\n' "$server_dir"
 echo 'Use ADMIN_PASSWORD from that file to open the panel. Phones only need PUBLIC_URL; synchronization is automatic.'
+echo 'The home page is now a self-service account picker; the admin panel moved to PUBLIC_URL/panel.'
+echo 'To enable the Telegram bot, put its token in TELEGRAM_TOKEN in .env and rerun ./install.sh.'

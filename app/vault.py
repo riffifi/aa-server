@@ -55,6 +55,8 @@ class Vault:
           CREATE TABLE IF NOT EXISTS panel_sessions(key_hash TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL,
             version INTEGER NOT NULL, kind TEXT NOT NULL, created REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS telegram_links(chat_id INTEGER NOT NULL, account_id TEXT NOT NULL,
+            created REAL NOT NULL, PRIMARY KEY(chat_id, account_id));
         ''')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
@@ -201,7 +203,26 @@ class Vault:
         with self.transaction() as db:
             row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
+            db.execute('DELETE FROM telegram_links WHERE account_id=?', (account_id,))
             self._event(db, account_id, 0, 'deleted', row['group_id'] if row else None)
+
+    def link_telegram(self, chat_id, account_id):
+        with self.transaction() as db:
+            if db.execute('SELECT 1 FROM accounts WHERE id=?', (account_id,)).fetchone() is None:
+                raise KeyError(account_id)
+            db.execute('INSERT OR IGNORE INTO telegram_links(chat_id,account_id,created) VALUES(?,?,?)', (chat_id, account_id, time.time()))
+
+    def unlink_telegram(self, chat_id, account_id):
+        with self.transaction() as db:
+            db.execute('DELETE FROM telegram_links WHERE chat_id=? AND account_id=?', (chat_id, account_id))
+
+    def telegram_accounts(self, chat_id):
+        with self.transaction() as db:
+            return [row[0] for row in db.execute('SELECT account_id FROM telegram_links WHERE chat_id=?', (chat_id,))]
+
+    def telegram_chats(self, account_id):
+        with self.transaction() as db:
+            return [row[0] for row in db.execute('SELECT chat_id FROM telegram_links WHERE account_id=?', (account_id,))]
 
     def events(self, after, group_id=None):
         with self.transaction() as db:

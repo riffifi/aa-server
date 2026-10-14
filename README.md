@@ -19,6 +19,54 @@ The administration panel still requires its own password and CSRF token for
 account removal and login management. HTTPS encrypts traffic; it does not add
 phone authentication. Plain HTTP is supported.
 
+## Self-service account picker
+
+Opening the server URL now shows a **self-service picker** instead of the admin
+sign-in: account owners see every account with its connection state, tap their own
+to renew it (confirming the normal MIREA sign-in), or **Add my account** to enroll
+for the first time. No panel password is needed — this matches the URL-is-the-
+capability model, so restrict access with your network/Nginx if required. The
+administration panel (account removal and login management) moved to
+`PUBLIC_URL/panel` and still requires its password and CSRF token.
+
+`POST /api/accounts/import`, `GET /api/accounts` and the new unauthenticated
+`POST /api/logins` (`{label, account_id?}` → a temporary `/enroll/{id}/{token}`
+path the picker polls) back this flow. Destructive panel endpoints are unchanged.
+
+The QR login now presses through Pulse's post-approval "continue"/consent page
+automatically, so a sign-in no longer stalls at *confirming the session*; the same
+step runs during silent renewal.
+
+## Telegram bot
+
+Set `TELEGRAM_TOKEN` in `.env` (empty by default) and rerun `sudo ./install.sh`
+to enable an optional bot. With the variable unset the server runs exactly as
+before. The bot uses long polling (no public webhook or HTTPS needed) and drives
+the same in-process login and renewal as the panel and picker — it adds no new
+stored secret beyond the chat↔account link used to address alerts.
+
+In the bot an owner sends `/menu`, picks their account (which turns on alerts),
+and renews or enrolls through inline buttons that show the MIREA QR as a photo.
+When an account's session can no longer be renewed automatically, everyone who
+linked that account gets a **"needs a new login"** message with a one-tap Renew
+button. When `PUBLIC_URL` is HTTPS the menu also offers a mini-app button that
+opens the picker inside Telegram; on an HTTP deployment it links out to the
+picker in a browser instead.
+
+Rotate the token with BotFather's `/revoke` if it has ever been shared, since the
+token alone controls the bot. Never commit `.env`.
+
+## Automatic renewal
+
+The server keeps each active SSO state warm and rolls it forward without any user
+interaction: it renews when a known expiry is within `RENEW_BEFORE_SECONDS` (default
+900), re-exercises an active session at least every `RENEW_INTERVAL_SECONDS`
+(default 900), scans every `REFRESH_SECONDS` (default 180), and backs a single
+account off for `RENEW_BACKOFF_SECONDS` (default 300) after a failed attempt. A
+failed proactive renewal keeps the still-valid credentials. The server cannot make
+a session permanent once MIREA's own SSO state requires a fresh login — that is
+when the Telegram alert and the picker's **Needs re-login** badge come in.
+
 ## Groups
 
 Assign university schedule group IDs and names from an account’s **Group** action
