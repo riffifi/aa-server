@@ -159,6 +159,24 @@ class Vault:
             self._event(db, account_id, version, 'session', row['group_id'] if row else None)
         return self.account(account_id)
 
+    def end_session(self, account_id):
+        # End the Pulse session without deleting the account: drop the stored cookie
+        # and browser state so it can't authenticate (and auto-renewal won't run),
+        # mark it expired, and emit a sync event so phones stop using it. The label,
+        # group, page password and pass permission are kept.
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None:
+                raise KeyError(account_id)
+            secret = self.secret(row)
+            for key in ('cookie', 'storage_state', 'expires_at', 'renewed_at'):
+                secret.pop(key, None)
+            version = row['version'] + 1
+            db.execute('UPDATE accounts SET secret=?,state=?,expires_at=NULL,version=?,session_version=session_version+1,updated_at=? WHERE id=?',
+                       (self.seal(secret), 'expired', version, time.time(), account_id))
+            self._event(db, account_id, version, 'session')
+        return self.public(self.account(account_id))
+
     def rename(self, account_id, label, expected=None):
         label = (label or '').strip()
         if not label or len(label) > 60:

@@ -82,6 +82,16 @@ class PulseTransport:
             return None, None
         return protocol.subscribed_group(reply.body, reply.headers)
 
+    async def logout(self, cookie):
+        # Best-effort: end the SSO session on MIREA's side too, so the credentials
+        # can't be reused anywhere. Failure here does not matter — the server clears
+        # its own copy regardless.
+        try:
+            await self.http.get(protocol.HOST + '/api/auth/logout',
+                params={'redirectUri': protocol.HOST}, headers={'cookie': validate_header(cookie)})
+        except (httpx.HTTPError, ValueError, OSError):
+            pass
+
     async def acs_timeline(self, cookie, uid, start, end):
         # Turnstile (ACS) entry/exit events over [start, end].
         try:

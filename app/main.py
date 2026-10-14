@@ -108,6 +108,11 @@ class Service:
             if row is None:
                 return None
             secret = self.vault.secret(row)
+            if not secret.get('cookie'):
+                # Session was ended/cleared: nothing to check or renew, keep it expired.
+                self.vault.update_state(account_id, 'expired', row['version'])
+                await self.changed()
+                return self.vault.account(account_id)
             state, uid = await self.transport.identity(secret['cookie'])
             if state == 'valid' and uid != row['pulse_id']:
                 state = 'forbidden'
@@ -444,6 +449,8 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if row is None:
             raise HTTPException(404, 'Account not found')
         secret = vault.secret(row)
+        if not secret.get('cookie'):
+            raise HTTPException(409, 'The session was ended; sign in again')
         try:
             reply = await service.transport.rpc(secret['cookie'], 'profile', protocol.profile_request())
         except Exception:
@@ -477,7 +484,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
         now = time.time()
         start = (int((now + 3 * 3600) // 86400)) * 86400 - 3 * 3600  # Moscow midnight today
         end = start + 86400 - 1
-        result = await service.transport.acs_timeline(vault.secret(row)['cookie'], row['pulse_id'], start, end)
+        cookie = vault.secret(row).get('cookie')
+        if not cookie:
+            raise HTTPException(409, 'The session was ended; sign in again')
+        result = await service.transport.acs_timeline(cookie, row['pulse_id'], start, end)
         if result is None:
             raise HTTPException(503, 'Pulse is unavailable; try again')
         events, inside = result
@@ -547,6 +557,24 @@ def create_app(directory=None, password=None, transport=None, background=True):
             raise HTTPException(404, 'Account not found') from None
         except ValueError:
             raise HTTPException(400, 'Invalid name') from None
+        await service.changed()
+        return account
+
+    @app.post('/api/accounts/{identifier}/end-session')
+    @app.post('/panel/api/accounts/{identifier}/end-session')
+    async def end_session(identifier: str, request: Request):
+        # Terminate the Pulse session (keep the account). Owner page session or panel.
+        if request.url.path.startswith('/panel/'):
+            panel(request, True)
+        elif not page_authed(request, identifier):
+            raise HTTPException(401, 'Sign in to this account first')
+        row = vault.account(identifier)
+        if row is None:
+            raise HTTPException(404, 'Account not found')
+        cookie = vault.secret(row).get('cookie')
+        if cookie:
+            await service.transport.logout(cookie)  # best-effort MIREA logout
+        account = vault.end_session(identifier)
         await service.changed()
         return account
 
@@ -653,6 +681,8 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if len(body) < 5 or body[0] != 0 or int.from_bytes(body[1:5], 'big') != len(body) - 5:
             raise HTTPException(400, 'Invalid unary gRPC request')
         secret = vault.secret(row)
+        if not secret.get('cookie'):
+            raise HTTPException(409, 'The session was ended; sign in again')
         authorization = None
         if method in ('pass-code', 'pass-issue'):
             authorization = request.headers.get('x-pulse-token', '')

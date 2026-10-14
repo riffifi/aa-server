@@ -32,6 +32,7 @@ function renderAccount(account) {
   actions.append(action('Check', async () => { await api('accounts/' + account.id + '/refresh', 'POST'); await refresh(); }));
   actions.append(action('Посещение', async () => { const d = await api('accounts/' + account.id + '/attendance'); const t = s => new Date(s * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); const lines = (d.events || []).map(e => (e.direction === 'in' ? '→' : '←') + t(e.time)).join(', '); notice(`${account.label}: ${d.inside ? 'в здании' : 'снаружи'}${lines ? ' · ' + lines : ' · сегодня проходов нет'}`); }));
   actions.append(action('Re-login', () => startLogin(account.label, account.id)));
+  actions.append(action('Завершить сессию', async () => { if (confirm('Завершить сессию Пульса для «' + account.label + '»? Останется в списке, но потребует повторного входа.')) { await api('accounts/' + account.id + '/end-session', 'POST'); await refresh(); } }, 'quiet danger'));
   actions.append(action('Remove', async () => { if (confirm('Remove this account and its stored pass from this server?')) { await api('accounts/' + account.id, 'DELETE'); await refresh(); } }, 'quiet danger'));
   row.append(detail, actions); return row;
 }

@@ -147,6 +147,15 @@ async function pollLogin() {
 
 $('auth-form').addEventListener('submit', e => { e.preventDefault(); const p = $('auth-password').value; if (p.length >= 4) auth(p); });
 $('renew').onclick = () => startLogin();
+$('end-session').onclick = async () => {
+  if (!confirm('Завершить сессию Пульса для этого аккаунта? Нужно будет войти заново.')) return;
+  try {
+    const response = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/end-session', { method: 'POST', cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw Error(typeof result.detail === 'string' ? result.detail : 'Не удалось.');
+    account = result; showAccount(); notice('Сессия завершена. Войдите заново, когда понадобится.');
+  } catch (error) { notice(error.message); }
+};
 $('acs-refresh').onclick = () => loadAttendance();
 $('pass-allowed').onchange = () => savePass();
 $('close-login').onclick = () => { currentJob = null; $('login-card').hidden = true; };

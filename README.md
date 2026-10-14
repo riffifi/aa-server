@@ -60,6 +60,18 @@ the account the login produced and sends the user to `/u/{account_id}`. Because 
 login also captures and stores the session, signing in this way renews it at the same
 time. The sign-in sends **no label**, so it never overwrites an existing account's name.
 
+### Ending a session
+
+`POST /api/accounts/{id}/end-session` (owner page session, or the `/panel/...` variant for
+admins) terminates the Pulse session without deleting the account: it best-effort calls
+MIREA's logout with the stored cookie, then clears the cookie and browser state from the
+encrypted secret, marks the account `expired`, and emits a sync event. The label, group,
+page password and pass permission are kept; auto-renewal won't run until the owner signs in
+again. Endpoints that need a live session (RPC proxy, attendance, profile dump) return 409
+afterwards. The owner's page has a "Завершить сессию" button and the panel a per-account
+action. See [docs/migration-plan.md](docs/migration-plan.md) for the plan to move the rest
+of the client's logic server-side for security.
+
 ### Renaming
 
 An account is renamed via `PUT /api/accounts/{id}/label` (`{label, expected_version?}`) —
