@@ -13,7 +13,7 @@ METHODS = {
     'pass-code': '/rtu_tc.rtu_attend.humanpass.HumanPassService/SendVerificationCode',
     'pass-issue': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetDigitalPass',
     'schedules': '/rtu.schedule.api.PersonalScheduleService/GetSubscribedSchedules',
-    'acs-stats': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetHumanAcsAttendanceStats',
+    'acs-timeline': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetHumanAcsTimeline',
 }
 PROFILE_PATH = METHODS['profile']
 
@@ -212,43 +212,54 @@ def _timestamp(seconds, nanos=0):
         out += _vfield(2, nanos)
     return out
 
-def acs_stats_request(uid, start, end):
-    """Build the GetHumanAcsAttendanceStats request: the human id, a [start, end]
-    window (protobuf Timestamps) and the flag the app sends (3=1)."""
+def acs_timeline_request(uid, start, end):
+    """Build the GetHumanAcsTimeline request: the human id, a [start, end] window
+    (protobuf Timestamps) and the two flags the app sends (3=1, 4=2)."""
     window = field(1, _timestamp(int(start))) + field(2, _timestamp(int(end), 999000000))
-    message = field(1, uid.encode()) + field(2, window) + _vfield(3, 1)
+    message = field(1, uid.encode()) + field(2, window) + _vfield(3, 1) + _vfield(4, 2)
     return frame(message)
 
-def acs_sessions(body, headers):
-    """Parse GetHumanAcsAttendanceStats into attendance sessions. Each session (field 3,
-    repeated) carries the entry time in field 1 and the exit time in field 2 (verified
-    against real data: 09:02 → 17:59). A session with no exit means still inside.
-    Returns (sessions_sorted_by_entry, inside_now)."""
+# ACS event direction, verified against real passes: at the inner turnstile code 1 is
+# an entry (вход) and code 2 is an exit (выход). The outer checkpoint (ЦКПП) emits
+# code 3 in both directions, so it is not directional and is ignored.
+ACS_DIRECTION = {1: 'in', 2: 'out'}
+
+def _collect_acs_events(node, out):
+    if isinstance(node, dict):
+        stamp = node.get('2')
+        when = stamp.get('1') if isinstance(stamp, dict) else None
+        code = node.get('5')
+        if isinstance(when, int) and isinstance(code, int) and isinstance(node.get('3'), dict):
+            zone = node['3'].get('2')
+            out.append({'time': when, 'code': code, 'zone': zone if isinstance(zone, str) else None})
+        for value in node.values():
+            _collect_acs_events(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_acs_events(value, out)
+
+def acs_events(body, headers):
+    """Parse GetHumanAcsTimeline into directional turnstile events. The response nests
+    events in a few shapes, so they are collected recursively (an event is any submessage
+    with a Timestamp in field 2, a zone in field 3 and a direction code in field 5).
+    Only directional codes (1=entry, 2=exit) are kept. Returns (events_sorted, inside)."""
     try:
         message, status = grpc_message(body, headers)
     except (ValueError, UnicodeError):
         return [], False
     if status != 0 or message is None:
         return [], False
-    raw = decode_tree(message).get('3')
-    if isinstance(raw, dict):
-        raw = [raw]
-    if not isinstance(raw, list):
-        return [], False
-    sessions = []
-    for item in raw:
-        if not isinstance(item, dict):
+    raw = []
+    _collect_acs_events(decode_tree(message), raw)
+    events = []
+    for event in raw:
+        direction = ACS_DIRECTION.get(event['code'])
+        if direction is None:
             continue
-        enter = item.get('1')
-        enter = enter.get('1') if isinstance(enter, dict) else None
-        leave = item.get('2')
-        leave = leave.get('1') if isinstance(leave, dict) else None
-        if not isinstance(enter, int):
-            continue
-        sessions.append({'enter': enter, 'exit': leave if isinstance(leave, int) else None})
-    sessions.sort(key=lambda s: s['enter'])
-    inside = bool(sessions) and sessions[-1]['exit'] is None
-    return sessions, inside
+        events.append({'direction': direction, 'time': event['time'], 'zone': event['zone']})
+    events.sort(key=lambda e: e['time'])
+    inside = bool(events) and events[-1]['direction'] == 'in'
+    return events, inside
 
 def subscribed_group(body, headers):
     """Parse GetSubscribedSchedules into (group_id, group_name). The response lists

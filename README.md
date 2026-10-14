@@ -135,15 +135,16 @@ group name and numeric schedule ID, then wire automatic assignment.
 ## Attendance (turnstile entry/exit)
 
 `GET /api/accounts/{id}/attendance` (owner page session, or the `/panel/...` variant for
-admins) returns today's attendance sessions for the account, via Pulse's
-`HumanPassService/GetHumanAcsAttendanceStats` (request: the account's pulse id + a
-Moscow-day window + flag 3=1). Each session (field 3, repeated) carries the **entry** time
-in field 1 and the **exit** time in field 2 — verified against real data (09:02 → 17:59);
-a session with no exit means still inside. The response reports `{inside, sessions:[{enter,
-exit}], since}`. The owner's page shows "Посещение сегодня" with an inside/outside badge and
-the entry→exit list; the panel has a per-account "Посещение" action. (The ACS *timeline*
-RPC was tried first but its per-event in/out encoding was ambiguous; the stats RPC gives
-clean entry/exit pairs.)
+admins) returns today's turnstile events for the account, via Pulse's
+`HumanPassService/GetHumanAcsTimeline` (request: the account's pulse id + a Moscow-day
+window + flags 3=1, 4=2). Events are collected recursively (an event is any submessage
+with a Timestamp in field 2, a zone in field 3 and a direction code in field 5). The
+direction is the **code in field 5**, verified against real passes: at the inner turnstile
+`1` is an entry and `2` is an exit; the outer checkpoint (ЦКПП) emits `3` in both
+directions and is ignored. The response reports `{inside, events:[{direction, time, zone}],
+since}`, `inside` = last directional event is an entry. The owner's page shows "Посещение
+сегодня" with an inside/outside badge and the entry/exit list; the panel has a per-account
+"Посещение" action.
 
 ## Automatic group detection
 
