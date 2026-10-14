@@ -34,6 +34,47 @@ function render() {
     : 'Tap Renew and confirm in the MIREA app.';
   $('renew').textContent = account.state === 'valid' ? 'Renew now' : 'Renew';
   if (!savingPass) $('pass-allowed').checked = account.pass_allowed !== false;
+  $('group-current').textContent = account.group_id
+    ? `Текущая группа: ${account.group_name || account.group_id} (id ${account.group_id})`
+    : 'Группа не выбрана.';
+}
+
+let groupTimer = null;
+function onGroupInput() {
+  clearTimeout(groupTimer);
+  const query = $('group-input').value.trim();
+  if (query.length < 2) { $('group-results').replaceChildren(); return; }
+  groupTimer = setTimeout(async () => {
+    try {
+      const response = await fetch('/api/groups/search?q=' + encodeURIComponent(query), { cache: 'no-store' });
+      const result = await response.json();
+      const rows = (result.groups || []).map(group => {
+        const button = el('button', `${group.name} · id ${group.id}`, 'secondary');
+        button.addEventListener('click', () => assignGroup(group));
+        const row = el('div', null, 'row');
+        row.append(button);
+        return row;
+      });
+      $('group-results').replaceChildren(...rows);
+      if (!rows.length) notice('Группа не найдена — проверь написание.');
+    } catch (_) { /* keep quiet, user can retry */ }
+  }, 300);
+}
+
+async function assignGroup(group) {
+  try {
+    const response = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/group', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_id: group.id, group_name: group.name, expected_version: account ? account.version : 0 }),
+      cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw Error(typeof result.detail === 'string' ? result.detail : 'Не удалось сохранить группу.');
+    account = result.id ? result : account;
+    $('group-input').value = '';
+    $('group-results').replaceChildren();
+    notice('Группа сохранена: ' + group.name);
+    await load();
+  } catch (error) { notice(error.message); }
 }
 
 async function savePass() {
@@ -103,6 +144,7 @@ async function pollLogin() {
 
 $('renew').onclick = () => startLogin();
 $('pass-allowed').onchange = () => savePass();
+$('group-input').oninput = () => onGroupInput();
 $('close-login').onclick = () => { currentJob = null; $('login-card').hidden = true; };
 
 load();

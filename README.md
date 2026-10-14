@@ -108,6 +108,24 @@ decoded protobuf as a field tree (`{grpc_status, fields}`) — strings, numbers 
 nested messages only; cookies and tokens are never included. Use it to locate the
 group name and numeric schedule ID, then wire automatic assignment.
 
+## Automatic group detection
+
+The group is detected from the account itself: Pulse's
+`rtu.schedule.api.PersonalScheduleService/GetSubscribedSchedules` (empty request,
+identity from the cookie) returns the subscribed group with its numeric schedule id
+and name — the same id space as `schedule-of.mirea.ru`. `refresh_account` calls it and
+assigns the group the first time an account is seen valid, without overwriting a group
+set by hand, so new logins get their group automatically within one refresh cycle.
+
+## Group lookup (manual fallback)
+
+When detection finds nothing, `GET /api/groups/search?q=<name>`
+resolves a group name to its numeric schedule id through the public MIREA schedule API
+(`schedule-of.mirea.ru/schedule/api/search`, `scheduleTarget == 1`), the same source and
+id space the official app uses. The per-user page has a live search box that calls it and
+saves the chosen group through the existing `PUT /api/accounts/{id}/group`. The server
+host must be able to reach `schedule-of.mirea.ru`.
+
 ## Groups
 
 Assign university schedule group IDs and names from an account’s **Group** action

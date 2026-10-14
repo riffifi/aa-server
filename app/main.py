@@ -116,8 +116,20 @@ class Service:
             if due and secret.get('storage_state') and now - last_attempt >= RENEW_BACKOFF:
                 self.renewal_attempts[account_id] = now
                 if await self.browser.refresh(row):
-                    return self.vault.account(account_id)
+                    row = self.vault.account(account_id) or row
+                    secret = self.vault.secret(row)
             self.vault.update_state(account_id, state, row['version'])
+            # Auto-detect the group from the account itself the first time, without
+            # clobbering a group someone set by hand.
+            fresh = self.vault.account(account_id)
+            detect = getattr(self.transport, 'subscribed_group', None)
+            if state == 'valid' and fresh is not None and fresh['group_id'] is None and detect is not None:
+                try:
+                    group_id, group_name = await detect(secret['cookie'])
+                    if group_id:
+                        self.vault.update_group(account_id, group_id, group_name, fresh['version'])
+                except Exception:
+                    pass
             await self.changed()
             return self.vault.account(account_id)
 
@@ -382,6 +394,15 @@ def create_app(directory=None, password=None, transport=None, background=True):
     @app.get('/api/groups')
     async def groups():
         return {'groups': vault.groups()}
+
+    @app.get('/api/groups/search')
+    async def groups_search(q: str = ''):
+        # Live group lookup for the picker/user page: name -> numeric schedule id
+        # via the public MIREA schedule API. Open, like the rest of /api.
+        query = q.strip()
+        if len(query) < 2:
+            return {'groups': []}
+        return {'groups': await service.transport.search_groups(query[:50])}
 
     @app.get('/panel/api/accounts/{identifier}/profile-fields')
     async def profile_fields(identifier: str, request: Request):

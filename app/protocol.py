@@ -12,6 +12,7 @@ METHODS = {
     'pass-token': '/rtu.pulse_app.LongTimeTokenService/GetAccessTokenForDigitalPass',
     'pass-code': '/rtu_tc.rtu_attend.humanpass.HumanPassService/SendVerificationCode',
     'pass-issue': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetDigitalPass',
+    'schedules': '/rtu.schedule.api.PersonalScheduleService/GetSubscribedSchedules',
 }
 PROFILE_PATH = METHODS['profile']
 
@@ -200,6 +201,40 @@ def authentication_state(status, headers, body):
         return profile_identity(body, headers)
     except (ValueError, UnicodeError, TypeError):
         return 'invalidResponse', None
+
+def subscribed_group(body, headers):
+    """Parse GetSubscribedSchedules into (group_id, group_name). The response lists
+    the schedules the account is subscribed to; each entry's target carries a
+    scheduleTarget (1 = group, 2 = teacher, 3 = auditorium) and a numeric id in the
+    same space as schedule-of.mirea.ru. We return the group entry, preferring the
+    one flagged default (field 4 == 1). Returns (None, None) when there is none."""
+    try:
+        message, status = grpc_message(body, headers)
+    except (ValueError, UnicodeError):
+        return None, None
+    if status != 0 or message is None:
+        return None, None
+    entries = decode_tree(message).get('1')
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        return None, None
+    best = None
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        target = item.get('1')
+        if not isinstance(target, dict) or target.get('1') != 1:
+            continue
+        group_id = target.get('2')
+        if not isinstance(group_id, int) or group_id <= 0:
+            continue
+        name = item.get('2') if isinstance(item.get('2'), str) else None
+        if item.get('4') == 1:
+            return group_id, name
+        if best is None:
+            best = (group_id, name)
+    return best if best else (None, None)
 
 def token_expiry(token):
     try:

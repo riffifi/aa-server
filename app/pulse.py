@@ -72,6 +72,38 @@ class PulseTransport:
         except (httpx.HTTPError, ValueError, OSError):
             return 'unavailable', None
 
+    async def subscribed_group(self, cookie):
+        # The account's own group, straight from Pulse: GetSubscribedSchedules takes
+        # an empty request (identity comes from the cookie) and returns the group's
+        # numeric schedule id and name — the real automatic group detection.
+        try:
+            reply = await self.rpc(cookie, 'schedules', protocol.frame(b''))
+        except (httpx.HTTPError, ValueError, OSError):
+            return None, None
+        return protocol.subscribed_group(reply.body, reply.headers)
+
+    async def search_groups(self, query):
+        # Resolve a group name to its numeric schedule id via the public MIREA
+        # schedule API (schedule-of.mirea.ru) — the same source the official app
+        # uses, so the id matches what the phone app expects. scheduleTarget 1 is
+        # a group (2 teacher, 3 auditorium).
+        try:
+            response = await self.http.get('https://schedule-of.mirea.ru/schedule/api/search',
+                params={'limit': '15', 'match': query}, headers={'accept': 'application/json'})
+            if response.status_code != 200:
+                return []
+            payload = response.json()
+        except (httpx.HTTPError, ValueError, OSError):
+            return []
+        items = payload.get('data') if isinstance(payload, dict) else None
+        groups = []
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict) and item.get('scheduleTarget') == 1 and isinstance(item.get('id'), int):
+                    groups.append({'id': item['id'], 'name': str(item.get('targetTitle') or ''),
+                                   'full': str(item.get('fullTitle') or '')})
+        return groups[:15]
+
     async def close(self):
         await self.http.aclose()
 
