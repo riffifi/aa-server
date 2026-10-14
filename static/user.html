@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AntiAttendance · My account</title><link rel="stylesheet" href="/static/panel.css"><script src="/static/user.js" defer></script></head><body><main class="owner">
+<header><div class="eyebrow">ANTIATTENDANCE</div><h1 id="title">Your account</h1><p id="subtitle">Your MIREA session lives here. Renew it when it needs a new login, and choose whether your pass may be used in the app.</p></header>
+
+<section class="card" id="card" hidden>
+<div class="section-heading"><h2 id="label">Account</h2><span id="state-badge" class="badge"></span></div>
+<p id="meta" class="meta"></p>
+<div class="actions gap-top"><button id="renew">Renew</button></div>
+
+<label class="check gap-top"><input type="checkbox" id="pass-allowed"><span>Разрешить использовать мой пропуск в приложении</span></label>
+<p class="meta">When off, the app cannot use or issue your digital pass. Your session and attendance are unaffected.</p>
+</section>
+
+<section id="login-card" class="card" hidden><div class="section-heading"><h2>Signing in</h2><button id="close-login" class="quiet">Cancel</button></div>
+<p id="login-status" role="status"></p>
+<img id="qr" width="260" height="260" alt="MIREA sign-in QR code" hidden>
+<a id="qr-link" target="_blank" rel="noopener" hidden>Open the MIREA confirmation page</a>
+<p class="meta">Scan this with the MIREA app, or open the link in a signed-in MIREA browser. Only confirm if you meant to connect your account.</p>
+</section>
+
+<p id="error" role="status" hidden></p>
+<p id="notice" role="status" aria-live="polite"></p>
+<footer>This page is just for your account. Sessions renew automatically while MIREA allows it.</footer>
+</main></body></html>

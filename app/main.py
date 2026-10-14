@@ -76,6 +76,9 @@ class GroupBody(BaseModel):
 class PassBody(BaseModel):
     number: str = Field(min_length=1, max_length=19)
     expected_version: int = Field(ge=0)
+class PassPermissionBody(BaseModel):
+    allowed: bool
+    expected_version: int | None = Field(default=None, ge=0)
 
 class Service:
     def __init__(self, vault, transport=None):
@@ -216,6 +219,12 @@ def create_app(directory=None, password=None, transport=None, background=True):
     @app.get('/panel')
     async def panel_page():
         return FileResponse(static / 'panel.html')
+
+    @app.get('/u/{identifier}')
+    async def user_page(identifier: str):
+        # Each account's own page. The identifier is the account's opaque UUID,
+        # which acts as the capability for this page under the URL-only model.
+        return FileResponse(static / 'user.html')
 
     @app.post('/panel/api/login')
     async def login(body: LoginBody, request: Request):
@@ -374,6 +383,25 @@ def create_app(directory=None, password=None, transport=None, background=True):
     async def groups():
         return {'groups': vault.groups()}
 
+    @app.get('/api/accounts/{identifier}')
+    async def account_detail(identifier: str):
+        row = vault.account(identifier)
+        if row is None:
+            raise HTTPException(404, 'Account not found')
+        return vault.public(row)
+
+    @app.put('/api/accounts/{identifier}/pass-allowed')
+    @app.put('/panel/api/accounts/{identifier}/pass-allowed')
+    async def set_pass_permission(identifier: str, body: PassPermissionBody, request: Request):
+        if request.url.path.startswith('/panel/'):
+            panel(request, True)
+        try:
+            account = vault.set_pass_allowed(identifier, body.allowed, body.expected_version)
+        except KeyError:
+            raise HTTPException(404, 'Account not found') from None
+        await service.changed()
+        return account
+
     @app.put('/api/accounts/{identifier}/group')
     @app.put('/panel/api/accounts/{identifier}/group')
     async def assign_group(identifier: str, body: GroupBody, request: Request):
@@ -448,6 +476,8 @@ def create_app(directory=None, password=None, transport=None, background=True):
         row = vault.account(identifier)
         if row is None:
             raise HTTPException(404, 'Account not found')
+        if method in ('pass-token', 'pass-code', 'pass-issue') and not row['pass_allowed']:
+            raise HTTPException(403, 'Pass use is disabled for this account')
         if method in ('pass-code', 'pass-issue'):
             limit_key = (method, identifier)
             queue = attempts[limit_key]

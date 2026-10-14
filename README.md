@@ -37,6 +37,25 @@ The QR login now presses through Pulse's post-approval "continue"/consent page
 automatically, so a sign-in no longer stalls at *confirming the session*; the same
 step runs during silent renewal.
 
+### Per-account page
+
+Every account also has its own page at `/u/{account_id}` — a focused view with just
+that account's status, a Renew button, and the pass permission below. The account's
+opaque UUID is the capability for the page under the URL-only model. The picker links
+each row to its page, and the bot offers a direct link / mini-app button to it.
+
+### Pass permission
+
+Each account carries a `pass_allowed` flag (on by default) that the owner can toggle
+from their page, the picker, or the bot. When it is off the server refuses the
+`pass-token`, `pass-code` and `pass-issue` RPCs for that account with HTTP 403, so the
+app cannot use or issue that account's digital pass; the session, attendance and
+renewal are unaffected. `GET /api/accounts/{id}` returns one account (including
+`pass_allowed`, which also appears in `GET /api/accounts`), and
+`PUT /api/accounts/{id}/pass-allowed` (`{allowed, expected_version?}`, public; the
+`/panel/...` variant needs the password) changes it and emits a `pass_permission`
+sync event so phones pick it up.
+
 ## Telegram bot
 
 Set `TELEGRAM_TOKEN` in `.env` (empty by default) and rerun `sudo ./install.sh`

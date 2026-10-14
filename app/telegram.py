@@ -109,14 +109,23 @@ class TelegramBot:
             await self.send(chat_id, 'That account no longer exists. Send /menu to start over.')
             return
         self.service.vault.link_telegram(chat_id, account_id)
+        allowed = account.get('pass_allowed', True)
         if account['state'] == 'valid':
             line = f'“{account["label"]}” is connected and renews automatically.\nAlerts are on — I’ll message you if it ever needs a new login.'
         else:
             line = f'“{account["label"]}” needs a new login. Tap Renew and confirm in the MIREA app.'
-        await self.send(chat_id, line, [
+        line += '\nPass in app: ' + ('ON' if allowed else 'OFF')
+        keyboard = [
             [{'text': '🔄 Renew now', 'callback_data': 'renew:' + account_id}],
+            [{'text': ('🚫 Disable pass in app' if allowed else '🪪 Enable pass in app'),
+              'callback_data': f'pass:{account_id}:{0 if allowed else 1}'}],
             [{'text': '🔕 Stop alerts', 'callback_data': 'unlink:' + account_id}],
-            [{'text': '⬅️ Back', 'callback_data': 'mine'}]])
+            [{'text': '⬅️ Back', 'callback_data': 'mine'}]]
+        if self.webapp_url:
+            page = self.webapp_url.rstrip('/') + '/u/' + account_id
+            keyboard.insert(1, [{'text': '🌐 My page', 'web_app': {'url': page}} if page.startswith('https://')
+                                else {'text': '🌐 My page', 'url': page}])
+        await self.send(chat_id, line, keyboard)
 
     # ---- Update handling ------------------------------------------------------
     async def handle_update(self, update):
@@ -163,6 +172,15 @@ class TelegramBot:
                 await self.send(chat_id, 'That account no longer exists. Send /menu to start over.')
             else:
                 await self.start_renewal(chat_id, account['id'], account['label'])
+        elif data.startswith('pass:'):
+            parts = data.split(':', 2)
+            if len(parts) == 3:
+                try:
+                    self.service.vault.set_pass_allowed(parts[1], parts[2] == '1')
+                    await self.service.changed()
+                except KeyError:
+                    pass
+            await self.show_account(chat_id, parts[1] if len(parts) == 3 else '')
         elif data.startswith('unlink:'):
             self.service.vault.unlink_telegram(chat_id, data[7:])
             await self.send(chat_id, '🔕 Alerts off for that account.')

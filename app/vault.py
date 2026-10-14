@@ -61,6 +61,10 @@ class Vault:
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
             self.db.execute('ALTER TABLE accounts ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
+        if 'pass_allowed' not in columns:
+            # Per-account permission to use the digital pass in the app. Defaults to
+            # on so existing passes keep working; owners can revoke it per account.
+            self.db.execute('ALTER TABLE accounts ADD COLUMN pass_allowed INTEGER NOT NULL DEFAULT 1')
         event_columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
         for column in ('group_id', 'previous_group_id'):
             if column not in event_columns:
@@ -112,7 +116,9 @@ class Vault:
             return dict(row) if row else None
 
     def public(self, row):
-        return {key: row[key] for key in ('id', 'label', 'group_id', 'group_name', 'state', 'expires_at', 'checked_at', 'version', 'session_version', 'pass_version', 'updated_at')}
+        data = {key: row[key] for key in ('id', 'label', 'group_id', 'group_name', 'state', 'expires_at', 'checked_at', 'version', 'session_version', 'pass_version', 'updated_at')}
+        data['pass_allowed'] = bool(row['pass_allowed']) if 'pass_allowed' in row.keys() else True
+        return data
 
     def _event(self, db, account_id, version, kind, previous_group_id=None):
         row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
@@ -162,6 +168,21 @@ class Vault:
             db.execute('UPDATE accounts SET group_id=?,group_name=?,version=?,updated_at=? WHERE id=?',
                        (group_id, group_name, version, time.time(), account_id))
             self._event(db, account_id, version, 'group', row['group_id'])
+        return self.public(self.account(account_id))
+
+    def set_pass_allowed(self, account_id, allowed, expected=None):
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None:
+                raise KeyError(account_id)
+            if expected is not None and expected != row['version']:
+                raise Conflict('Account changed; refresh and retry')
+            value = 1 if allowed else 0
+            if row['pass_allowed'] == value:
+                return self.public(row)
+            version = row['version'] + 1
+            db.execute('UPDATE accounts SET pass_allowed=?,version=?,updated_at=? WHERE id=?', (value, version, time.time(), account_id))
+            self._event(db, account_id, version, 'pass_permission')
         return self.public(self.account(account_id))
 
     def groups(self):

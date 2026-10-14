@@ -34,12 +34,18 @@ async function loadAccounts() {
 
 function renderAccount(account) {
   const row = el('div', null, 'row'), body = el('div', null, 'row-body'), actions = el('div', null, 'actions');
-  body.append(el('strong', account.label), el('span', STATE_LABEL[account.state] || account.state, 'badge ' + account.state));
+  const name = el('a', account.label, 'inline');
+  name.href = '/u/' + encodeURIComponent(account.id);
+  const strong = el('strong');
+  strong.append(name);
+  body.append(strong, el('span', STATE_LABEL[account.state] || account.state, 'badge ' + account.state));
   if (account.group_id) body.append(el('span', account.group_name || ('Group ' + account.group_id), 'badge'));
   body.append(el('div', account.state === 'valid' ? `Renews automatically · session until ${date(account.expires_at)}` : 'Tap Renew and confirm in the MIREA app.', 'meta'));
+  const page = el('button', 'Моя страница', 'quiet');
+  page.addEventListener('click', () => { location.href = '/u/' + encodeURIComponent(account.id); });
   const renew = el('button', account.state === 'valid' ? 'Renew now' : 'Renew', account.state === 'valid' ? 'secondary' : '');
   renew.addEventListener('click', () => startLogin(account.label, account.id));
-  actions.append(renew);
+  actions.append(page, renew);
   row.append(body, actions);
   return row;
 }
