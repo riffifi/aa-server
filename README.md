@@ -99,6 +99,15 @@ failed proactive renewal keeps the still-valid credentials. The server cannot ma
 a session permanent once MIREA's own SSO state requires a fresh login — that is
 when the Telegram alert and the picker's **Needs re-login** badge come in.
 
+## Group discovery (diagnostic)
+
+To work out where a student's group lives in the Pulse profile (for future automatic
+group assignment), an admin can call `GET /panel/api/accounts/{id}/profile-fields`
+while signed in to the panel. It fetches the account's profile RPC and returns the
+decoded protobuf as a field tree (`{grpc_status, fields}`) — strings, numbers and
+nested messages only; cookies and tokens are never included. Use it to locate the
+group name and numeric schedule ID, then wire automatic assignment.
+
 ## Groups
 
 Assign university schedule group IDs and names from an account’s **Group** action

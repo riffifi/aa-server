@@ -383,6 +383,26 @@ def create_app(directory=None, password=None, transport=None, background=True):
     async def groups():
         return {'groups': vault.groups()}
 
+    @app.get('/panel/api/accounts/{identifier}/profile-fields')
+    async def profile_fields(identifier: str, request: Request):
+        # Admin-only diagnostic: the decoded Pulse profile protobuf as a field tree,
+        # for discovering where the group lives. Cookies/tokens are never included —
+        # only the profile message is decoded, not the stored secret.
+        panel(request)
+        row = vault.account(identifier)
+        if row is None:
+            raise HTTPException(404, 'Account not found')
+        secret = vault.secret(row)
+        try:
+            reply = await service.transport.rpc(secret['cookie'], 'profile', protocol.profile_request())
+        except Exception:
+            raise HTTPException(503, 'Pulse is unavailable') from None
+        try:
+            message, status = protocol.grpc_message(reply.body, reply.headers)
+        except ValueError:
+            raise HTTPException(502, 'Could not parse the Pulse profile response') from None
+        return {'grpc_status': status, 'fields': protocol.decode_tree(message) if message is not None else {}}
+
     @app.get('/api/accounts/{identifier}')
     async def account_detail(identifier: str):
         row = vault.account(identifier)

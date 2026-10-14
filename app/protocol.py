@@ -32,6 +32,77 @@ def frame(payload, flag=0):
 def profile_request():
     return frame(field(1, HOST.encode()) + b'\x18\x01')
 
+def _read_varint(payload, offset):
+    value = 0
+    for shift in range(0, 70, 7):
+        if offset >= len(payload):
+            raise ValueError('Truncated varint')
+        byte = payload[offset]
+        offset += 1
+        value |= (byte & 127) << shift
+        if not byte & 128:
+            return value, offset
+    raise ValueError('Invalid varint')
+
+def _as_text(data):
+    try:
+        text = data.decode('utf-8')
+    except UnicodeError:
+        return None
+    if any(ord(c) < 32 and c not in '\t\n\r' for c in text):
+        return None
+    return text
+
+def decode_tree(payload, depth=0):
+    """Best-effort, tolerant decode of a protobuf message into a JSON-friendly
+    tree for diagnostics. Length-delimited fields become a nested object when they
+    parse cleanly as a message, otherwise a UTF-8 string, otherwise a hex preview.
+    Never raises: it returns whatever it could decode before hitting bad bytes."""
+    out = {}
+    offset = 0
+    try:
+        while offset < len(payload):
+            tag, offset = _read_varint(payload, offset)
+            number, wire = tag >> 3, tag & 7
+            if number == 0:
+                break
+            if wire == 0:
+                value, offset = _read_varint(payload, offset)
+            elif wire in (1, 5):
+                size = 8 if wire == 1 else 4
+                if offset + size > len(payload):
+                    break
+                value = int.from_bytes(payload[offset:offset + size], 'little')
+                offset += size
+            elif wire == 2:
+                length, offset = _read_varint(payload, offset)
+                if length < 0 or offset + length > len(payload):
+                    break
+                data = payload[offset:offset + length]
+                offset += length
+                nested = decode_tree(data, depth + 1) if depth < 6 and data else {}
+                text = _as_text(data)
+                if nested and text is None:
+                    value = nested
+                elif text is not None:
+                    value = text
+                elif nested:
+                    value = nested
+                else:
+                    value = {'_hex': data[:64].hex(), '_len': len(data)}
+            else:
+                break
+            key = str(number)
+            if key in out:
+                if not isinstance(out[key], list):
+                    out[key] = [out[key]]
+                out[key].append(value)
+            else:
+                out[key] = value
+    except (ValueError, IndexError):
+        pass
+    return out
+
 def fields(payload):
     offset = 0
     result = {}
