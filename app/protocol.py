@@ -239,10 +239,12 @@ def acs_events(body, headers):
     for item in items:
         if not isinstance(item, dict):
             continue
-        if '1' in item:
-            event, direction = item['1'], 'in'
-        elif '2' in item:
-            event, direction = item['2'], 'out'
+        # Verified against the official app: the item keyed 2 is an entry (вход),
+        # the item keyed 1 is an exit (выход).
+        if '2' in item:
+            event, direction = item['2'], 'in'
+        elif '1' in item:
+            event, direction = item['1'], 'out'
         else:
             continue
         if not isinstance(event, dict):

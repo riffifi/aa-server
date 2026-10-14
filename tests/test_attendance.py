@@ -17,20 +17,21 @@ def test_acs_request_matches_the_captured_shape():
 
 
 def test_acs_events_parses_entries_exits_and_inside():
+    # Item keyed 2 = entry (вход), keyed 1 = exit (выход).
     def event(ts, zone):
         return f(1, b'uuid') + f(2, protocol._timestamp(ts)) + f(3, f(1, b'z') + f(2, zone.encode())) + protocol._vfield(5, 1)
-    message = (f(1, f(1, event(1000, 'Вход ЦКПП')))      # entry
-               + f(1, f(2, event(2000, 'Выход')))          # exit
+    message = (f(1, f(1, event(1000, 'Выход ЦКПП')))     # exit
+               + f(1, f(2, event(2000, 'Вход')))           # entry (later)
                + f(1, f(1, protocol._vfield(2, 12345))))    # trailing summary -> ignored
     body = protocol.frame(message) + protocol.frame(b'grpc-status: 0\r\n', 128)
     events, inside = protocol.acs_events(body, GRPC)
-    assert events == [{'direction': 'in', 'time': 1000, 'zone': 'Вход ЦКПП'},
-                      {'direction': 'out', 'time': 2000, 'zone': 'Выход'}]
-    assert inside is False
+    assert events == [{'direction': 'out', 'time': 1000, 'zone': 'Выход ЦКПП'},
+                      {'direction': 'in', 'time': 2000, 'zone': 'Вход'}]
+    assert inside is True  # last event is an entry
 
-    only_entry = protocol.frame(f(1, f(1, event(1000, 'Вход')))) + protocol.frame(b'grpc-status: 0\r\n', 128)
-    events, inside = protocol.acs_events(only_entry, GRPC)
-    assert inside is True and len(events) == 1
+    only_exit = protocol.frame(f(1, f(1, event(1000, 'Выход')))) + protocol.frame(b'grpc-status: 0\r\n', 128)
+    events, inside = protocol.acs_events(only_exit, GRPC)
+    assert inside is False and events[0]['direction'] == 'out'
 
 
 class FakePulse:
