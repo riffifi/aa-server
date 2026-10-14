@@ -66,6 +66,10 @@ class Vault:
             # Per-account permission to use the digital pass in the app. Defaults to
             # on so existing passes keep working; owners can revoke it per account.
             self.db.execute('ALTER TABLE accounts ADD COLUMN pass_allowed INTEGER NOT NULL DEFAULT 1')
+        if 'page_seen_at' not in columns:
+            # Last time the owner signed in to their own page (sets the "has logged in"
+            # indicator in the panel). NULL means they have never opened it.
+            self.db.execute('ALTER TABLE accounts ADD COLUMN page_seen_at REAL')
         event_columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
         for column in ('group_id', 'previous_group_id'):
             if column not in event_columns:
@@ -271,6 +275,8 @@ class Vault:
         with self.transaction() as db:
             db.execute('DELETE FROM page_sessions WHERE expires < ?', (time.time(),))
             db.execute('INSERT INTO page_sessions VALUES(?,?,?)', (digest(token), account_id, time.time() + ttl))
+            # A new session means the owner just signed in to their page.
+            db.execute('UPDATE accounts SET page_seen_at=? WHERE id=?', (time.time(), account_id))
         return token
 
     def page_session_account(self, token):

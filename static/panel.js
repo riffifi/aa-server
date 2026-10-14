@@ -25,6 +25,8 @@ function renderAccount(account) {
   detail.append(el('div', `Session expiry: ${date(account.expires_at)} · checked: ${date(account.checked_at)}`, 'meta'));
   detail.append(el('div', account.automatic_renewal ? `Automatic renewal enabled · last renewal: ${date(account.renewed_at)}` : 'Re-login here once to enable automatic renewal.', 'meta'));
   detail.append(el('div', account.group_id ? `Group: ${account.group_name || account.group_id}` : 'No group assigned', 'meta'));
+  detail.append(el('span', account.page_seen_at ? 'Входил ✓' : 'Не входил', 'badge ' + (account.page_seen_at ? 'valid' : '')));
+  if (account.page_seen_at) detail.append(el('div', `Последний вход на страницу: ${date(account.page_seen_at)}`, 'meta'));
   actions.append(action('Group', async () => { editingGroup = account; $('group-account').textContent = account.label; $('group-id').value = account.group_id || ''; $('group-name').value = account.group_name || ''; $('group-dialog').showModal(); }));
   actions.append(action('Rename', async () => { const name = prompt('Новое название аккаунта', account.label); if (name && name.trim()) { await api('accounts/' + account.id + '/label', 'PUT', { label: name.trim(), expected_version: account.version }); await refresh(); } }));
   actions.append(action('Check', async () => { await api('accounts/' + account.id + '/refresh', 'POST'); await refresh(); }));

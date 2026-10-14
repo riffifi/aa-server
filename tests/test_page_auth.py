@@ -67,6 +67,17 @@ def test_logout_closes_the_session(app):
         assert client.get(f'/api/accounts/{aid}').status_code == 401
 
 
+def test_page_seen_indicator_in_panel(app):
+    with TestClient(app) as client:
+        aid = app.state.service.vault.upsert('u', 'Me', {'cookie': 'session=u'})['id']
+        csrf = client.post('/panel/api/login', json={'password': PASSWORD}).json()['csrf']
+        before = {a['id']: a for a in client.get('/panel/api/state').json()['accounts']}[aid]
+        assert before['page_seen_at'] is None
+        app.state.service.vault.create_page_session(aid)  # owner signs in to their page
+        after = {a['id']: a for a in client.get('/panel/api/state').json()['accounts']}[aid]
+        assert after['page_seen_at'] is not None
+
+
 def test_claim_grants_session_after_completed_login(app):
     with TestClient(app) as client:
         aid = app.state.service.vault.upsert('u', 'Me', {'cookie': 'session=u'})['id']

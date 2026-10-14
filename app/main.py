@@ -288,6 +288,7 @@ def create_app(directory=None, password=None, transport=None, background=True):
             secret = vault.secret(row)
             metadata['automatic_renewal'] = bool(secret.get('storage_state'))
             metadata['renewed_at'] = secret.get('renewed_at')
+            metadata['page_seen_at'] = row['page_seen_at'] if 'page_seen_at' in row.keys() else None
             accounts.append(metadata)
         return {'csrf': session['csrf'], 'accounts': accounts, 'cursor': vault.cursor()}
 
