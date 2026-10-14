@@ -25,17 +25,16 @@ function showAuth(data) {
   $('auth-card').hidden = false;
   if (data.label) $('title').textContent = data.label;
   if (hasPassword) {
+    // Password exists → let the owner log in with it.
     $('auth-title').textContent = 'Вход';
     $('auth-hint').textContent = 'Введите пароль этой страницы.';
-    $('auth-label').childNodes[0].textContent = 'Пароль';
-    $('auth-password').autocomplete = 'current-password';
-    $('auth-submit').textContent = 'Войти';
+    $('auth-form').hidden = false;
   } else {
-    $('auth-title').textContent = 'Задайте пароль';
-    $('auth-hint').textContent = 'Это первый вход — придумайте пароль, чтобы заходить сюда в следующий раз.';
-    $('auth-label').childNodes[0].textContent = 'Новый пароль';
-    $('auth-password').autocomplete = 'new-password';
-    $('auth-submit').textContent = 'Сохранить и войти';
+    // No password yet → do NOT let a stranger set one. The owner proves the
+    // account is theirs by signing in via the university, then sets a password.
+    $('auth-title').textContent = 'Аккаунт ещё не защищён';
+    $('auth-hint').textContent = 'Войдите через университет на главной — так подтвердится, что аккаунт ваш, — и затем задайте пароль для быстрого входа.';
+    $('auth-form').hidden = true;
   }
 }
 
@@ -53,12 +52,12 @@ function showAccount() {
     : 'Нажмите «Продлить» и подтвердите вход в приложении MIREA.';
   $('renew').textContent = account.state === 'valid' ? 'Продлить сейчас' : 'Продлить';
   if (!savingPass) $('pass-allowed').checked = account.pass_allowed !== false;
+  if (account.has_password === false) notice('Задайте пароль ниже, чтобы в следующий раз входить без университета.');
 }
 
 async function auth(password) {
-  const path = hasPassword ? 'login' : 'password';
   try {
-    const response = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/page/' + path, {
+    const response = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/page/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password }), cache: 'no-store' });
     const result = await response.json();

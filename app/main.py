@@ -470,10 +470,14 @@ def create_app(directory=None, password=None, transport=None, background=True):
     async def account_set_page_password(identifier: str, body: PagePasswordBody, request: Request):
         if vault.account(identifier) is None:
             raise HTTPException(404, 'Account not found')
-        if vault.has_page_password(identifier) and not page_authed(request, identifier):
-            raise HTTPException(403, 'A password is already set; sign in first')
+        # Setting OR changing the password always requires an active session, so a
+        # passwordless account cannot be hijacked by whoever sets a password first.
+        # The only way to get that first session is signing in via the university
+        # (the /claim path), which proves the account is yours.
+        if not page_authed(request, identifier):
+            raise HTTPException(401, 'Sign in via the university first to set a password')
         vault.set_page_password(identifier, body.password)
-        return set_page_cookie(JSONResponse({'ok': True, 'authed': True}), vault.create_page_session(identifier))
+        return JSONResponse({'ok': True, 'authed': True})
 
     @app.post('/api/accounts/{identifier}/page/login')
     async def account_page_login(identifier: str, body: PagePasswordBody, request: Request):

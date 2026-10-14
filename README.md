@@ -45,7 +45,9 @@ the first visit the owner sets one, and after that it must be entered (or a sess
 obtained by signing in via the university — see below). The password is scrypt-hashed in
 the account's encrypted secret; a `page_session` cookie (30 days) unlocks the page and
 gates the account-detail read and the pass toggle. Endpoints: `GET /…/page` (status),
-`POST /…/page/password` (set on first visit, or change while signed in),
+`POST /…/page/password` (set or change — **always requires an active session**, so a
+passwordless account cannot be hijacked by whoever sets a password first; the first
+session comes from signing in via the university),
 `POST /…/page/login`, `POST /…/page/logout`. Manual group entry is **not** on this page —
 it lives only in the admin panel.
 

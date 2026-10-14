@@ -22,40 +22,46 @@ def app(tmp_path):
     return create_app(tmp_path, PASSWORD, FakePulse(), background=False)
 
 
-def test_first_visit_sets_password_and_unlocks(app):
+def session_cookie(app, client, account_id):
+    # A session is normally obtained by signing in via the university (claim);
+    # tests mint one directly to stand in for that proven-ownership step.
+    token = app.state.service.vault.create_page_session(account_id)
+    client.cookies.set('page_session', token)
+    return token
+
+
+def test_passwordless_account_cannot_be_hijacked(app):
     with TestClient(app) as client:
         row = app.state.service.vault.upsert('u', 'Me', {'cookie': 'session=u'})
         aid = row['id']
         state = client.get(f'/api/accounts/{aid}/page').json()
         assert state == {'authed': False, 'has_password': False, 'id': aid, 'label': 'Me'}
-        # Detail and pass toggle are closed before auth.
+        # Detail, pass toggle and (critically) setting the first password are all
+        # refused without a session — a stranger cannot claim a passwordless account.
         assert client.get(f'/api/accounts/{aid}').status_code == 401
         assert client.put(f'/api/accounts/{aid}/pass-allowed', json={'allowed': False}).status_code == 401
-        # First visit sets the password and signs in.
-        assert client.post(f'/api/accounts/{aid}/page/password', json={'password': 'hunter2'}).json()['authed'] is True
-        page = client.get(f'/api/accounts/{aid}/page').json()
-        assert page['authed'] is True and page['has_password'] is True
-        assert client.get(f'/api/accounts/{aid}').status_code == 200
-        assert client.put(f'/api/accounts/{aid}/pass-allowed', json={'allowed': False, 'expected_version': page['version']}).status_code == 200
+        assert client.post(f'/api/accounts/{aid}/page/password', json={'password': 'hunter2'}).status_code == 401
 
 
-def test_second_client_needs_the_password(app):
-    with TestClient(app) as owner, TestClient(app) as stranger:
+def test_setting_password_after_claimed_session(app):
+    with TestClient(app) as client:
         aid = app.state.service.vault.upsert('u', 'Me', {'cookie': 'session=u'})['id']
-        owner.post(f'/api/accounts/{aid}/page/password', json={'password': 'hunter2'})
-        # A different client without the cookie cannot set a new password or read detail.
-        assert stranger.get(f'/api/accounts/{aid}/page').json() == {'authed': False, 'has_password': True, 'id': aid, 'label': 'Me'}
-        assert stranger.post(f'/api/accounts/{aid}/page/password', json={'password': 'other'}).status_code == 403
-        assert stranger.get(f'/api/accounts/{aid}').status_code == 401
-        assert stranger.post(f'/api/accounts/{aid}/page/login', json={'password': 'wrong'}).status_code == 401
-        assert stranger.post(f'/api/accounts/{aid}/page/login', json={'password': 'hunter2'}).status_code == 200
-        assert stranger.get(f'/api/accounts/{aid}').status_code == 200
+        session_cookie(app, client, aid)  # stands in for a completed university sign-in
+        assert client.get(f'/api/accounts/{aid}').status_code == 200
+        assert client.post(f'/api/accounts/{aid}/page/password', json={'password': 'hunter2'}).json()['authed'] is True
+        # Drop the session to act as a fresh visitor: now the password is required.
+        client.cookies.clear()
+        assert client.get(f'/api/accounts/{aid}/page').json()['has_password'] is True
+        assert client.get(f'/api/accounts/{aid}').status_code == 401
+        assert client.post(f'/api/accounts/{aid}/page/login', json={'password': 'wrong'}).status_code == 401
+        assert client.post(f'/api/accounts/{aid}/page/login', json={'password': 'hunter2'}).status_code == 200
+        assert client.get(f'/api/accounts/{aid}').status_code == 200
 
 
 def test_logout_closes_the_session(app):
     with TestClient(app) as client:
         aid = app.state.service.vault.upsert('u', 'Me', {'cookie': 'session=u'})['id']
-        client.post(f'/api/accounts/{aid}/page/password', json={'password': 'hunter2'})
+        session_cookie(app, client, aid)
         assert client.get(f'/api/accounts/{aid}').status_code == 200
         client.post(f'/api/accounts/{aid}/page/logout')
         assert client.get(f'/api/accounts/{aid}').status_code == 401

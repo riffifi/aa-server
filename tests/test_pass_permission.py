@@ -32,15 +32,15 @@ def setup(tmp_path):
         yield client, app.state.service
 
 
-def signin(client, account_id):
-    # A page session (set on first visit) is what unlocks detail and the pass toggle.
-    assert client.post(f'/api/accounts/{account_id}/page/password', json={'password': 'pw-secret'}).status_code == 200
+def signin(client, service, account_id):
+    # A page session (normally from a university sign-in) unlocks detail and the toggle.
+    client.cookies.set('page_session', service.vault.create_page_session(account_id))
 
 
 def test_pass_defaults_on_and_single_account_endpoint(setup):
     client, service = setup
     row = service.vault.upsert('person', 'Person', {'cookie': 'session=person'})
-    signin(client, row['id'])
+    signin(client, service, row["id"])
     detail = client.get('/api/accounts/' + row['id'])
     assert detail.status_code == 200 and detail.json()['pass_allowed'] is True
     assert client.get('/api/accounts/missing').status_code == 404
@@ -51,7 +51,7 @@ def test_pass_defaults_on_and_single_account_endpoint(setup):
 def test_toggling_permission_blocks_pass_rpcs_only(setup):
     client, service = setup
     row = service.vault.upsert('person', 'Person', {'cookie': 'session=person'})
-    signin(client, row['id'])
+    signin(client, service, row["id"])
     assert client.post(f'/api/accounts/{row["id"]}/rpc/pass-token', content=unary(), headers=GRPC).status_code != 403
     put = client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': False, 'expected_version': row['version']})
     assert put.status_code == 200 and put.json()['pass_allowed'] is False
@@ -66,7 +66,7 @@ def test_toggling_permission_blocks_pass_rpcs_only(setup):
 def test_permission_change_emits_sync_event(setup):
     client, service = setup
     row = service.vault.upsert('person', 'Person', {'cookie': 'session=person'})
-    signin(client, row['id'])
+    signin(client, service, row["id"])
     cursor = client.get('/api/events?after=0&wait=0').json()['cursor']
     client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': False, 'expected_version': row['version']})
     events = client.get(f'/api/events?after={cursor}&wait=0').json()['events']
@@ -80,5 +80,5 @@ def test_pass_toggle_requires_page_session_or_panel(setup):
     assert client.put(f'/api/accounts/{account_id}/pass-allowed', json={'allowed': False}).status_code == 401
     assert client.put(f'/panel/api/accounts/{account_id}/pass-allowed', json={'allowed': False}).status_code == 401
     # With a page session the public variant works.
-    signin(client, account_id)
+    signin(client, service, account_id)
     assert client.put(f'/api/accounts/{account_id}/pass-allowed', json={'allowed': False}).status_code == 200
