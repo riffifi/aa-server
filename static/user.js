@@ -53,6 +53,7 @@ function showAccount() {
   $('renew').textContent = account.state === 'valid' ? 'Продлить сейчас' : 'Продлить';
   if (!savingPass) $('pass-allowed').checked = account.pass_allowed !== false;
   if (document.activeElement !== $('rename-input')) $('rename-input').value = account.label;
+  loadAttendance();
   if (account.has_password === false) notice('Задайте пароль ниже, чтобы в следующий раз входить без университета.');
 }
 
@@ -66,6 +67,25 @@ async function auth(password) {
     $('auth-password').value = '';
     await load();
   } catch (error) { notice(error.message); }
+}
+
+let acsLoading = false;
+function hhmm(t) { return new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+async function loadAttendance() {
+  if (acsLoading) return;
+  acsLoading = true;
+  try {
+    const response = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/attendance', { cache: 'no-store' });
+    if (!response.ok) throw Error('Pulse недоступен, попробуйте позже.');
+    const data = await response.json();
+    const badge = $('inside-badge');
+    badge.textContent = data.inside ? 'Сейчас внутри' : 'Снаружи';
+    badge.className = 'badge ' + (data.inside ? 'valid' : '');
+    if (!data.events.length) { $('acs-list').textContent = 'Сегодня проходов не зафиксировано.'; return; }
+    $('acs-list').textContent = data.events.map(e =>
+      `${e.direction === 'in' ? '→ вход' : '← выход'} ${hhmm(e.time)}${e.zone ? ' · ' + e.zone : ''}`).join('\n');
+  } catch (error) { $('acs-list').textContent = error.message; }
+  finally { acsLoading = false; }
 }
 
 async function savePass() {
@@ -127,6 +147,7 @@ async function pollLogin() {
 
 $('auth-form').addEventListener('submit', e => { e.preventDefault(); const p = $('auth-password').value; if (p.length >= 4) auth(p); });
 $('renew').onclick = () => startLogin();
+$('acs-refresh').onclick = () => loadAttendance();
 $('pass-allowed').onchange = () => savePass();
 $('close-login').onclick = () => { currentJob = null; $('login-card').hidden = true; };
 $('logout').onclick = async () => {

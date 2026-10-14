@@ -13,6 +13,7 @@ METHODS = {
     'pass-code': '/rtu_tc.rtu_attend.humanpass.HumanPassService/SendVerificationCode',
     'pass-issue': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetDigitalPass',
     'schedules': '/rtu.schedule.api.PersonalScheduleService/GetSubscribedSchedules',
+    'acs-timeline': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetHumanAcsTimeline',
 }
 PROFILE_PATH = METHODS['profile']
 
@@ -201,6 +202,61 @@ def authentication_state(status, headers, body):
         return profile_identity(body, headers)
     except (ValueError, UnicodeError, TypeError):
         return 'invalidResponse', None
+
+def _vfield(number, value):
+    return varint(number << 3) + varint(value)
+
+def _timestamp(seconds, nanos=0):
+    out = _vfield(1, seconds)
+    if nanos:
+        out += _vfield(2, nanos)
+    return out
+
+def acs_timeline_request(uid, start, end):
+    """Build the GetHumanAcsTimeline request: the human id, a [start, end] window
+    (protobuf Timestamps), and the two flags the app sends (3=1, 4=2)."""
+    window = field(1, _timestamp(int(start))) + field(2, _timestamp(int(end), 999000000))
+    message = field(1, uid.encode()) + field(2, window) + _vfield(3, 1) + _vfield(4, 2)
+    return frame(message)
+
+def acs_events(body, headers):
+    """Parse GetHumanAcsTimeline into a list of turnstile events. Each list item is
+    keyed 1 (entry) or 2 (exit); the event carries a Timestamp in field 2 and the
+    zone name in field 3.2. A trailing summary item (field 2 is a number, not a
+    Timestamp) is ignored. Returns (events_sorted_by_time, inside_now)."""
+    try:
+        message, status = grpc_message(body, headers)
+    except (ValueError, UnicodeError):
+        return [], False
+    if status != 0 or message is None:
+        return [], False
+    items = decode_tree(message).get('1')
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list):
+        return [], False
+    events = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if '1' in item:
+            event, direction = item['1'], 'in'
+        elif '2' in item:
+            event, direction = item['2'], 'out'
+        else:
+            continue
+        if not isinstance(event, dict):
+            continue
+        stamp = event.get('2')
+        when = stamp.get('1') if isinstance(stamp, dict) else None
+        if not isinstance(when, int):
+            continue
+        zone = event.get('3')
+        events.append({'direction': direction, 'time': when,
+                       'zone': zone.get('2') if isinstance(zone, dict) and isinstance(zone.get('2'), str) else None})
+    events.sort(key=lambda e: e['time'])
+    inside = bool(events) and events[-1]['direction'] == 'in'
+    return events, inside
 
 def subscribed_group(body, headers):
     """Parse GetSubscribedSchedules into (group_id, group_name). The response lists

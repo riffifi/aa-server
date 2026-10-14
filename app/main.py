@@ -463,6 +463,26 @@ def create_app(directory=None, password=None, transport=None, background=True):
             raise HTTPException(401, 'Sign in to this account first')
         return vault.public(row)
 
+    @app.get('/api/accounts/{identifier}/attendance')
+    @app.get('/panel/api/accounts/{identifier}/attendance')
+    async def account_attendance(identifier: str, request: Request):
+        # Turnstile entry/exit for today (Moscow time). Owner's page session, or panel.
+        if request.url.path.startswith('/panel/'):
+            panel(request)
+        elif not page_authed(request, identifier):
+            raise HTTPException(401, 'Sign in to this account first')
+        row = vault.account(identifier)
+        if row is None:
+            raise HTTPException(404, 'Account not found')
+        now = time.time()
+        start = (int((now + 3 * 3600) // 86400)) * 86400 - 3 * 3600  # Moscow midnight today
+        end = start + 86400 - 1
+        result = await service.transport.acs_timeline(vault.secret(row)['cookie'], row['pulse_id'], start, end)
+        if result is None:
+            raise HTTPException(503, 'Pulse is unavailable; try again')
+        events, inside = result
+        return {'inside': inside, 'events': events, 'since': start}
+
     @app.get('/api/accounts/{identifier}/page')
     async def account_page_state(identifier: str, request: Request):
         row = vault.account(identifier)

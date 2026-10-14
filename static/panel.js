@@ -30,6 +30,7 @@ function renderAccount(account) {
   actions.append(action('Group', async () => { editingGroup = account; $('group-account').textContent = account.label; $('group-id').value = account.group_id || ''; $('group-name').value = account.group_name || ''; $('group-dialog').showModal(); }));
   actions.append(action('Rename', async () => { const name = prompt('Новое название аккаунта', account.label); if (name && name.trim()) { await api('accounts/' + account.id + '/label', 'PUT', { label: name.trim(), expected_version: account.version }); await refresh(); } }));
   actions.append(action('Check', async () => { await api('accounts/' + account.id + '/refresh', 'POST'); await refresh(); }));
+  actions.append(action('Посещение', async () => { const d = await api('accounts/' + account.id + '/attendance'); const lines = (d.events || []).map(e => (e.direction === 'in' ? 'вход ' : 'выход ') + new Date(e.time * 1000).toLocaleTimeString()).join(', '); notice(`${account.label}: ${d.inside ? 'в здании' : 'снаружи'}${lines ? ' · ' + lines : ' · сегодня проходов нет'}`); }));
   actions.append(action('Re-login', () => startLogin(account.label, account.id)));
   actions.append(action('Remove', async () => { if (confirm('Remove this account and its stored pass from this server?')) { await api('accounts/' + account.id, 'DELETE'); await refresh(); } }, 'quiet danger'));
   row.append(detail, actions); return row;

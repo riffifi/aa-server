@@ -132,6 +132,16 @@ decoded protobuf as a field tree (`{grpc_status, fields}`) — strings, numbers 
 nested messages only; cookies and tokens are never included. Use it to locate the
 group name and numeric schedule ID, then wire automatic assignment.
 
+## Attendance (turnstile entry/exit)
+
+`GET /api/accounts/{id}/attendance` (owner page session, or the `/panel/...` variant for
+admins) returns today's ACS turnstile events for the account, via Pulse's
+`HumanPassService/GetHumanAcsTimeline` (request: the account's pulse id + a Moscow-day
+window + flags 3=1, 4=2). Each list item is keyed 1 (entry) or 2 (exit) with a Timestamp
+in field 2 and the zone name in field 3.2; the response reports `{inside, events:[{direction,
+time, zone}], since}`. The owner's page shows "Посещение сегодня" with an inside/outside
+badge and the entry/exit list; the panel has a per-account "Посещение" action.
+
 ## Automatic group detection
 
 The group is detected from the account itself: Pulse's

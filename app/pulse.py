@@ -82,6 +82,14 @@ class PulseTransport:
             return None, None
         return protocol.subscribed_group(reply.body, reply.headers)
 
+    async def acs_timeline(self, cookie, uid, start, end):
+        # Turnstile (ACS) entry/exit events for the account over [start, end].
+        try:
+            reply = await self.rpc(cookie, 'acs-timeline', protocol.acs_timeline_request(uid, start, end))
+        except (httpx.HTTPError, ValueError, OSError):
+            return None
+        return protocol.acs_events(reply.body, reply.headers)
+
     async def search_groups(self, query):
         # Resolve a group name to its numeric schedule id via the public MIREA
         # schedule API (schedule-of.mirea.ru) — the same source the official app
