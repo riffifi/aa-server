@@ -81,9 +81,9 @@ async function loadAttendance() {
     const badge = $('inside-badge');
     badge.textContent = data.inside ? 'Сейчас внутри' : 'Снаружи';
     badge.className = 'badge ' + (data.inside ? 'valid' : '');
-    if (!data.events.length) { $('acs-list').textContent = 'Сегодня проходов не зафиксировано.'; return; }
-    $('acs-list').textContent = data.events.map(e =>
-      `${e.direction === 'in' ? '→ вход' : '← выход'} ${hhmm(e.time)}${e.zone ? ' · ' + e.zone : ''}`).join('\n');
+    if (!data.sessions.length) { $('acs-list').textContent = 'Сегодня проходов не зафиксировано.'; return; }
+    $('acs-list').textContent = data.sessions.map(s =>
+      `вход ${hhmm(s.enter)} — ${s.exit ? 'выход ' + hhmm(s.exit) : 'ещё внутри'}`).join('\n');
   } catch (error) { $('acs-list').textContent = error.message; }
   finally { acsLoading = false; }
 }

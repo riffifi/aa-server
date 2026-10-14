@@ -6,32 +6,30 @@ from app import protocol
 PASSWORD = 'a-test-password-with-enough-characters'
 GRPC = {'content-type': 'application/grpc-web+proto'}
 f = protocol.field
+ts = protocol._timestamp
+vf = protocol._vfield
 
 
 def test_acs_request_matches_the_captured_shape():
-    body = protocol.acs_timeline_request('07dae93a-1741-4ab0-bc64-f68874669202', 1791925200, 1792011599)
+    body = protocol.acs_stats_request('07dae93a-1741-4ab0-bc64-f68874669202', 1791925200, 1792011599)
     tree = protocol.decode_tree(body[5:])
     assert tree == {'1': '07dae93a-1741-4ab0-bc64-f68874669202',
                     '2': {'1': {'1': 1791925200}, '2': {'1': 1792011599, '2': 999000000}},
-                    '3': 1, '4': 2}
+                    '3': 1}
 
 
-def test_acs_events_parses_entries_exits_and_inside():
-    # Item keyed 2 = entry (вход), keyed 1 = exit (выход).
-    def event(ts, zone):
-        return f(1, b'uuid') + f(2, protocol._timestamp(ts)) + f(3, f(1, b'z') + f(2, zone.encode())) + protocol._vfield(5, 1)
-    message = (f(1, f(1, event(1000, 'Выход ЦКПП')))     # exit
-               + f(1, f(2, event(2000, 'Вход')))           # entry (later)
-               + f(1, f(1, protocol._vfield(2, 12345))))    # trailing summary -> ignored
+def test_acs_sessions_pairs_entry_exit_and_inside():
+    done = f(1, ts(1000)) + f(2, ts(2000)) + vf(4, 1)   # entered 1000, exited 2000
+    still = f(1, ts(3000))                               # entered 3000, no exit -> inside
+    message = vf(1, 2) + f(3, done) + f(3, still)
     body = protocol.frame(message) + protocol.frame(b'grpc-status: 0\r\n', 128)
-    events, inside = protocol.acs_events(body, GRPC)
-    assert events == [{'direction': 'out', 'time': 1000, 'zone': 'Выход ЦКПП'},
-                      {'direction': 'in', 'time': 2000, 'zone': 'Вход'}]
-    assert inside is True  # last event is an entry
+    sessions, inside = protocol.acs_sessions(body, GRPC)
+    assert sessions == [{'enter': 1000, 'exit': 2000}, {'enter': 3000, 'exit': None}]
+    assert inside is True
 
-    only_exit = protocol.frame(f(1, f(1, event(1000, 'Выход')))) + protocol.frame(b'grpc-status: 0\r\n', 128)
-    events, inside = protocol.acs_events(only_exit, GRPC)
-    assert inside is False and events[0]['direction'] == 'out'
+    closed = protocol.frame(vf(1, 1) + f(3, f(1, ts(1000)) + f(2, ts(2000)))) + protocol.frame(b'grpc-status: 0\r\n', 128)
+    sessions, inside = protocol.acs_sessions(closed, GRPC)
+    assert inside is False and sessions == [{'enter': 1000, 'exit': 2000}]
 
 
 class FakePulse:
@@ -41,9 +39,9 @@ class FakePulse:
         return 'valid', 'u'
     async def rpc(self, *a, **k):
         return None
-    async def acs_timeline(self, cookie, uid, start, end):
+    async def acs_stats(self, cookie, uid, start, end):
         self.captured = (uid, start, end)
-        return [{'direction': 'in', 'time': start + 100, 'zone': 'ЦКПП'}], True
+        return [{'enter': start + 100, 'exit': None}], True
     async def close(self):
         pass
 
@@ -58,5 +56,5 @@ def test_attendance_endpoint_requires_session(tmp_path):
         result = client.get(f'/api/accounts/{aid}/attendance')
         assert result.status_code == 200
         data = result.json()
-        assert data['inside'] is True and data['events'][0]['zone'] == 'ЦКПП'
-        assert pulse.captured[0] == 'person-123'  # queried by the account's pulse id
+        assert data['inside'] is True and data['sessions'][0]['exit'] is None
+        assert pulse.captured[0] == 'person-123'

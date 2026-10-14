@@ -477,11 +477,11 @@ def create_app(directory=None, password=None, transport=None, background=True):
         now = time.time()
         start = (int((now + 3 * 3600) // 86400)) * 86400 - 3 * 3600  # Moscow midnight today
         end = start + 86400 - 1
-        result = await service.transport.acs_timeline(vault.secret(row)['cookie'], row['pulse_id'], start, end)
+        result = await service.transport.acs_stats(vault.secret(row)['cookie'], row['pulse_id'], start, end)
         if result is None:
             raise HTTPException(503, 'Pulse is unavailable; try again')
-        events, inside = result
-        return {'inside': inside, 'events': events, 'since': start}
+        sessions, inside = result
+        return {'inside': inside, 'sessions': sessions, 'since': start}
 
     @app.get('/api/accounts/{identifier}/page')
     async def account_page_state(identifier: str, request: Request):

@@ -82,13 +82,13 @@ class PulseTransport:
             return None, None
         return protocol.subscribed_group(reply.body, reply.headers)
 
-    async def acs_timeline(self, cookie, uid, start, end):
-        # Turnstile (ACS) entry/exit events for the account over [start, end].
+    async def acs_stats(self, cookie, uid, start, end):
+        # Turnstile (ACS) attendance sessions (entry/exit pairs) over [start, end].
         try:
-            reply = await self.rpc(cookie, 'acs-timeline', protocol.acs_timeline_request(uid, start, end))
+            reply = await self.rpc(cookie, 'acs-stats', protocol.acs_stats_request(uid, start, end))
         except (httpx.HTTPError, ValueError, OSError):
             return None
-        return protocol.acs_events(reply.body, reply.headers)
+        return protocol.acs_sessions(reply.body, reply.headers)
 
     async def search_groups(self, query):
         # Resolve a group name to its numeric schedule id via the public MIREA
