@@ -595,15 +595,23 @@ def create_app(directory=None, password=None, transport=None, background=True):
             panel(request, True)
         elif not page_authed(request, identifier):
             raise HTTPException(401, 'Sign in to this account first')
-        row = vault.account(identifier)
-        if row is None:
-            raise HTTPException(404, 'Account not found')
-        cookie = vault.secret(row).get('cookie')
-        if cookie:
-            await service.transport.logout(cookie)  # best-effort MIREA logout
-        account = vault.end_session(identifier)
-        await service.changed()
-        return account
+        async with service.locks[identifier]:
+            row = vault.account(identifier)
+            if row is None:
+                raise HTTPException(404, 'Account not found')
+            cookie = vault.secret(row).get('cookie')
+            if cookie:
+                try:
+                    await service.transport.logout(cookie)
+                except Exception:
+                    # Local revocation must succeed even when upstream logout fails.
+                    pass
+            account = vault.end_session(identifier)
+            service.issued_tokens.pop(identifier, None)
+            service.renewal_attempts.pop(identifier, None)
+            vault.audit('session_ended', 'panel' if request.url.path.startswith('/panel/') else 'owner', identifier)
+            await service.changed()
+            return account
 
     @app.put('/api/accounts/{identifier}/pass-allowed')
     @app.put('/panel/api/accounts/{identifier}/pass-allowed')

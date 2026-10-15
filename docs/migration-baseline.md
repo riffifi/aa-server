@@ -53,13 +53,22 @@ exception for testing.
 - Public deployment TLS is currently configuration-driven (`PUBLIC_URL`), not
   enforced by the service. SQLite and in-memory jobs/events require one process.
 
-## Decisions pending from the user
+## Decisions and remaining protocol work
 
-The app/server protocol change depends on the selected access model (revocable
-per-installation access versus private-network/VPN-only access) and the final
-credential policy (server-only versus an encrypted local fallback). Those choices
-were requested before changing the protocol or deleting working login/transfer
-flows. PostgreSQL is deferred as the plan specifies.
+The user chose a separate daily admin password for pass testing, copied from the
+panel and retained in app secure storage for that server until rejected/expired.
+This is distinct from the panel login password. Local Pulse sessions and existing
+transfer/recovery flows are retained in a Legacy view under app Settings, while
+the normal app view uses server-backed account references and server sign-in.
+Legacy synchronization compatibility remains available; the app therefore still
+contains reusable local credentials when the user uses Legacy.
+
+A general phone-client authorization model for the URL-only API has not been
+chosen by those answers. The testing capability is deliberately scoped to pass
+permission and does not grant group, ownership or account-management privileges.
+Do not claim Phase 1 authentication is complete or remove owner/panel protections.
+PostgreSQL remains deferred. The next protocol step must coordinate normal-client
+authorization with existing synchronization and the Legacy compatibility policy.
 
 The separately requested daily-password pass testing mode is an explicit admin
 exception to the owner's pass-use flag, not a persistent change to that flag or
