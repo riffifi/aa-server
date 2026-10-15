@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .vault import Vault, Conflict, digest
 from .pulse import PulseTransport, BrowserLogins, validate_header
 from .telegram import TelegramBot
+from .agreements import Agreements
 from . import protocol
 from .pass_testing import daily_access, matches as matches_test_password
 
@@ -95,6 +96,8 @@ class Service:
         self.browser = BrowserLogins(vault, self.changed)
         self.locks = defaultdict(asyncio.Lock)
         self.issued_tokens = defaultdict(dict)
+        self.agreements = Agreements(vault)
+        self.telegram = None
         self.refresh_task = None
         self.started = time.time()
         self.renewal_attempts = {}
@@ -180,6 +183,7 @@ def create_app(directory=None, password=None, transport=None, background=True):
             if token:
                 bot = TelegramBot(token, service, os.environ.get('PUBLIC_URL', ''))
                 app.state.telegram = bot
+                service.telegram = bot
                 bot.task = asyncio.create_task(bot.run())
         yield
         if bot is not None:
@@ -230,6 +234,18 @@ def create_app(directory=None, password=None, transport=None, background=True):
             return None
         access = daily_access(vault.pass_testing_key)
         return access if matches_test_password(password, access) else None
+
+    def pass_access(request, identifier):
+        return page_authed(request, identifier) or service.agreements.status(identifier, request.headers.get('x-pass-client', '')) == 'approved'
+
+    def require_pass(request, row, operation):
+        if row['pass_allowed'] and pass_access(request, row['id']):
+            return
+        if test_access(request) is not None:
+            vault.audit('pass_testing_' + operation, 'daily-admin', row['id'])
+            return
+        raise HTTPException(403, 'Owner approval in Telegram is required for this person',
+                            headers={'X-Pass-Test-Invalid': '1'} if request.headers.get('x-pass-test-key') else None)
 
     def set_page_cookie(response, token):
         secure = os.environ.get('PUBLIC_URL', '').startswith('https://')
@@ -449,9 +465,33 @@ def create_app(directory=None, password=None, transport=None, background=True):
             raise HTTPException(400, 'Invalid group')
         rows = vault.accounts(group_id)
         testing = test_access(request)
-        passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if row['pass_allowed'] or testing else None, 'version': row['pass_version']} for row in rows]
-        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id,
+        key = request.headers.get('x-pass-client', '')
+        metadata = [{**vault.public(row), 'pass_access': service.agreements.status(row['id'], key)} for row in rows]
+        passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if testing or (row['pass_allowed'] and pass_access(request, row['id'])) else None, 'version': row['pass_version']} for row in rows]
+        return {'accounts': metadata, 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id,
+                'pass_agreements_required': True, 'pass_access_expires_at': time.time() + 300,
                 'pass_testing_expires_at': testing['expires_at'] if testing else None}
+
+    @app.post('/api/accounts/{identifier}/pass-request')
+    async def request_pass(identifier: str, request: Request):
+        bot = service.telegram
+        if bot is None or not bot.username:
+            raise HTTPException(503, 'Telegram bot is not configured or ready')
+        address = request.client.host if request.client else 'unknown'
+        queue = attempts[('pass-request', address)]
+        now = time.time()
+        while queue and queue[0] < now - 300:
+            queue.popleft()
+        if len(queue) >= 40:
+            raise HTTPException(429, 'Too many requests; try again later')
+        queue.append(now)
+        try:
+            identifier = service.agreements.create(identifier, request.headers.get('x-pass-client', ''))
+        except KeyError:
+            raise HTTPException(404, 'Account not found') from None
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        return {'url': 'https://t.me/' + bot.username + '?start=access_' + identifier, 'expires_in': 600}
 
     @app.get('/api/groups')
     async def groups():
@@ -669,11 +709,7 @@ def create_app(directory=None, password=None, transport=None, background=True):
         row = vault.account(identifier)
         if row is None:
             raise HTTPException(404, 'Account not found')
-        if not row['pass_allowed']:
-            if test_access(request) is None:
-                raise HTTPException(403, 'Pass use is disabled for this account',
-                                    headers={'X-Pass-Test-Invalid': '1'} if request.headers.get('x-pass-test-key') else None)
-            vault.audit('pass_testing_publish', 'daily-admin', identifier)
+        require_pass(request, row, 'publish')
         try:
             account = vault.save_pass(identifier, body.number, body.expected_version)
         except ValueError:
@@ -707,11 +743,8 @@ def create_app(directory=None, password=None, transport=None, background=True):
         row = vault.account(identifier)
         if row is None:
             raise HTTPException(404, 'Account not found')
-        if method in ('pass-token', 'pass-code', 'pass-issue') and not row['pass_allowed']:
-            if test_access(request) is None:
-                raise HTTPException(403, 'Pass use is disabled for this account',
-                                    headers={'X-Pass-Test-Invalid': '1'} if request.headers.get('x-pass-test-key') else None)
-            vault.audit('pass_testing_' + method, 'daily-admin', identifier)
+        if method in ('pass-token', 'pass-code', 'pass-issue'):
+            require_pass(request, row, method)
         if method in ('pass-code', 'pass-issue'):
             limit_key = (method, identifier)
             queue = attempts[limit_key]

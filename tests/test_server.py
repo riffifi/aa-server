@@ -7,6 +7,7 @@ from app.main import create_app
 from app.pulse import Reply, validate_header
 from app.vault import Vault
 from app import protocol
+from app.pass_testing import daily_access
 
 PASSWORD = 'a-test-password-with-enough-characters'
 HEADERS = {'content-type': 'application/grpc-web+proto'}
@@ -32,6 +33,7 @@ def setup(tmp_path):
     pulse = FakePulse()
     app = create_app(tmp_path, PASSWORD, pulse, background=False)
     with TestClient(app) as client:
+        client.headers['x-pass-test-key'] = daily_access(app.state.service.vault.pass_testing_key)['password']
         yield client, app.state.service, pulse, tmp_path
 
 def account(service, uid='person-one'):

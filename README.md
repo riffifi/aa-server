@@ -1,8 +1,10 @@
 # Pulse session server — URL-only automatic sync
 
 Enter the same server URL in **Settings → Session server** on each phone. There
-are no device keys, pairing steps, publisher switches, or manual upload steps.
-The app uploads its own saved sessions and NFC pass identifiers automatically.
+are no general device keys, publisher switches, or manual upload steps.
+Pass access additionally requires per-person owner approval in Telegram; the app
+keeps its separate pass credential in secure storage. Legacy synchronization
+uploads saved sessions automatically and uploads pass identifiers only with permission.
 Other connected apps receive revision events and fetch the changes. A new login
 or NFC enrollment schedules an upload immediately; failed uploads retry while
 the app runs and when it resumes. Unchanged credentials are not uploaded again.
@@ -12,8 +14,9 @@ Phones proxy the supported Pulse profile, attendance and NFC RPCs through the
 server. Each NFC activation requests a fresh account-bound Pulse token. The
 server cannot inspect the official Pulse app’s private storage on a phone.
 
-**Anyone who can reach the API can read shared account metadata, use passes
-whose use is enabled, and upload sessions and permitted passes.** The URL is not an authentication secret. Use
+**Anyone who can reach the API can read shared account metadata and upload
+sessions.** Pass access additionally requires person-specific owner approval or
+the explicit daily testing capability. The URL is not an authentication secret. Use
 network/firewall/VPN rules or Nginx access rules to restrict access if needed.
 The administration panel still requires its own password and CSRF token for
 account removal and login management. HTTPS encrypts traffic; it does not add
@@ -80,36 +83,53 @@ owner's own page (a valid page session). Renames bump the version and emit a `la
 event. The owner's page and the panel both expose it. Page passwords are set and changed
 from the owner's page (always under a session).
 
-### Pass permission
+### Pass permission and Telegram agreements
 
-Each account carries a `pass_allowed` flag (on by default) that the owner can toggle
-from their page, the picker, or the bot. When it is off the server refuses the
-`pass-token`, `pass-code` and `pass-issue` RPCs for that account with HTTP 403, so the
-app cannot use or issue that account's digital pass; the session, attendance and
-renewal are unaffected. `GET /api/accounts/{id}` returns one account (including
-`pass_allowed`, which also appears in `GET /api/accounts`), and
-`PUT /api/accounts/{id}/pass-allowed` (`{allowed, expected_version?}`, public; the
-`/panel/...` variant needs the password) changes it and emits a `pass_permission`
-sync event so phones pick it up.
+`pass_allowed` is the owner's account-wide switch. It is **not** a grant to every
+phone. Ordinary pass snapshots, uploads, and `pass-token`/`pass-code`/`pass-issue`
+RPCs additionally require an approval for the requesting Telegram person (or the
+owner's authenticated page session). Attendance and session renewal are unchanged.
+Snapshots omit pass numbers for unauthorized callers. The separate daily admin
+password remains the explicit testing exception and does not create agreements.
 
 ## Telegram bot
 
-Set `TELEGRAM_TOKEN` in `.env` (empty by default) and rerun `sudo ./install.sh`
-to enable an optional bot. With the variable unset the server runs exactly as
-before. The bot uses long polling (no public webhook or HTTPS needed) and drives
-the same in-process login and renewal as the panel and picker — it adds no new
-stored secret beyond the chat↔account link used to address alerts.
+Set a **fresh** `TELEGRAM_TOKEN` in the deployment's untracked `.env` and rerun
+`sudo ./install.sh`. Never put the token in source, screenshots, logs or chat.
+If a token has been shared, revoke it through BotFather before deployment.
+The bot discovers its username through `getMe` and uses long polling. Do not run
+another poller with the same token. No webhook setup is needed.
 
-In the bot an owner sends `/menu`, picks their account (which turns on alerts),
-and renews or enrolls through inline buttons that show the MIREA QR as a photo.
-When an account's session can no longer be renewed automatically, everyone who
-linked that account gets a **"needs a new login"** message with a one-tap Renew
-button. When `PUBLIC_URL` is HTTPS the menu also offers a mini-app button that
-opens the picker inside Telegram; on an HTTP deployment it links out to the
-picker in a browser instead.
+1. The owner opens `/menu`, picks their account and completes **MIREA sign-in**.
+   Merely selecting an account or having an old alert subscription is not proof
+   of ownership. Existing unverified links must complete this step once.
+2. In the app's Passes screen, a requester taps **Request access** and confirms
+   the request in Telegram. The app stores a random credential in secure storage
+   per server; it is never placed in the Telegram link. Handoff links expire after
+   ten minutes and are single-use. The requester must confirm their own app's link.
+3. The verified owner receives the requester's Telegram name, username when
+   available, and numeric Telegram ID, with **Allow / Deny** buttons. This proves
+   a Telegram identity, not a legal name. Only the verified owner can decide.
+4. After approval, the requester returns to the app and refreshes. Permission is
+   per person and per pass, persists until revoked, and can be used on another
+   phone only after that phone is linked to the same Telegram person.
+5. Owners revoke individual people from the account menu. Revocation emits a sync
+   event and blocks new pass RPCs immediately. Active phone presentations are
+   stopped on sync; offline native activation is capped at a five-minute lease.
+   Pending requests expire after seven days. Restarting the server preserves
+   requests, grants and delivery state.
 
-Rotate the token with BotFather's `/revoke` if it has ever been shared, since the
-token alone controls the bot. Never commit `.env`.
+`POST /api/accounts/{id}/pass-request` with `X-Pass-Client` creates an expiring
+Telegram handoff. The same private header identifies the app for snapshots and
+pass operations. General account-list/attendance protocol v2 remains URL-only;
+this is a scoped pass authorization layer, not completion of the wider migration.
+Authenticated owner pages retain their own pass controls. Old clients can no
+longer obtain passes without owner approval. Modern app NFC refuses older servers
+that do not advertise `pass_agreements_required`, and local Legacy passes cannot
+bypass the server-backed approval flow. Local sessions and transfer remain in Legacy.
+
+Deep links and callback handling follow the [Telegram Bot documentation](https://core.telegram.org/bots/features#deep-linking)
+and [CallbackQuery sender fields](https://core.telegram.org/bots/api#callbackquery).
 
 ## Concurrency and self-service load
 
@@ -347,7 +367,8 @@ The authenticated administration panel shows a separate **Pass testing** passwor
 with a copy action and a preview of available test passes. It rotates at midnight
 in Moscow and is stable across server restarts. It is not the panel login password.
 
-In the app, open the debug menu, enable **Pass testing**, and paste that password.
+In the app, make five downward swipes on the left rail at Attendance (01) to
+reveal Developer (00), enable **Pass testing**, and paste that password.
 The app keeps it in platform secure storage for this server until it expires or
 is rejected, then requires the new password. Explicitly disabling testing removes
 it. Test-only pass numbers are excluded from the persisted account snapshot, and
@@ -355,8 +376,8 @@ NFC token expiry is capped at the testing deadline.
 
 `POST /api/debug/pass-testing` validates the daily password with rate limiting.
 Testing API requests use `X-Pass-Test-Key`. This permits pass snapshots, uploads,
-and pass RPCs while the saved `pass_allowed` flag is false, without modifying the
-flag. Pulse identity, live-session checks, account-bound token issuance, owner
+and pass RPCs without a person-specific agreement or while `pass_allowed` is
+false, without modifying either permission. Pulse identity, live-session checks, account-bound token issuance, owner
 verification-code requirements and attempt limits still apply. Ordinary requests
 cannot retrieve disabled pass numbers. Testing unlocks and exceptional pass
 operations are recorded in `audit_events` without passwords or tokens; records

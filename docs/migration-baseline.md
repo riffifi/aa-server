@@ -73,3 +73,18 @@ authorization with existing synchronization and the Legacy compatibility policy.
 The separately requested daily-password pass testing mode is an explicit admin
 exception to the owner's pass-use flag, not a persistent change to that flag or
 a substitute for Pulse sign-in, verification, account binding or token expiry.
+
+## Per-person Telegram pass authorization · 16 October 2026
+
+The owner now approves each Telegram person separately. `X-Pass-Client` is a scoped
+app pass credential, linked to the requester's Telegram through a separate,
+single-use ten-minute handoff. A verified owner (MIREA sign-in through the bot)
+approves/denies the request or revokes the grant. Old chat↔account alert links
+are unverified and cannot decide permissions. Pass snapshots, uploads and pass
+RPCs enforce the grant plus the global account switch. Normal snapshots omit
+unauthorized pass numbers. The daily admin password is the explicit testing
+exception; it creates no persistent grant. Metadata/attendance authorization
+remains a separate Phase 1 decision. Revocation emits an event; native app
+activation has a maximum five-minute online-refreshed lease. Deploy app and
+server together. Bot configuration is held in an ignored private environment
+file, with no token in source or tests.

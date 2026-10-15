@@ -29,8 +29,10 @@ class TelegramBot:
         self.service = service
         self.base = 'https://api.telegram.org/bot' + token
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(POLL_TIMEOUT + 10))
+        self.username = ''
         self.offset = 0
         self.running = True
+        self.login_tasks = set()
         self.pending = {}          # chat_id -> 'await_label'
         self.last_state = {}       # account_id -> last observed state (for alerts)
         parsed = urlparse(public_url or '')
@@ -108,7 +110,11 @@ class TelegramBot:
         if account is None:
             await self.send(chat_id, 'That account no longer exists. Send /menu to start over.')
             return
-        self.service.vault.link_telegram(chat_id, account_id)
+        verified = self.service.agreements.owns(chat_id, account_id)
+        if not verified:
+            await self.send(chat_id, f'Подтвердите, что аккаунт «{account["label"]}» принадлежит вам: войдите через МИРЭА. Только после этого вы сможете управлять разрешениями.',
+                            [[{'text': 'Подтвердить через МИРЭА', 'callback_data': 'renew:' + account_id}]])
+            return
         allowed = account.get('pass_allowed', True)
         if account['state'] == 'valid':
             line = f'“{account["label"]}” is connected and renews automatically.\nAlerts are on — I’ll message you if it ever needs a new login.'
@@ -125,6 +131,8 @@ class TelegramBot:
             page = self.webapp_url.rstrip('/') + '/u/' + account_id
             keyboard.insert(1, [{'text': '🌐 My page', 'web_app': {'url': page}} if page.startswith('https://')
                                 else {'text': '🌐 My page', 'url': page}])
+        for grant in self.service.agreements.grants(chat_id, account_id):
+            keyboard.insert(-1, [{'text': 'Отозвать: ' + grant['label'][:45], 'callback_data': 'revoke:' + grant['id']}])
         await self.send(chat_id, line, keyboard)
 
     # ---- Update handling ------------------------------------------------------
@@ -140,6 +148,16 @@ class TelegramBot:
         if chat_id is None or chat.get('type') != 'private':
             return
         text = (message.get('text') or '').strip()
+        if text.startswith('/start access_'):
+            identifier = text.split(' ', 1)[1][7:]
+            pending = self.service.agreements.preview(identifier)
+            account = self.service.vault.account(pending['account_id']) if pending else None
+            if account:
+                await self.send(chat_id, f'Запросить доступ к пропуску «{account["label"]}» для приложения, из которого вы открыли эту ссылку? Владелец увидит ваш Telegram и сможет отозвать доступ. Подтверждайте только свои запросы.',
+                                [[{'text': 'Запросить доступ', 'callback_data': 'request:' + identifier}]])
+            else:
+                await self.send(chat_id, 'Ссылка истекла или уже использована. Создайте новый запрос в приложении.')
+            return
         if text.startswith('/start') or text.startswith('/menu'):
             self.pending.pop(chat_id, None)
             await self.main_menu(chat_id)
@@ -149,7 +167,7 @@ class TelegramBot:
             if text.startswith('/'):
                 await self.main_menu(chat_id)
                 return
-            await self.start_renewal(chat_id, None, text[:60] or 'Account')
+            await self.queue_login(chat_id, None, text[:60] or 'Account')
             return
         await self.main_menu(chat_id)
 
@@ -157,9 +175,35 @@ class TelegramBot:
         await self.answer(query.get('id'))
         chat_id = ((query.get('message') or {}).get('chat') or {}).get('id')
         data = query.get('data') or ''
-        if chat_id is None:
+        chat = ((query.get('message') or {}).get('chat') or {})
+        sender = query.get('from') or {}
+        if chat_id is None or chat.get('type') != 'private' or sender.get('id') != chat_id:
             return
-        if data == 'mine':
+        agreements = self.service.agreements
+        if data.startswith('request:'):
+            name = ' '.join(str(sender.get(part) or '') for part in ('first_name', 'last_name')).strip()
+            username = sender.get('username')
+            label = f'{name} ' + (f'(@{username}) ' if username else '') + f'· Telegram ID {chat_id}'
+            if agreements.claim(data[8:], chat_id, label):
+                await self.service.changed()
+                await self.send(chat_id, 'Запрос создан. Ожидайте решения владельца; затем вернитесь в приложение и обновите пропуска.')
+                await self.send_requests()
+            else:
+                await self.send(chat_id, 'Запрос недействителен, уже использован или связан с другим Telegram. Создайте новый запрос в приложении.')
+        elif data.startswith('agree:'):
+            parts = data.split(':')
+            if len(parts) == 3 and parts[2] in ('0', '1') and agreements.decide(parts[1], chat_id, parts[2] == '1'):
+                await self.service.changed()
+                await self.edit(chat_id, (query.get('message') or {}).get('message_id'), 'Доступ разрешён.' if parts[2] == '1' else 'Запрос отклонён.', [])
+            else:
+                await self.send(chat_id, 'Решение уже принято, запрос истёк или вы не владелец этого пропуска.')
+        elif data.startswith('revoke:'):
+            if agreements.revoke(data[7:], chat_id):
+                await self.service.changed()
+                await self.send(chat_id, 'Доступ отозван.')
+            else:
+                await self.send(chat_id, 'Разрешение не найдено или вы не владелец.')
+        elif data == 'mine':
             await self.list_accounts(chat_id)
         elif data == 'add':
             self.pending[chat_id] = 'await_label'
@@ -171,10 +215,10 @@ class TelegramBot:
             if account is None:
                 await self.send(chat_id, 'That account no longer exists. Send /menu to start over.')
             else:
-                await self.start_renewal(chat_id, account['id'], account['label'])
+                await self.queue_login(chat_id, account['id'], account['label'])
         elif data.startswith('pass:'):
             parts = data.split(':', 2)
-            if len(parts) == 3:
+            if len(parts) == 3 and parts[2] in ('0', '1') and agreements.owns(chat_id, parts[1]):
                 try:
                     self.service.vault.set_pass_allowed(parts[1], parts[2] == '1')
                     await self.service.changed()
@@ -182,11 +226,27 @@ class TelegramBot:
                     pass
             await self.show_account(chat_id, parts[1] if len(parts) == 3 else '')
         elif data.startswith('unlink:'):
-            self.service.vault.unlink_telegram(chat_id, data[7:])
+            self.service.agreements.unlink_owner(chat_id, data[7:])
+            await self.service.changed()
             await self.send(chat_id, '🔕 Alerts off for that account.')
             await self.list_accounts(chat_id)
         else:
             await self.main_menu(chat_id)
+
+    async def queue_login(self, chat_id, account_id, label):
+        if len(self.login_tasks) >= 24:
+            await self.send(chat_id, 'Сервер занят входами. Повторите попытку позже.')
+            return
+        async def work():
+            try:
+                await self.start_renewal(chat_id, account_id, label)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await self.send(chat_id, 'Не удалось завершить вход. Повторите попытку из /menu.')
+        task = asyncio.create_task(work())
+        self.login_tasks.add(task)
+        task.add_done_callback(self.login_tasks.discard)
 
     async def start_renewal(self, chat_id, account_id, label):
         try:
@@ -213,10 +273,11 @@ class TelegramBot:
             linked = job.result_id or account_id
             if linked:
                 try:
-                    self.service.vault.link_telegram(chat_id, linked)
+                    self.service.agreements.verify_owner(chat_id, linked)
                 except KeyError:
                     pass
                 self.last_state[linked] = 'valid'
+                await self.send_requests()
             await self.edit(chat_id, message_id,
                 '✅ Connected! Your account will renew automatically from now on. '
                 'I’ll message you here if it ever needs another login.')
@@ -224,6 +285,20 @@ class TelegramBot:
             await self.edit(chat_id, message_id, '⚠️ ' + (job.error or 'Login did not complete. Try again from /menu.'))
 
     # ---- Background loops ------------------------------------------------------
+    async def send_requests(self):
+        for request in self.service.agreements.notifications():
+            account = self.service.vault.account(request['account_id'])
+            if not account:
+                continue
+            delivered = False
+            for owner in self.service.agreements.owners(account['id']):
+                result = await self.send(owner, f'Запрос доступа к вашему пропуску «{account["label"]}».\nКто: {request["label"]}\nРазрешение действует для этого человека, пока вы его не отзовёте.',
+                                         [[{'text': 'Разрешить', 'callback_data': 'agree:' + request['id'] + ':1'},
+                                           {'text': 'Отклонить', 'callback_data': 'agree:' + request['id'] + ':0'}]])
+                delivered = delivered or result is not None
+            if delivered:
+                self.service.agreements.notified(request['id'])
+
     async def notify_scan(self):
         for account in self.service.vault.accounts():
             previous = self.last_state.get(account['id'], '__new__')
@@ -242,6 +317,7 @@ class TelegramBot:
         while self.running:
             try:
                 await self.notify_scan()
+                await self.send_requests()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -249,10 +325,17 @@ class TelegramBot:
             await asyncio.sleep(NOTIFY_INTERVAL)
 
     async def poll_loop(self):
+        me = await self.call('getMe')
+        if me and isinstance(me.get('username'), str):
+            self.username = me['username']
         await self.call('deleteWebhook', {'drop_pending_updates': 'false'})
         await self.call('setMyCommands', {'commands': json.dumps([
             {'command': 'menu', 'description': 'Manage and renew your MIREA account'}])})
         while self.running:
+            if not self.username:
+                me = await self.call('getMe')
+                if me and isinstance(me.get('username'), str):
+                    self.username = me['username']
             result = await self.call('getUpdates', {'offset': self.offset, 'timeout': POLL_TIMEOUT,
                 'allowed_updates': json.dumps(['message', 'callback_query'])}, timeout=POLL_TIMEOUT + 10)
             if not result:
@@ -275,4 +358,8 @@ class TelegramBot:
 
     async def close(self):
         self.running = False
+        tasks = list(self.login_tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await self.http.aclose()

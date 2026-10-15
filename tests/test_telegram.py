@@ -1,4 +1,5 @@
 import json
+import asyncio
 from types import SimpleNamespace
 import pytest
 from app.main import Service
@@ -40,7 +41,7 @@ def bot(tmp_path):
 
 
 def callback(chat_id, data):
-    return {'id': 'cb', 'message': {'chat': {'id': chat_id}}, 'data': data}
+    return {'id': 'cb', 'from': {'id': chat_id}, 'message': {'chat': {'id': chat_id, 'type': 'private'}}, 'data': data}
 
 
 def message(chat_id, text):
@@ -56,11 +57,11 @@ async def test_start_shows_main_menu(bot):
 
 
 @pytest.mark.asyncio
-async def test_pick_links_chat_and_offers_renew(bot):
+async def test_pick_requires_university_proof_before_linking_owner(bot):
     instance, service = bot
     row = service.vault.upsert('owner', 'Ivan', {'cookie': 'session=owner'})
     await instance.handle_update({'callback_query': callback(100, 'pick:' + row['id'])})
-    assert service.vault.telegram_accounts(100) == [row['id']]
+    assert service.vault.telegram_accounts(100) == []
     assert any('renew:' + row['id'] in k for k in instance.recorder.keyboards())
 
 
@@ -82,6 +83,7 @@ async def test_add_flow_prompts_then_enrolls(bot):
     job = SimpleNamespace(id='j', status='complete', qr=None, result_id=created['id'], error=None)
     service.browser.start = lambda label, account_id=None: (job, 'tok')
     await instance.handle_update({'message': message(100, 'Ivan group 23')})
+    await asyncio.sleep(0)
     assert 100 not in instance.pending
     assert service.vault.telegram_accounts(100) == [created['id']]
     assert any('Connected' in t for t in instance.recorder.texts('editMessageText'))

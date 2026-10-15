@@ -268,6 +268,9 @@ class Vault:
             row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
             db.execute('DELETE FROM telegram_links WHERE account_id=?', (account_id,))
+            for table in ('pass_requests', 'pass_grants'):
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    db.execute(f'DELETE FROM {table} WHERE account_id=?', (account_id,))
             db.execute('DELETE FROM page_sessions WHERE account_id=?', (account_id,))
             self._event(db, account_id, 0, 'deleted', row['group_id'] if row else None)
 
