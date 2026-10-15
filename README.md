@@ -12,8 +12,8 @@ Phones proxy the supported Pulse profile, attendance and NFC RPCs through the
 server. Each NFC activation requests a fresh account-bound Pulse token. The
 server cannot inspect the official Pulse app’s private storage on a phone.
 
-**Anyone who can reach the API can read and use all shared accounts and passes,
-and upload sessions and passes.** The URL is not an authentication secret. Use
+**Anyone who can reach the API can read shared account metadata, use passes
+whose use is enabled, and upload sessions and permitted passes.** The URL is not an authentication secret. Use
 network/firewall/VPN rules or Nginx access rules to restrict access if needed.
 The administration panel still requires its own password and CSRF token for
 account removal and login management. HTTPS encrypts traffic; it does not add
@@ -340,3 +340,24 @@ bash -n install.sh
 Tests use simulated Pulse replies; a real owner-approved sign-in must still be
 verified after installation. Never commit `.env`, cookies, database backups,
 `master.key`, or login capabilities.
+
+## Daily pass testing
+
+The authenticated administration panel shows a separate **Pass testing** password,
+with a copy action and a preview of available test passes. It rotates at midnight
+in Moscow and is stable across server restarts. It is not the panel login password.
+
+In the app, open the debug menu, enable **Pass testing**, and paste that password.
+The app keeps it in platform secure storage for this server until it expires or
+is rejected, then requires the new password. Explicitly disabling testing removes
+it. Test-only pass numbers are excluded from the persisted account snapshot, and
+NFC token expiry is capped at the testing deadline.
+
+`POST /api/debug/pass-testing` validates the daily password with rate limiting.
+Testing API requests use `X-Pass-Test-Key`. This permits pass snapshots, uploads,
+and pass RPCs while the saved `pass_allowed` flag is false, without modifying the
+flag. Pulse identity, live-session checks, account-bound token issuance, owner
+verification-code requirements and attempt limits still apply. Ordinary requests
+cannot retrieve disabled pass numbers. Testing unlocks and exceptional pass
+operations are recorded in `audit_events` without passwords or tokens; records
+are bounded to 30 days and 10,000 entries.

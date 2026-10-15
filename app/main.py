@@ -16,6 +16,7 @@ from .vault import Vault, Conflict, digest
 from .pulse import PulseTransport, BrowserLogins, validate_header
 from .telegram import TelegramBot
 from . import protocol
+from .pass_testing import daily_access, matches as matches_test_password
 
 def _seconds(name, default):
     try:
@@ -223,6 +224,13 @@ def create_app(directory=None, password=None, transport=None, background=True):
     def page_authed(request, account_id):
         return vault.page_session_account(request.cookies.get('page_session', '')) == account_id
 
+    def test_access(request):
+        password = request.headers.get('x-pass-test-key', '')
+        if not password:
+            return None
+        access = daily_access(vault.pass_testing_key)
+        return access if matches_test_password(password, access) else None
+
     def set_page_cookie(response, token):
         secure = os.environ.get('PUBLIC_URL', '').startswith('https://')
         response.set_cookie('page_session', token, max_age=2592000, httponly=True, secure=secure, samesite='lax', path='/')
@@ -295,7 +303,24 @@ def create_app(directory=None, password=None, transport=None, background=True):
             metadata['renewed_at'] = secret.get('renewed_at')
             metadata['page_seen_at'] = row['page_seen_at'] if 'page_seen_at' in row.keys() else None
             accounts.append(metadata)
-        return {'csrf': session['csrf'], 'accounts': accounts, 'cursor': vault.cursor()}
+        return {'csrf': session['csrf'], 'accounts': accounts, 'cursor': vault.cursor(),
+                'pass_testing': daily_access(vault.pass_testing_key)}
+
+    @app.post('/api/debug/pass-testing')
+    async def unlock_pass_testing(body: LoginBody, request: Request):
+        address = request.client.host if request.client else 'unknown'
+        queue = attempts[('pass-testing', address)]
+        now = time.time()
+        while queue and queue[0] < now - 300:
+            queue.popleft()
+        if len(queue) >= 8:
+            raise HTTPException(429, 'Too many attempts; wait a few minutes')
+        queue.append(now)
+        access = daily_access(vault.pass_testing_key)
+        if not matches_test_password(body.password, access):
+            raise HTTPException(401, 'Wrong or expired pass testing password')
+        vault.audit('pass_testing_unlocked', 'daily-admin:' + address)
+        return {'expires_at': access['expires_at'], 'day': access['day']}
 
     @app.post('/panel/api/logout')
     async def logout(request: Request):
@@ -423,8 +448,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if group_id is not None and not 0 < group_id <= 2**63 - 1:
             raise HTTPException(400, 'Invalid group')
         rows = vault.accounts(group_id)
-        passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number'), 'version': row['pass_version']} for row in rows]
-        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id}
+        testing = test_access(request)
+        passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if row['pass_allowed'] or testing else None, 'version': row['pass_version']} for row in rows]
+        return {'accounts': [vault.public(row) for row in rows], 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id,
+                'pass_testing_expires_at': testing['expires_at'] if testing else None}
 
     @app.get('/api/groups')
     async def groups():
@@ -631,8 +658,14 @@ def create_app(directory=None, password=None, transport=None, background=True):
 
     @app.put('/api/accounts/{identifier}/pass')
     async def publish_pass(identifier: str, body: PassBody, request: Request):
-        if vault.account(identifier) is None:
+        row = vault.account(identifier)
+        if row is None:
             raise HTTPException(404, 'Account not found')
+        if not row['pass_allowed']:
+            if test_access(request) is None:
+                raise HTTPException(403, 'Pass use is disabled for this account',
+                                    headers={'X-Pass-Test-Invalid': '1'} if request.headers.get('x-pass-test-key') else None)
+            vault.audit('pass_testing_publish', 'daily-admin', identifier)
         try:
             account = vault.save_pass(identifier, body.number, body.expected_version)
         except ValueError:
@@ -667,7 +700,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
         if row is None:
             raise HTTPException(404, 'Account not found')
         if method in ('pass-token', 'pass-code', 'pass-issue') and not row['pass_allowed']:
-            raise HTTPException(403, 'Pass use is disabled for this account')
+            if test_access(request) is None:
+                raise HTTPException(403, 'Pass use is disabled for this account',
+                                    headers={'X-Pass-Test-Invalid': '1'} if request.headers.get('x-pass-test-key') else None)
+            vault.audit('pass_testing_' + method, 'daily-admin', identifier)
         if method in ('pass-code', 'pass-issue'):
             limit_key = (method, identifier)
             queue = attempts[limit_key]

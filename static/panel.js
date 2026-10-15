@@ -1,5 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
+let testingPasses = false;
 let csrf = '', currentJob = null, accounts = [], syncing = false, editingGroup = null;
 function notice(message) { $('notice').textContent = message; }
 async function api(path, method = 'GET', body) {
@@ -45,6 +46,9 @@ async function refresh() {
     $('account-count').textContent = String(accounts.length); $('empty-accounts').hidden = accounts.length > 0;
     $('accounts').replaceChildren(...accounts.map(renderAccount));
     $('server-url').value = location.origin;
+    $('pass-test-password').value = data.pass_testing.password;
+    $('pass-test-expiry').textContent = 'Rotates at ' + date(data.pass_testing.expires_at) + ' (midnight in Moscow).';
+    if (testingPasses) await previewTestPasses();
   } catch (error) { if ($('panel').hidden === false) notice(error.message); }
   finally { syncing = false; }
 }
@@ -88,6 +92,24 @@ $('new-account').onclick = () => $('account-dialog').showModal();
 $('account-form').addEventListener('submit', async event => { event.preventDefault(); try { await startLogin($('account-label').value); $('account-dialog').close(); $('account-form').reset(); } catch (error) { notice(error.message); } });
 $('copy-server').onclick = () => copy('server-url'); $('copy-owner').onclick = () => copy('owner-link');
 $('close-enroll').onclick = async () => { if (currentJob) await api('logins/' + currentJob, 'DELETE').catch(error => notice(error.message)); currentJob = null; $('enroll-card').hidden = true; };
-$('sign-out').onclick = async () => { try { await api('logout', 'POST'); $('panel').hidden = true; $('sign-in').hidden = false; $('enroll-card').hidden = true; currentJob = null; csrf = ''; } catch (error) { notice(error.message); } };
+$('sign-out').onclick = async () => { testingPasses = false; $('pass-test-password').value = ''; $('pass-test-status').textContent = ''; try { await api('logout', 'POST'); $('panel').hidden = true; $('sign-in').hidden = false; $('enroll-card').hidden = true; currentJob = null; csrf = ''; } catch (error) { notice(error.message); } };
 document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => { button.closest('dialog').close(); }; });
 refresh(); setInterval(() => { if (!$('panel').hidden) refresh(); }, 5000);
+
+async function previewTestPasses() {
+  const response = await fetch('/api/accounts', {
+    headers: { 'X-Pass-Test-Key': $('pass-test-password').value }, cache: 'no-store',
+  });
+  if (!response.ok) throw Error('Could not preview pass testing.');
+  const result = await response.json();
+  const count = (result.passes || []).filter(pass => pass.number).length;
+  $('pass-test-status').textContent = `${count} stored passes available for testing. Owner agreement settings are unchanged.`;
+}
+$('copy-pass-test').onclick = () => copy('pass-test-password');
+$('toggle-pass-test').onclick = async () => {
+  testingPasses = !testingPasses;
+  $('toggle-pass-test').setAttribute('aria-pressed', String(testingPasses));
+  $('toggle-pass-test').textContent = testingPasses ? 'Stop test preview' : 'Preview test passes';
+  if (!testingPasses) { $('pass-test-status').textContent = ''; return; }
+  try { await previewTestPasses(); } catch (error) { notice(error.message); }
+};

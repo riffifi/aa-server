@@ -42,12 +42,15 @@ class Vault:
         except FileExistsError:
             pass
         self.cipher = Fernet(key_file.read_bytes().strip())
+        self.pass_testing_key = hashlib.sha256(b'pass-testing-key\0' + key_file.read_bytes().strip()).digest()
         self.lock = threading.RLock()
         self.db = sqlite3.connect(directory / 'sessions.sqlite3', check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.executescript('''
           CREATE TABLE IF NOT EXISTS config(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL, account_id TEXT, actor TEXT NOT NULL, created REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, pulse_id TEXT UNIQUE NOT NULL,
             label TEXT NOT NULL, group_id INTEGER, group_name TEXT, secret TEXT NOT NULL,
             state TEXT NOT NULL, expires_at REAL, checked_at REAL NOT NULL, version INTEGER NOT NULL,
@@ -341,3 +344,10 @@ class Vault:
 
     def close(self):
         self.db.close()
+
+    def audit(self, action, actor, account_id=None):
+        with self.transaction() as db:
+            db.execute('INSERT INTO audit_events(action,account_id,actor,created) VALUES(?,?,?,?)',
+                       (action, account_id, actor, time.time()))
+            db.execute('DELETE FROM audit_events WHERE created<?', (time.time() - 30 * 86400,))
+            db.execute('DELETE FROM audit_events WHERE id NOT IN (SELECT id FROM audit_events ORDER BY id DESC LIMIT 10000)')
