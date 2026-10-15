@@ -43,3 +43,12 @@ prepared under `integrations/telegram-relay`; deployment needs the user's
 Cloudflare account access or the URL and shared secret of a Worker they deploy.
 Its code does not require DNS or server-wide routing changes. Live owner/login,
 request, approval and revocation checks remain pending until that route works.
+
+## Prepared relay validation
+
+The optional relay and server configuration pass 92 Python tests and four Node
+Worker tests. The relay source is ready to publish; no Cloudflare account access
+is connected. The live container remains on the already deployed core `eb6d60f`
+until the relay URL and secrets can be configured. The install script's executable
+bit is now tracked in Git, preserving the intent of the mode change found on the
+remote checkout; `bash -n` and `./install.sh --check` pass.
