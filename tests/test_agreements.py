@@ -85,6 +85,7 @@ def test_denial_expiry_replay_and_same_person_on_second_phone(setup):
     assert agreements.decide(approved, 100, True)
     second = request(service, owner, OTHER)
     assert agreements.status(owner, OTHER) == 'approved'
+    assert agreements.notifications() == []
     assert not agreements.claim(second, 301, 'Wrong person')
     grant = agreements.grants(100, owner)[0]
     assert agreements.revoke(grant['id'], 100)

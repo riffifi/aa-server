@@ -184,9 +184,10 @@ class TelegramBot:
             name = ' '.join(str(sender.get(part) or '') for part in ('first_name', 'last_name')).strip()
             username = sender.get('username')
             label = f'{name} ' + (f'(@{username}) ' if username else '') + f'· Telegram ID {chat_id}'
-            if agreements.claim(data[8:], chat_id, label):
+            state = agreements.claim(data[8:], chat_id, label)
+            if state:
                 await self.service.changed()
-                await self.send(chat_id, 'Запрос создан. Ожидайте решения владельца; затем вернитесь в приложение и обновите пропуска.')
+                await self.send(chat_id, 'Доступ уже разрешён. Вернитесь в приложение и обновите пропуска.' if state == 'approved' else 'Запрос создан. Ожидайте решения владельца; затем вернитесь в приложение и обновите пропуска.')
                 await self.send_requests()
             else:
                 await self.send(chat_id, 'Запрос недействителен, уже использован или связан с другим Telegram. Создайте новый запрос в приложении.')

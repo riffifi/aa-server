@@ -101,15 +101,18 @@ class Agreements:
         with self.vault.transaction() as db:
             row = db.execute("SELECT * FROM pass_requests WHERE id=? AND state='link' AND expires>?", (identifier, now)).fetchone()
             if not row or self.vault.account(row['account_id']) is None:
-                return False
+                return None
             client = db.execute('SELECT telegram_id FROM pass_clients WHERE key_hash=?', (row['client_hash'],)).fetchone()
             if client and client[0] != telegram_id:
-                return False
+                return None
+            owners = self.owners(row['account_id'])
+            grant = db.execute('SELECT allowed FROM pass_grants WHERE account_id=? AND telegram_id=?', (row['account_id'], telegram_id)).fetchone()
+            state = 'approved' if telegram_id in owners or (owners and grant and grant[0]) else 'pending'
             db.execute('INSERT OR REPLACE INTO pass_clients VALUES(?,?,?)', (row['client_hash'], telegram_id, label[:160]))
-            db.execute("UPDATE pass_requests SET telegram_id=?,label=?,state='pending',expires=? WHERE id=?", (telegram_id, label[:160], now + 7 * 86400, identifier))
+            db.execute('UPDATE pass_requests SET telegram_id=?,label=?,state=?,expires=? WHERE id=?', (telegram_id, label[:160], state, now + 7 * 86400, identifier))
             self._event(db, row['account_id'])
         self.vault.audit('pass_requested', 'telegram:' + str(telegram_id), row['account_id'])
-        return True
+        return state
 
     def notifications(self):
         with self.vault.transaction() as db:
