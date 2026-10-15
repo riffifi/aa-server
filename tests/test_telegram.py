@@ -120,3 +120,26 @@ async def test_https_public_url_offers_mini_app_button(tmp_path):
     await instance.main_menu(100)
     assert any('web_app' in k for k in instance.recorder.keyboards())
     vault.close()
+
+
+@pytest.mark.asyncio
+async def test_authenticated_relay_keeps_bot_token_out_of_request_url(bot):
+    import httpx
+    _, service = bot
+    async def handle(request):
+        assert str(request.url) == 'https://relay.example/getMe'
+        assert request.headers['authorization'] == 'Bearer a-private-relay-key-at-least-32-characters'
+        assert 'secret-test-token' not in str(request.url)
+        return httpx.Response(200, json={'ok': True, 'result': {'username': 'test_bot'}})
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    instance = TelegramBot('secret-test-token', service, http=http,
+                           relay_url='https://relay.example', relay_key='a-private-relay-key-at-least-32-characters')
+    assert await instance.call('getMe') == {'username': 'test_bot'}
+    await instance.close()
+
+
+@pytest.mark.parametrize('url,key', [('http://relay.example', 'x' * 32), ('https://user:password@relay.example', 'x' * 32), ('https://relay.example?token=secret', 'x' * 32), ('https://relay.example', ''), ('', 'x' * 32)])
+def test_invalid_relay_configuration_is_rejected(bot, url, key):
+    _, service = bot
+    with pytest.raises(ValueError, match='TELEGRAM_RELAY_URL'):
+        TelegramBot('test-token', service, relay_url=url, relay_key=key)

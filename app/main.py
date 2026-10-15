@@ -181,7 +181,9 @@ def create_app(directory=None, password=None, transport=None, background=True):
             service.refresh_task = asyncio.create_task(service.refresh_loop())
             token = os.environ.get('TELEGRAM_TOKEN', '').strip()
             if token:
-                bot = TelegramBot(token, service, os.environ.get('PUBLIC_URL', ''))
+                bot = TelegramBot(token, service, os.environ.get('PUBLIC_URL', ''),
+                                  relay_url=os.environ.get('TELEGRAM_RELAY_URL', '').strip(),
+                                  relay_key=os.environ.get('TELEGRAM_RELAY_KEY', '').strip())
                 app.state.telegram = bot
                 service.telegram = bot
                 bot.task = asyncio.create_task(bot.run())

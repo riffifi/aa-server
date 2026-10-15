@@ -24,10 +24,16 @@ STATUS_TEXT = {
 
 
 class TelegramBot:
-    def __init__(self, token, service, public_url='', http=None):
+    def __init__(self, token, service, public_url='', http=None, relay_url='', relay_key=''):
         self.token = token
         self.service = service
-        self.base = 'https://api.telegram.org/bot' + token
+        parsed_relay = urlparse(relay_url)
+        if bool(relay_url) != bool(relay_key) or (relay_url and (
+            parsed_relay.scheme != 'https' or not parsed_relay.hostname or parsed_relay.username or
+            parsed_relay.password or parsed_relay.query or parsed_relay.fragment or len(relay_key) < 32)):
+            raise ValueError('Set a valid HTTPS TELEGRAM_RELAY_URL and TELEGRAM_RELAY_KEY together')
+        self.base = relay_url.rstrip('/') if relay_url else 'https://api.telegram.org/bot' + token
+        self.relay_key = relay_key
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(POLL_TIMEOUT + 10))
         self.username = ''
         self.offset = 0
@@ -42,6 +48,7 @@ class TelegramBot:
     async def call(self, method, data=None, files=None, timeout=None):
         try:
             response = await self.http.post(f'{self.base}/{method}', data=data or {}, files=files,
+                                             headers={'Authorization': 'Bearer ' + self.relay_key} if self.relay_key else {},
                                              timeout=timeout or 20)
             payload = response.json()
             return payload.get('result') if payload.get('ok') else None

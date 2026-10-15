@@ -382,3 +382,13 @@ verification-code requirements and attempt limits still apply. Ordinary requests
 cannot retrieve disabled pass numbers. Testing unlocks and exceptional pass
 operations are recorded in `audit_events` without passwords or tokens; records
 are bounded to 30 days and 10,000 entries.
+
+### Telegram reachability
+
+If the origin cannot reach Telegram directly, the optional authenticated
+[Cloudflare Worker relay](integrations/telegram-relay/README.md) provides a
+bot-specific route. Set `TELEGRAM_RELAY_URL` and `TELEGRAM_RELAY_KEY` together;
+leave both empty for direct access. The Worker has a separate relay secret and
+its own secret bot-token binding. The relay settings affect only Telegram.
+See [the deployment record](docs/deployment-2026-10-16.md) for current verification
+and outstanding live checks.

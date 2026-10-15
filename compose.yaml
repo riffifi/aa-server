@@ -22,6 +22,8 @@ services:
       MAX_ACTIVE_LOGINS: ${MAX_ACTIVE_LOGINS:-24}
       LOGIN_TTL_SECONDS: ${LOGIN_TTL_SECONDS:-600}
       TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:-}
+      TELEGRAM_RELAY_URL: ${TELEGRAM_RELAY_URL:-}
+      TELEGRAM_RELAY_KEY: ${TELEGRAM_RELAY_KEY:-}
     volumes:
       - session_data:/data
   nginx:
