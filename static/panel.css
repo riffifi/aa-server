@@ -305,3 +305,11 @@ button,.btnlink { color:#111116; }
 .img, img { border-color:var(--line); }
 .picker-shell .topbar-link { display:none; }
 .picker-shell .topbar::after { content:"MIREA  /  SESSION SYNC"; color:var(--muted); font:600 .66rem "Geist Mono",ui-monospace,monospace; letter-spacing:.1em; }
+.admin-layout { display:block; }
+.admin-content { min-width:0; width:100%; }
+.dashboard-heading { align-items:flex-end; }
+.dashboard-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+@media (max-width:700px) {
+  .dashboard-heading { align-items:flex-start; }
+  .dashboard-actions { width:100%; justify-content:flex-start; }
+}
