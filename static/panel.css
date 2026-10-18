@@ -273,3 +273,35 @@ h1 span { color:var(--accent); }
   .flow-step { gap:6px; font-size:.64rem; }
   .site-footer { flex-direction:column; gap:5px; }
 }
+
+/* The requested square, always-dark visual system */
+:root {
+  color-scheme: dark;
+  --canvas:#08090b; --surface:#111216; --surface-soft:#191a20;
+  --ink:#f2f2f4; --muted:#a0a1aa; --line:#303138;
+  --accent:#c4bcff; --accent-strong:#d8d2ff; --accent-soft:#262438;
+  --success:#83d6ac; --success-bg:#193326;
+  --warning:#efc66f; --warning-bg:#382f1d;
+  --danger:#ff9cad; --danger-bg:#3b2229;
+  --shadow:0 20px 60px #0008;
+  background:var(--canvas); color:var(--ink);
+}
+*, *::before, *::after { border-radius:0 !important; }
+body { background:radial-gradient(ellipse at 5% 0%,#211f32 0,transparent 34rem),radial-gradient(ellipse at 100% 10%,#191b2b 0,transparent 30rem),var(--canvas); }
+button,.btnlink { color:#111116; }
+.brand-mark,.eyebrow::before { background:#f2f2f4; color:#111116; }
+.topbar { border-color:var(--line); background:transparent; }
+.topbar-context { border-color:var(--line); color:var(--muted); }
+.access-card,.surface,.admin-rail { border-color:var(--line); background:var(--surface); box-shadow:var(--shadow); }
+.access-card::after { border-color:#373444; }
+.badge { background:#27282e; color:#dedee3; }
+.row { border-color:var(--line); }
+.site-footer { border-color:var(--line); }
+.brand,.brand:hover { color:var(--ink); }
+.secondary { background:#1c1d23; color:var(--ink); }
+.secondary:hover { background:var(--accent-soft); color:var(--accent-strong); }
+.quiet { color:var(--muted); }
+.quiet:hover { background:#202127; color:var(--ink); }
+.img, img { border-color:var(--line); }
+.picker-shell .topbar-link { display:none; }
+.picker-shell .topbar::after { content:"MIREA  /  SESSION SYNC"; color:var(--muted); font:600 .66rem "Geist Mono",ui-monospace,monospace; letter-spacing:.1em; }

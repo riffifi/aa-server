@@ -2,6 +2,17 @@
 const $ = id => document.getElementById(id);
 let currentJob = null, currentBase = null;
 
+// The admin route is intentionally hidden in the home page header. Five
+// consecutive clicks on the brand open it; clicking elsewhere resets the count.
+let adminBrandClicks = 0;
+document.addEventListener('click', event => {
+  const brand = event.target.closest('.picker-shell .brand');
+  if (!brand) { adminBrandClicks = 0; return; }
+  event.preventDefault();
+  adminBrandClicks += 1;
+  if (adminBrandClicks === 5) location.assign('/panel');
+}, true);
+
 // Telegram injects window.Telegram.WebApp only when the page is opened as a mini
 // app (and its script is reachable). Everything below works as a normal web page
 // whether or not that is present; this is a progressive enhancement only.
