@@ -67,7 +67,12 @@ class TelegramBot:
             try:
                 payload = response.json()
             except (ValueError, json.JSONDecodeError):
-                logger.warning('Telegram API %s returned non-JSON HTTP %s', method, response.status_code)
+                detail = response.text[:200]
+                for secret in (self.token, self.relay_key, self.proxy_key):
+                    if secret:
+                        detail = detail.replace(secret, '[redacted]')
+                logger.warning('Telegram API %s returned non-JSON HTTP %s (%s): %s',
+                               method, response.status_code, response.headers.get('content-type', 'unknown'), detail)
                 return None
             if not isinstance(payload, dict) or not payload.get('ok'):
                 description = str(payload.get('description', 'unspecified API error')) if isinstance(payload, dict) else 'invalid response'
