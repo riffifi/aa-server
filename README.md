@@ -390,5 +390,10 @@ If the origin cannot reach Telegram directly, the optional authenticated
 bot-specific route. Set `TELEGRAM_RELAY_URL` and `TELEGRAM_RELAY_KEY` together;
 leave both empty for direct access. The Worker has a separate relay secret and
 its own secret bot-token binding. The relay settings affect only Telegram.
+The path-based Worker pattern can also be used by setting `TELEGRAM_PROXY_URL`
+to the Worker origin and `TELEGRAM_PROXY_KEY` to its `PROXY_KEY` secret. Leave
+the relay variables empty in this mode. The bot will call
+`<worker>/<key>/bot<TOKEN>/<method>`; unlike the authenticated relay, this form
+includes the bot token in the upstream URL path. Configure only one proxy mode.
 See [the deployment record](docs/deployment-2026-10-16.md) for current verification
 and outstanding live checks.

@@ -24,7 +24,7 @@ STATUS_TEXT = {
 
 
 class TelegramBot:
-    def __init__(self, token, service, public_url='', http=None, relay_url='', relay_key=''):
+    def __init__(self, token, service, public_url='', http=None, relay_url='', relay_key='', proxy_url='', proxy_key=''):
         self.token = token
         self.service = service
         parsed_relay = urlparse(relay_url)
@@ -32,7 +32,17 @@ class TelegramBot:
             parsed_relay.scheme != 'https' or not parsed_relay.hostname or parsed_relay.username or
             parsed_relay.password or parsed_relay.query or parsed_relay.fragment or len(relay_key) < 32)):
             raise ValueError('Set a valid HTTPS TELEGRAM_RELAY_URL and TELEGRAM_RELAY_KEY together')
-        self.base = relay_url.rstrip('/') if relay_url else 'https://api.telegram.org/bot' + token
+        parsed_proxy = urlparse(proxy_url)
+        if bool(proxy_url) != bool(proxy_key) or (proxy_url and (
+            parsed_proxy.scheme != 'https' or not parsed_proxy.hostname or parsed_proxy.username or
+            parsed_proxy.password or parsed_proxy.query or parsed_proxy.fragment or parsed_proxy.path not in ('', '/') or
+            len(proxy_key) < 16 or not all(char.isascii() and (char.isalnum() or char in '_-') for char in proxy_key))):
+            raise ValueError('Set a valid HTTPS TELEGRAM_PROXY_URL and TELEGRAM_PROXY_KEY together')
+        if relay_url and proxy_url:
+            raise ValueError('Configure only one Telegram relay or proxy')
+        self.base = (relay_url.rstrip('/') if relay_url else
+                     f'{proxy_url.rstrip("/")}/{proxy_key}/bot{token}' if proxy_url else
+                     'https://api.telegram.org/bot' + token)
         self.relay_key = relay_key
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(POLL_TIMEOUT + 10))
         self.username = ''
