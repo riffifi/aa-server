@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hmac
 import json
+import logging
 import os
 import time
 from collections import defaultdict, deque
@@ -18,6 +19,8 @@ from .telegram import TelegramBot
 from .agreements import Agreements
 from . import protocol
 from .pass_testing import daily_access, matches as matches_test_password
+
+logger = logging.getLogger(__name__)
 
 def _seconds(name, default):
     try:
@@ -181,14 +184,18 @@ def create_app(directory=None, password=None, transport=None, background=True):
             service.refresh_task = asyncio.create_task(service.refresh_loop())
             token = os.environ.get('TELEGRAM_TOKEN', '').strip()
             if token:
-                bot = TelegramBot(token, service, os.environ.get('PUBLIC_URL', ''),
-                                  relay_url=os.environ.get('TELEGRAM_RELAY_URL', '').strip(),
-                                  relay_key=os.environ.get('TELEGRAM_RELAY_KEY', '').strip(),
-                                  proxy_url=os.environ.get('TELEGRAM_PROXY_URL', '').strip(),
-                                  proxy_key=os.environ.get('TELEGRAM_PROXY_KEY', '').strip())
-                app.state.telegram = bot
-                service.telegram = bot
-                bot.task = asyncio.create_task(bot.run())
+                try:
+                    bot = TelegramBot(token, service, os.environ.get('PUBLIC_URL', ''),
+                                      relay_url=os.environ.get('TELEGRAM_RELAY_URL', '').strip(),
+                                      relay_key=os.environ.get('TELEGRAM_RELAY_KEY', '').strip(),
+                                      proxy_url=os.environ.get('TELEGRAM_PROXY_URL', '').strip(),
+                                      proxy_key=os.environ.get('TELEGRAM_PROXY_KEY', '').strip())
+                except ValueError as error:
+                    logger.error('Telegram bot disabled by invalid configuration: %s', error)
+                else:
+                    app.state.telegram = bot
+                    service.telegram = bot
+                    bot.task = asyncio.create_task(bot.run())
         yield
         if bot is not None:
             bot.running = False

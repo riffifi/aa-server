@@ -7,10 +7,13 @@ with the variable unset the server behaves exactly as before.
 """
 import asyncio
 import json
+import logging
 import time
 from urllib.parse import urlparse
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 POLL_TIMEOUT = 30
 NOTIFY_INTERVAL = 60
@@ -44,6 +47,7 @@ class TelegramBot:
                      f'{proxy_url.rstrip("/")}/{proxy_key}/bot{token}' if proxy_url else
                      'https://api.telegram.org/bot' + token)
         self.relay_key = relay_key
+        self.proxy_key = proxy_key
         self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(POLL_TIMEOUT + 10))
         self.username = ''
         self.offset = 0
@@ -60,9 +64,21 @@ class TelegramBot:
             response = await self.http.post(f'{self.base}/{method}', data=data or {}, files=files,
                                              headers={'Authorization': 'Bearer ' + self.relay_key} if self.relay_key else {},
                                              timeout=timeout or 20)
-            payload = response.json()
-            return payload.get('result') if payload.get('ok') else None
-        except Exception:
+            try:
+                payload = response.json()
+            except (ValueError, json.JSONDecodeError):
+                logger.warning('Telegram API %s returned non-JSON HTTP %s', method, response.status_code)
+                return None
+            if not isinstance(payload, dict) or not payload.get('ok'):
+                description = str(payload.get('description', 'unspecified API error')) if isinstance(payload, dict) else 'invalid response'
+                for secret in (self.token, self.relay_key, self.proxy_key):
+                    if secret:
+                        description = description.replace(secret, '[redacted]')
+                logger.warning('Telegram API %s failed (HTTP %s): %s', method, response.status_code, description[:240])
+                return None
+            return payload.get('result')
+        except Exception as error:
+            logger.warning('Telegram API %s request failed (%s)', method, type(error).__name__)
             return None
 
     async def send(self, chat_id, text, keyboard=None):
@@ -338,14 +354,15 @@ class TelegramBot:
                 await self.send_requests()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                pass
+            except Exception as error:
+                logger.exception('Telegram notification loop failed (%s)', type(error).__name__)
             await asyncio.sleep(NOTIFY_INTERVAL)
 
     async def poll_loop(self):
         me = await self.call('getMe')
         if me and isinstance(me.get('username'), str):
             self.username = me['username']
+            logger.info('Telegram bot @%s connected; polling updates', self.username)
         await self.call('deleteWebhook', {'drop_pending_updates': 'false'})
         await self.call('setMyCommands', {'commands': json.dumps([
             {'command': 'menu', 'description': 'Manage and renew your MIREA account'}])})
@@ -373,6 +390,8 @@ class TelegramBot:
             await asyncio.gather(self.poll_loop(), self.notify_loop())
         except asyncio.CancelledError:
             raise
+        except Exception as error:
+            logger.exception('Telegram bot stopped unexpectedly (%s)', type(error).__name__)
 
     async def close(self):
         self.running = False
