@@ -313,3 +313,13 @@ button,.btnlink { color:#111116; }
   .dashboard-heading { align-items:flex-start; }
   .dashboard-actions { width:100%; justify-content:flex-start; }
 }
+.dashboard-grid { grid-template-columns:minmax(0,1fr); }
+.dashboard-grid .side-stack { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; }
+.account-admin .row { display:grid; grid-template-columns:minmax(0,1fr); align-items:stretch; gap:12px; }
+.account-admin .row-body { display:block; width:100%; min-width:0; }
+.account-admin .row-body > .meta { display:inline-block; max-width:100%; margin:8px 18px 0 0; vertical-align:top; overflow-wrap:normal; word-break:normal; }
+.account-admin .row .actions { display:grid; width:100%; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.account-admin .row .actions button { width:100%; min-width:0; white-space:normal; }
+@media (max-width:700px) {
+  .dashboard-grid .side-stack { grid-template-columns:minmax(0,1fr); }
+}
