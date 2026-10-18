@@ -1,24 +1,20 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AntiAttendance · My account</title><link rel="stylesheet" href="/static/panel.css"><script src="/static/picker.js" defer></script></head><body><main>
-<header><div class="eyebrow">ANTIATTENDANCE</div><h1>Keep your account connected.</h1><p>Pick your account below to renew its sign-in, or add yourself for the first time. Renewing takes a few seconds with the MIREA app — no password is stored here.</p></header>
-
-<section class="card"><h2>Ваш аккаунт</h2><p>Войдите через университетский аккаунт MIREA — откроется ваша личная страница, где можно продлить сессию и настроить пропуск.</p><div class="actions"><a id="sso" href="/login" class="btnlink">Войти через университет</a></div></section>
-
-<section class="card"><div class="section-heading"><h2>Accounts</h2><span id="account-count"></span></div>
-<div id="accounts" class="rows"></div>
-<p id="empty-accounts" hidden>No accounts yet. Add yours to get started.</p>
-<p id="load-error" hidden></p>
-<div class="actions gap-top"><button id="add-account">Add my account</button><button id="reload" class="secondary">Refresh list</button></div>
-</section>
-
-<section id="login-card" class="card" hidden><div class="section-heading"><h2 id="login-title">Connecting…</h2><button id="close-login" class="quiet">Cancel</button></div>
-<p id="login-status" role="status"></p>
-<img id="qr" width="260" height="260" alt="MIREA sign-in QR code" hidden>
-<a id="qr-link" target="_blank" rel="noopener" hidden>Open the MIREA confirmation page</a>
-<p class="meta">Open the MIREA mobile app and scan this code, or tap the link above in a browser already signed in to MIREA. Only confirm if you meant to connect your account to this group’s server.</p>
-</section>
-
-<dialog id="name-dialog"><form id="name-form"><h2>Add your account</h2><label>Your name or group label<input id="new-label" maxlength="60" autocomplete="off" placeholder="e.g. Ivan · ИНБО-10-23" required></label><p class="meta">This is just a label so you can find your account in the list later.</p><div class="actions"><button>Show login QR</button><button type="button" class="quiet" data-close>Cancel</button></div></form></dialog>
-
-<p id="notice" role="status" aria-live="polite"></p>
-<footer>Sessions renew automatically while MIREA allows it. You only need to come back here when an account shows <strong>Needs re-login</strong>. Admins can manage accounts from the <a href="/panel" class="inline">panel</a>.</footer>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171820"><title>AntiAttendance · My account</title><link rel="stylesheet" href="/static/panel.css"><script src="/static/picker.js" defer></script></head>
+<body><main class="page-shell picker-shell">
+  <nav class="topbar"><a class="brand" href="/"><span class="brand-mark">aa.</span><span>AntiAttendance<small>SESSION SERVER</small></span></a><a class="topbar-link" href="/panel">Admin panel <span aria-hidden="true">↗</span></a></nav>
+  <header class="hero hero-grid">
+    <div class="hero-copy"><div class="eyebrow">YOUR MIREA ACCOUNT SPACE</div><h1>Your account,<br><span>always in sync.</span></h1><p>Connect once. Your session stays ready for the apps and devices you use.</p><div class="hero-meta"><span class="live-dot">Private account space</span><span>No password is stored here</span></div></div>
+    <section class="access-card"><div class="access-icon" aria-hidden="true">↗</div><div class="eyebrow">FIRST TIME HERE?</div><h2>Sign in with MIREA</h2><p>Connect your university account to open your personal page and manage your session.</p><div class="actions"><a id="sso" href="/login" class="btnlink">Continue to MIREA <span aria-hidden="true">→</span></a></div><span class="access-note">Secure QR sign-in · No password saved</span></section>
+  </header>
+  <section class="surface accounts-surface">
+    <div class="section-heading section-heading-large"><div><div class="eyebrow">CONNECTED SESSIONS</div><h2>Your accounts</h2><p>Choose an account to renew its sign-in or manage access.</p></div><div class="count-wrap"><span id="account-count">0</span><span>accounts</span></div></div>
+    <div id="accounts" class="rows"></div>
+    <div id="empty-accounts" class="empty-state" hidden><div class="empty-glyph" aria-hidden="true">+</div><strong>Nothing connected yet</strong><p>Add your first MIREA account and keep its session in sync.</p></div>
+    <p id="load-error" class="inline-error" hidden></p>
+    <div class="actions list-actions"><button id="add-account">Add my account <span aria-hidden="true">+</span></button><button id="reload" class="secondary">Refresh list <span aria-hidden="true">↻</span></button></div>
+  </section>
+  <section id="login-card" class="surface login-surface" hidden><div class="section-heading"><div><div class="eyebrow">SECURE SIGN-IN</div><h2 id="login-title">Connecting…</h2></div><button id="close-login" class="quiet">Cancel</button></div><div class="login-progress"><span class="progress-dot"></span><p id="login-status" role="status"></p></div><img id="qr" width="260" height="260" alt="MIREA sign-in QR code" hidden><a id="qr-link" target="_blank" rel="noopener" hidden>Open the MIREA confirmation page</a><p class="meta">Open the MIREA app and scan the code, or open the link in a browser already signed in to MIREA. Confirm only if you meant to connect your account to this server.</p></section>
+  <dialog id="name-dialog"><form id="name-form"><div class="eyebrow">NEW SESSION</div><h2>Add your account</h2><p>Choose a label to recognize this account later.</p><label>Your name or group label<input id="new-label" maxlength="60" autocomplete="off" placeholder="e.g. Ivan · ИНБО-10-23" required></label><div class="actions dialog-actions"><button>Continue to sign-in <span aria-hidden="true">→</span></button><button type="button" class="quiet" data-close>Cancel</button></div></form></dialog>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <footer class="site-footer"><span>Sessions renew automatically while MIREA allows it.</span><span>Server owners can manage connected accounts from the <a href="/panel" class="inline">admin panel</a>.</span></footer>
 </main></body></html>
