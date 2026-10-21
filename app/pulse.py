@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import io
 import json
 import os
@@ -40,6 +41,8 @@ def validate_header(header):
             raise ValueError('Invalid session header')
         seen.add(name)
     return header
+
+log = logging.getLogger('aa.login')
 
 @dataclass
 class Reply:
@@ -140,6 +143,7 @@ class LoginJob:
     task: object = None
     approval_submitted: bool = False
     approved_at: float | None = None
+    diag: str = ''
 
 class BrowserLogins:
     def __init__(self, vault, changed):
@@ -195,7 +199,7 @@ class BrowserLogins:
         await context.route('**/*', guard)
         return context
 
-    async def capture(self, context):
+    async def capture(self, context, job=None):
         response = await context.request.post(protocol.HOST + protocol.PROFILE_PATH,
             data=protocol.profile_request(), headers={'content-type': 'application/grpc-web+proto', 'x-grpc-web': '1',
               'x-requested-with': 'XMLHttpRequest', 'origin': protocol.HOST}, timeout=15000, max_redirects=0)
@@ -203,6 +207,8 @@ class BrowserLogins:
         if len(body) > MAX_RESPONSE:
             return None
         state, uid = protocol.authentication_state(response.status, response.headers, body)
+        if job is not None:
+            job.diag = f'{response.status}/{state}'
         if state != 'valid':
             return None
         cookies = await context.cookies([protocol.HOST + protocol.PROFILE_PATH])
@@ -346,13 +352,21 @@ class BrowserLogins:
                 await page.goto(protocol.LOGIN_URL, wait_until='domcontentloaded', timeout=45000)
                 while time.time() - job.created < self.login_ttl:
                     if job.approved_at and time.time() - job.approved_at > 90:
-                        job.status, job.error = 'failed', 'MIREA approved the QR, but Pulse did not confirm the session. Start a new login.'
+                        where = urlparse(page.url)
+                        try:
+                            buttons = await asyncio.wait_for(page.locator('button:visible, input[type=submit]:visible, a[role=button]:visible').all_inner_texts(), 5)
+                        except Exception:
+                            buttons = []
+                        diag = f'stuck at {where.hostname}{where.path}; profile={job.diag or "-"}; buttons={[b.strip()[:30] for b in buttons[:8]]}'
+                        log.warning('login %s: %s', job.id[:6], diag)
+                        job.status, job.error = 'failed', 'Pulse не подтвердил сессию (' + diag + '). Начните заново.'
                         return
                     host = urlparse(page.url).hostname
                     if host == 'pulse.mirea.ru':
                         try:
-                            captured = await asyncio.wait_for(self.capture(context), 20)
-                        except Exception:
+                            captured = await asyncio.wait_for(self.capture(context, job), 20)
+                        except Exception as error:
+                            job.diag = 'exc:' + type(error).__name__
                             captured = None  # Cookies/profile can lag behind the redirect.
                         if captured:
                             uid, credentials = captured
@@ -380,13 +394,15 @@ class BrowserLogins:
                                 pass
                     await asyncio.sleep(2)
                 job.status, job.qr = 'expired', None
-        except Conflict:
+        except Conflict as error:
+            log.warning('login %s: conflict: %s', job.id[:6], error)
             job.status, job.error = 'failed', 'The login belongs to a different account or a newer version was stored. Start again.'
         except asyncio.CancelledError:
             job.status, job.qr = 'cancelled', None
             raise
-        except Exception:
+        except Exception as error:
             # Never include browser URLs, cookies or exception contents in logs.
+            log.warning('login %s: %s', job.id[:6], type(error).__name__)
             job.status, job.error = 'failed', 'Could not complete Pulse login. Retry in the panel.'
         finally:
             if context:

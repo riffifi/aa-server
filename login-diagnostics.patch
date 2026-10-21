@@ -1,0 +1,111 @@
+From 52033c93a722756fc967ef5a6ca139b14689f478 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 21 Oct 2026 13:49:43 +0300
+Subject: [PATCH] =?UTF-8?q?=D0=94=D0=B8=D0=B0=D0=B3=D0=BD=D0=BE=D1=81?=
+ =?UTF-8?q?=D1=82=D0=B8=D0=BA=D0=B0=20=D0=B7=D0=B0=D0=B2=D0=B8=D1=81=D1=88?=
+ =?UTF-8?q?=D0=B8=D1=85=20=D0=B2=D1=85=D0=BE=D0=B4=D0=BE=D0=B2:=20=D1=85?=
+ =?UTF-8?q?=D0=BE=D1=81=D1=82/=D0=BF=D1=83=D1=82=D1=8C,=20=D1=81=D1=82?=
+ =?UTF-8?q?=D0=B0=D1=82=D1=83=D1=81=20=D0=BF=D1=80=D0=BE=D1=84=D0=B8=D0=BB?=
+ =?UTF-8?q?=D1=8F,=20=D0=BA=D0=BD=D0=BE=D0=BF=D0=BA=D0=B8=20(=D0=B1=D0=B5?=
+ =?UTF-8?q?=D0=B7=20=D1=81=D0=B5=D0=BA=D1=80=D0=B5=D1=82=D0=BE=D0=B2)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01P3b8TJHMdu4dRYRkddjVCn
+---
+ app/pulse.py | 28 ++++++++++++++++++++++------
+ 1 file changed, 22 insertions(+), 6 deletions(-)
+
+diff --git a/app/pulse.py b/app/pulse.py
+index 61d6b8d..62863ed 100644
+--- a/app/pulse.py
++++ b/app/pulse.py
+@@ -1,4 +1,5 @@
+ import asyncio
++import logging
+ import io
+ import json
+ import os
+@@ -41,6 +42,8 @@ def validate_header(header):
+         seen.add(name)
+     return header
+ 
++log = logging.getLogger('aa.login')
++
+ @dataclass
+ class Reply:
+     status: int
+@@ -140,6 +143,7 @@ class LoginJob:
+     task: object = None
+     approval_submitted: bool = False
+     approved_at: float | None = None
++    diag: str = ''
+ 
+ class BrowserLogins:
+     def __init__(self, vault, changed):
+@@ -195,7 +199,7 @@ class BrowserLogins:
+         await context.route('**/*', guard)
+         return context
+ 
+-    async def capture(self, context):
++    async def capture(self, context, job=None):
+         response = await context.request.post(protocol.HOST + protocol.PROFILE_PATH,
+             data=protocol.profile_request(), headers={'content-type': 'application/grpc-web+proto', 'x-grpc-web': '1',
+               'x-requested-with': 'XMLHttpRequest', 'origin': protocol.HOST}, timeout=15000, max_redirects=0)
+@@ -203,6 +207,8 @@ class BrowserLogins:
+         if len(body) > MAX_RESPONSE:
+             return None
+         state, uid = protocol.authentication_state(response.status, response.headers, body)
++        if job is not None:
++            job.diag = f'{response.status}/{state}'
+         if state != 'valid':
+             return None
+         cookies = await context.cookies([protocol.HOST + protocol.PROFILE_PATH])
+@@ -346,13 +352,21 @@ class BrowserLogins:
+                 await page.goto(protocol.LOGIN_URL, wait_until='domcontentloaded', timeout=45000)
+                 while time.time() - job.created < self.login_ttl:
+                     if job.approved_at and time.time() - job.approved_at > 90:
+-                        job.status, job.error = 'failed', 'MIREA approved the QR, but Pulse did not confirm the session. Start a new login.'
++                        where = urlparse(page.url)
++                        try:
++                            buttons = await asyncio.wait_for(page.locator('button:visible, input[type=submit]:visible, a[role=button]:visible').all_inner_texts(), 5)
++                        except Exception:
++                            buttons = []
++                        diag = f'stuck at {where.hostname}{where.path}; profile={job.diag or "-"}; buttons={[b.strip()[:30] for b in buttons[:8]]}'
++                        log.warning('login %s: %s', job.id[:6], diag)
++                        job.status, job.error = 'failed', 'Pulse не подтвердил сессию (' + diag + '). Начните заново.'
+                         return
+                     host = urlparse(page.url).hostname
+                     if host == 'pulse.mirea.ru':
+                         try:
+-                            captured = await asyncio.wait_for(self.capture(context), 20)
+-                        except Exception:
++                            captured = await asyncio.wait_for(self.capture(context, job), 20)
++                        except Exception as error:
++                            job.diag = 'exc:' + type(error).__name__
+                             captured = None  # Cookies/profile can lag behind the redirect.
+                         if captured:
+                             uid, credentials = captured
+@@ -380,13 +394,15 @@ class BrowserLogins:
+                                 pass
+                     await asyncio.sleep(2)
+                 job.status, job.qr = 'expired', None
+-        except Conflict:
++        except Conflict as error:
++            log.warning('login %s: conflict: %s', job.id[:6], error)
+             job.status, job.error = 'failed', 'The login belongs to a different account or a newer version was stored. Start again.'
+         except asyncio.CancelledError:
+             job.status, job.qr = 'cancelled', None
+             raise
+-        except Exception:
++        except Exception as error:
+             # Never include browser URLs, cookies or exception contents in logs.
++            log.warning('login %s: %s', job.id[:6], type(error).__name__)
+             job.status, job.error = 'failed', 'Could not complete Pulse login. Retry in the panel.'
+         finally:
+             if context:
+-- 
+2.43.0
+
