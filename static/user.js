@@ -116,10 +116,13 @@ async function startLogin() {
     if (!response.ok) throw Error(typeof result.detail === 'string' ? result.detail : 'Не удалось начать вход.');
     currentBase = result.enrollment_path; currentJob = result.id;
     pollLogin();
-  } catch (error) { $('login-status').textContent = error.message; }
+  } catch (error) { $('login-status').textContent = error instanceof TypeError ? 'Нет связи с сервером. Проверьте интернет и нажмите ещё раз.' : error.message; }
 }
 
+let pollTimer = null;
+function schedulePoll(ms) { clearTimeout(pollTimer); pollTimer = setTimeout(pollLogin, ms); }
 async function pollLogin() {
+  clearTimeout(pollTimer);
   const job = currentJob, base = currentBase;
   if (!job) return;
   try {
@@ -141,9 +144,21 @@ async function pollLogin() {
       if (result.status === 'complete') { $('login-card').hidden = true; await load(); }
       return;
     }
-  } catch (error) { $('login-status').textContent = error.message; currentJob = null; return; }
-  if (currentJob === job) setTimeout(pollLogin, 2000);
+  } catch (error) {
+    // TypeError = network failure ("Failed to fetch"): the tab was backgrounded
+    // while the user confirmed in the MIREA app, or the connection blipped.
+    // The login job is still alive on the server, so keep polling.
+    if (error instanceof TypeError) {
+      if (job !== currentJob) return;
+      $('login-status').textContent = 'Нет связи с сервером, пробуем снова…';
+      schedulePoll(3000);
+      return;
+    }
+    $('login-status').textContent = error.message; currentJob = null; return;
+  }
+  if (currentJob === job) schedulePoll(2000);
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && currentJob) pollLogin(); });
 
 $('auth-form').addEventListener('submit', e => { e.preventDefault(); const p = $('auth-password').value; if (p.length >= 4) auth(p); });
 $('renew').onclick = () => startLogin();

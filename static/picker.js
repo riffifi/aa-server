@@ -80,7 +80,10 @@ async function startLogin(label, accountId) {
   }
 }
 
+let pollTimer = null;
+function schedulePoll(ms) { clearTimeout(pollTimer); pollTimer = setTimeout(pollLogin, ms); }
 async function pollLogin() {
+  clearTimeout(pollTimer);
   const job = currentJob, base = currentBase;
   if (!job) return;
   try {
@@ -106,12 +109,20 @@ async function pollLogin() {
       return;
     }
   } catch (error) {
+    if (error instanceof TypeError) {
+      // Network failure (tab backgrounded during MIREA confirmation): keep polling.
+      if (job !== currentJob) return;
+      $('login-status').textContent = 'Connection lost, retrying…';
+      schedulePoll(3000);
+      return;
+    }
     $('login-status').textContent = error.message;
     currentJob = null;
     return;
   }
-  if (currentJob === job) setTimeout(pollLogin, 2000);
+  if (currentJob === job) schedulePoll(2000);
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && currentJob) pollLogin(); });
 
 $('add-account').onclick = () => $('name-dialog').showModal();
 $('reload').onclick = () => loadAccounts();

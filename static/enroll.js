@@ -12,6 +12,9 @@ async function poll() {
     if (!result.qr) { image.hidden = true; link.hidden = true; }
     if (['complete', 'expired', 'failed', 'cancelled'].includes(result.status)) { image.hidden = true; link.hidden = true; return; }
     setTimeout(poll, 2000);
-  } catch (error) { document.getElementById('status').textContent = error.message; }
+  } catch (error) {
+    if (error instanceof TypeError) { document.getElementById('status').textContent = 'Connection lost, retrying…'; setTimeout(poll, 3000); return; }
+    document.getElementById('status').textContent = error.message;
+  }
 }
 poll();

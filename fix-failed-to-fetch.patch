@@ -1,0 +1,95 @@
+diff --git a/static/enroll.js b/static/enroll.js
+index 125e1e6..5bd0f44 100644
+--- a/static/enroll.js
++++ b/static/enroll.js
+@@ -12,6 +12,9 @@ async function poll() {
+     if (!result.qr) { image.hidden = true; link.hidden = true; }
+     if (['complete', 'expired', 'failed', 'cancelled'].includes(result.status)) { image.hidden = true; link.hidden = true; return; }
+     setTimeout(poll, 2000);
+-  } catch (error) { document.getElementById('status').textContent = error.message; }
++  } catch (error) {
++    if (error instanceof TypeError) { document.getElementById('status').textContent = 'Connection lost, retrying…'; setTimeout(poll, 3000); return; }
++    document.getElementById('status').textContent = error.message;
++  }
+ }
+ poll();
+diff --git a/static/picker.js b/static/picker.js
+index 73d1ac4..1b83f54 100644
+--- a/static/picker.js
++++ b/static/picker.js
+@@ -80,7 +80,10 @@ async function startLogin(label, accountId) {
+   }
+ }
+ 
++let pollTimer = null;
++function schedulePoll(ms) { clearTimeout(pollTimer); pollTimer = setTimeout(pollLogin, ms); }
+ async function pollLogin() {
++  clearTimeout(pollTimer);
+   const job = currentJob, base = currentBase;
+   if (!job) return;
+   try {
+@@ -106,12 +109,20 @@ async function pollLogin() {
+       return;
+     }
+   } catch (error) {
++    if (error instanceof TypeError) {
++      // Network failure (tab backgrounded during MIREA confirmation): keep polling.
++      if (job !== currentJob) return;
++      $('login-status').textContent = 'Connection lost, retrying…';
++      schedulePoll(3000);
++      return;
++    }
+     $('login-status').textContent = error.message;
+     currentJob = null;
+     return;
+   }
+-  if (currentJob === job) setTimeout(pollLogin, 2000);
++  if (currentJob === job) schedulePoll(2000);
+ }
++document.addEventListener('visibilitychange', () => { if (!document.hidden && currentJob) pollLogin(); });
+ 
+ $('add-account').onclick = () => $('name-dialog').showModal();
+ $('reload').onclick = () => loadAccounts();
+diff --git a/static/user.js b/static/user.js
+index 98047d9..a8dca8a 100644
+--- a/static/user.js
++++ b/static/user.js
+@@ -116,10 +116,13 @@ async function startLogin() {
+     if (!response.ok) throw Error(typeof result.detail === 'string' ? result.detail : 'Не удалось начать вход.');
+     currentBase = result.enrollment_path; currentJob = result.id;
+     pollLogin();
+-  } catch (error) { $('login-status').textContent = error.message; }
++  } catch (error) { $('login-status').textContent = error instanceof TypeError ? 'Нет связи с сервером. Проверьте интернет и нажмите ещё раз.' : error.message; }
+ }
+ 
++let pollTimer = null;
++function schedulePoll(ms) { clearTimeout(pollTimer); pollTimer = setTimeout(pollLogin, ms); }
+ async function pollLogin() {
++  clearTimeout(pollTimer);
+   const job = currentJob, base = currentBase;
+   if (!job) return;
+   try {
+@@ -141,9 +144,21 @@ async function pollLogin() {
+       if (result.status === 'complete') { $('login-card').hidden = true; await load(); }
+       return;
+     }
+-  } catch (error) { $('login-status').textContent = error.message; currentJob = null; return; }
+-  if (currentJob === job) setTimeout(pollLogin, 2000);
++  } catch (error) {
++    // TypeError = network failure ("Failed to fetch"): the tab was backgrounded
++    // while the user confirmed in the MIREA app, or the connection blipped.
++    // The login job is still alive on the server, so keep polling.
++    if (error instanceof TypeError) {
++      if (job !== currentJob) return;
++      $('login-status').textContent = 'Нет связи с сервером, пробуем снова…';
++      schedulePoll(3000);
++      return;
++    }
++    $('login-status').textContent = error.message; currentJob = null; return;
++  }
++  if (currentJob === job) schedulePoll(2000);
+ }
++document.addEventListener('visibilitychange', () => { if (!document.hidden && currentJob) pollLogin(); });
+ 
+ $('auth-form').addEventListener('submit', e => { e.preventDefault(); const p = $('auth-password').value; if (p.length >= 4) auth(p); });
+ $('renew').onclick = () => startLogin();
