@@ -223,7 +223,42 @@ class BrowserLogins:
     ACCEPT = re.compile(r'продолж|подтверд|разреш|войт|вход|accept|allow|authoriz|continu|confirm|proceed|grant|submit|ок\b|ok\b', re.I)
     REJECT = re.compile(r'отмен|отклон|запрет|назад|cancel|deny|reject|decline|\bback\b|logout|выход|выйти', re.I)
 
+    SKIP = re.compile(r'пропуст|не сейчас|позже|skip|later|not now', re.I)
+
+    async def skip_required_action(self, page):
+        # SSO can insert an optional required action (e.g. "link MAX") before it
+        # returns to Pulse. Its buttons are icon-only or links, so advance() saw
+        # nothing to press. Press only an explicit skip control, never "confirm",
+        # which would start linking a messenger to the student's account.
+        selectors = ['[name=cancel-aia]', '[name*=skip i]', '[id*=skip i]']
+        for selector in selectors:
+            target = page.locator(selector).first
+            try:
+                if await target.count():
+                    await target.click(timeout=3000)
+                    return True
+            except Exception:
+                pass
+        target = page.locator('a, button, input[type=submit], input[type=button], [role=button]').filter(has_text=self.SKIP).first
+        try:
+            if await target.count():
+                await target.click(timeout=3000)
+                return True
+        except Exception:
+            pass
+        for element in await page.locator('input[type=submit], input[type=button]').all():
+            try:
+                if self.SKIP.search(await element.get_attribute('value') or ''):
+                    await element.click(timeout=3000)
+                    return True
+            except Exception:
+                pass
+        return False
+
     async def advance(self, page):
+        if '/login-actions/required-action' in urlparse(getattr(page, 'url', '') or '').path:
+            await self.skip_required_action(page)
+            return
         # After the QR is approved, Pulse/SSO can land on an interstitial — an
         # OAuth consent screen or a plain "continue" page — whose button must be
         # pressed before the Pulse session cookie is issued. Press it ourselves so

@@ -63,3 +63,30 @@ async def test_advance_is_safe_when_page_has_no_locator():
     class Bare:
         pass
     await browser().advance(Bare())  # must not raise
+
+
+def test_required_action_presses_skip_not_confirm():
+    import asyncio
+    from app.pulse import BrowserLogins
+    clicked = []
+
+    class Loc:
+        def __init__(self, items): self.items = items
+        @property
+        def first(self): return Loc(self.items[:1])
+        def filter(self, has_text):
+            return Loc([i for i in self.items if has_text.search(i)])
+        async def count(self): return len(self.items)
+        async def click(self, timeout=None): clicked.append(self.items[0])
+        async def all(self): return []
+
+    class Page:
+        url = 'https://sso.mirea.ru/realms/mirea/login-actions/required-action?execution=x'
+        def locator(self, selector):
+            if selector.startswith('['):
+                return Loc([])
+            return Loc(['Подтвердить через MAX', 'Пропустить'])
+
+    logins = BrowserLogins.__new__(BrowserLogins)
+    asyncio.run(logins.advance(Page()))
+    assert clicked == ['Пропустить']
