@@ -54,7 +54,12 @@ async function poll() {
       } catch (error) { fail(error.message); return; }
     }
     if (['expired', 'failed', 'cancelled'].includes(result.status)) { fail(STATUS[result.status]); return; }
-  } catch (error) { fail(error.message); return; }
+  } catch (error) {
+    // Network failure (tab backgrounded while confirming in the MIREA app):
+    // the login is still running on the server, keep polling.
+    if (error instanceof TypeError && job === currentJob) { $('status').textContent = 'Нет связи с сервером, пробуем снова…'; setTimeout(poll, 3000); return; }
+    fail(error.message); return;
+  }
   if (currentJob === job) setTimeout(poll, 2000);
 }
 

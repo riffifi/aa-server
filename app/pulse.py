@@ -177,6 +177,11 @@ class BrowserLogins:
     async def _context(self, state=None):
         browser = await self._browser()
         context = await browser.new_context(storage_state=state, viewport={'width': 900, 'height': 900})
+        # Playwright's default is 30s per action. advance() touches up to 25
+        # controls, and during a redirect they detach, so each lookup waited the
+        # full 30s and the login sat in "finishing" for many minutes.
+        context.set_default_timeout(5000)
+        context.set_default_navigation_timeout(30000)
         async def guard(route):
             parsed = urlparse(route.request.url)
             # No caller-controlled URL is ever navigated or proxied. Prevent
@@ -248,6 +253,14 @@ class BrowserLogins:
                 await fallback.click(timeout=3000)
             except Exception:
                 pass
+
+    async def safe_advance(self, page):
+        try:
+            await asyncio.wait_for(self.advance(page), 15)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
 
     async def qr_step(self, context, page, job):
         data = await page.evaluate(self.script)
@@ -338,7 +351,7 @@ class BrowserLogins:
                     host = urlparse(page.url).hostname
                     if host == 'pulse.mirea.ru':
                         try:
-                            captured = await self.capture(context)
+                            captured = await asyncio.wait_for(self.capture(context), 20)
                         except Exception:
                             captured = None  # Cookies/profile can lag behind the redirect.
                         if captured:
@@ -349,13 +362,13 @@ class BrowserLogins:
                             return
                         # Not confirmed yet: clear any Pulse "continue"/consent page
                         # that is holding the OAuth callback open.
-                        await self.advance(page)
+                        await self.safe_advance(page)
                     elif host == 'sso.mirea.ru':
                         if job.approval_submitted:
                             # Authentication is already done; press through any
                             # post-login consent or required-action page SSO shows
                             # before it redirects back to Pulse.
-                            await self.advance(page)
+                            await self.safe_advance(page)
                         else:
                             try:
                                 await self.qr_step(context, page, job)
