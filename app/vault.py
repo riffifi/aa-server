@@ -66,6 +66,8 @@ class Vault:
             state TEXT NOT NULL, message TEXT NOT NULL, source TEXT NOT NULL, created REAL NOT NULL);
           CREATE INDEX IF NOT EXISTS marks_account ON marks(account_id, created);
           DROP TABLE IF EXISTS page_sessions;
+          CREATE TABLE IF NOT EXISTS pass_shares(account_id TEXT NOT NULL, grantee_id TEXT NOT NULL,
+            created REAL NOT NULL, PRIMARY KEY(account_id, grantee_id));
         ''')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
@@ -78,6 +80,10 @@ class Vault:
             # Last time the person signed in to the site (the "has logged in" indicator
             # in the panel). NULL means they never have.
             self.db.execute('ALTER TABLE accounts ADD COLUMN page_seen_at REAL')
+        if 'username' not in columns:
+            # The unique AA ID username, copied from signed AA ID tokens (AA ID owns it).
+            self.db.execute('ALTER TABLE accounts ADD COLUMN username TEXT')
+        self.db.execute('CREATE UNIQUE INDEX IF NOT EXISTS accounts_username ON accounts(username)')
         event_columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
         for column in ('group_id', 'previous_group_id'):
             if column not in event_columns:
@@ -130,6 +136,7 @@ class Vault:
 
     def public(self, row):
         data = {key: row[key] for key in ('id', 'label', 'group_id', 'group_name', 'state', 'expires_at', 'checked_at', 'version', 'session_version', 'pass_version', 'updated_at')}
+        data['username'] = row['username'] if 'username' in row.keys() else None
         data['pass_allowed'] = bool(row['pass_allowed']) if 'pass_allowed' in row.keys() else True
         return data
 
@@ -234,6 +241,57 @@ class Vault:
             self._event(db, account_id, version, 'pass_permission')
         return self.public(self.account(account_id))
 
+    def set_username(self, account_id, username):
+        # AA ID guarantees uniqueness; a stale copy on another account is cleared.
+        with self.transaction() as db:
+            row = db.execute('SELECT username FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None or row['username'] == username:
+                return
+            if username:
+                db.execute('UPDATE accounts SET username=NULL WHERE username=? AND id<>?', (username, account_id))
+            db.execute('UPDATE accounts SET username=?,updated_at=? WHERE id=?', (username, time.time(), account_id))
+
+    def search_people(self, query, exclude=None, limit=10):
+        """Accounts whose username starts with the query or whose name contains it."""
+        query = query.strip().lstrip('@').casefold()
+        if len(query) < 2:
+            return []
+        found = []
+        for row in self.accounts():
+            if row['id'] == exclude:
+                continue
+            username = (row['username'] or '').casefold()
+            if username.startswith(query) or query in row['label'].casefold():
+                found.append((username != query, not username.startswith(query), row['label'].casefold(), row))
+        return [row for *_, row in sorted(found, key=lambda item: item[:3])[:limit]]
+
+    def share_pass(self, account_id, grantee_id):
+        with self.transaction() as db:
+            db.execute('INSERT OR IGNORE INTO pass_shares VALUES(?,?,?)', (account_id, grantee_id, time.time()))
+            self._bump(db, account_id)
+
+    def unshare_pass(self, account_id, grantee_id):
+        with self.transaction() as db:
+            gone = db.execute('DELETE FROM pass_shares WHERE account_id=? AND grantee_id=?', (account_id, grantee_id)).rowcount
+            if gone:
+                self._bump(db, account_id)
+            return bool(gone)
+
+    def pass_shared(self, account_id, grantee_id):
+        with self.transaction() as db:
+            return db.execute('SELECT 1 FROM pass_shares WHERE account_id=? AND grantee_id=?', (account_id, grantee_id)).fetchone() is not None
+
+    def pass_shares(self, account_id):
+        with self.transaction() as db:
+            return [dict(row) for row in db.execute('''SELECT accounts.*, pass_shares.created AS shared_at FROM pass_shares
+                JOIN accounts ON accounts.id = pass_shares.grantee_id WHERE pass_shares.account_id=? ORDER BY accounts.label''', (account_id,))]
+
+    def _bump(self, db, account_id):
+        db.execute('UPDATE accounts SET version=version+1,updated_at=? WHERE id=?', (time.time(), account_id))
+        row = db.execute('SELECT version FROM accounts WHERE id=?', (account_id,)).fetchone()
+        if row:
+            self._event(db, account_id, row[0], 'pass_agreement')
+
     def groups(self):
         with self.transaction() as db:
             return [dict(row) for row in db.execute(
@@ -274,6 +332,7 @@ class Vault:
             row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
             db.execute('DELETE FROM telegram_links WHERE account_id=?', (account_id,))
+            db.execute('DELETE FROM pass_shares WHERE account_id=? OR grantee_id=?', (account_id, account_id))
             for table in ('pass_requests', 'pass_grants'):
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     db.execute(f'DELETE FROM {table} WHERE account_id=?', (account_id,))

@@ -31,6 +31,7 @@ function renderAccount(account) {
   const [stateText, tone] = STATE[account.state] || [account.state, ''];
   detail.append(name);
   const meta = el('span', null, 'meta');
+  if (account.username) meta.append(el('span', '@' + account.username), document.createTextNode(' · '));
   meta.append(el('span', account.group_name || (account.group_id ? 'Группа ' + account.group_id : 'без группы')), document.createTextNode(' · '), el('span', stateText, 'mark ' + tone));
   detail.append(meta);
   detail.append(el('span', `Проверена ${date(account.checked_at)} · ${account.automatic_renewal ? 'продлевается сама, последний раз ' + date(account.renewed_at) : 'без автопродления'} · ${account.page_seen_at ? 'на сайте ' + date(account.page_seen_at) : 'на сайт не входил'}`, 'meta'));
@@ -52,7 +53,7 @@ function renderAccount(account) {
 
 function renderList() {
   const query = $('filter').value.trim().toLocaleLowerCase('ru');
-  const shown = accounts.filter(a => !query || (a.label + ' ' + (a.group_name || '')).toLocaleLowerCase('ru').includes(query));
+  const shown = accounts.filter(a => !query || (a.label + ' ' + (a.group_name || '') + ' @' + (a.username || '')).toLocaleLowerCase('ru').includes(query));
   $('account-count').textContent = String(accounts.length);
   $('empty-accounts').hidden = accounts.length > 0;
   $('accounts').replaceChildren(...shown.map(renderAccount));

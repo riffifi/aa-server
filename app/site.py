@@ -36,7 +36,13 @@ class LinkBody(BaseModel):
 
 class MarkBody(BaseModel):
     qr: str = Field(min_length=1, max_length=8192)
-    account_ids: list[str] = Field(min_length=1, max_length=200)
+    account_ids: list[str] | None = Field(default=None, min_length=1, max_length=200)
+    # Mark the person's own group whatever the schedule says (no lesson found,
+    # schedule unavailable, another room): everyone in it with a working session.
+    own_group: bool = False
+
+class ShareBody(BaseModel):
+    account_id: str = Field(min_length=1, max_length=64)
 
 class SettingsBody(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=60)
@@ -44,7 +50,8 @@ class SettingsBody(BaseModel):
 
 def shown(lesson):
     return lesson and {key: lesson[key] for key in ('subject', 'type', 'location', 'teacher')} | {
-        'start': lesson['start'].strftime('%H:%M'), 'end': lesson['end'].strftime('%H:%M')}
+        'start': lesson['start'].strftime('%H:%M'), 'end': lesson['end'].strftime('%H:%M'),
+        'starts_at': schedule.epoch(lesson['start']), 'ends_at': schedule.epoch(lesson['end'])}
 
 def install(app, service, aaid, calendars, static):
     vault = service.vault
@@ -92,6 +99,11 @@ def install(app, service, aaid, calendars, static):
             return RedirectResponse('/?signin=failed', status_code=303)
         token = vault.create_site_session(person_data['id'], person_data['mirea'], person_data.get('group_id'),
                                           person_data.get('group_name'), SESSION_TTL)
+        own = vault.account_by_pulse(person_data['mirea'])
+        if own is not None and own['group_id'] is None and person_data.get('group_id'):
+            # Without a group the person is not shown at any lesson; AA ID knows it.
+            vault.update_group(own['id'], person_data['group_id'], person_data.get('group_name'), own['version'])
+            await service.changed()
         response = RedirectResponse('/', status_code=303)
         response.delete_cookie('aa_state', path='/auth')
         response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True, secure=secure, samesite='strict', path='/')
@@ -129,6 +141,8 @@ def install(app, service, aaid, calendars, static):
         account = vault.upsert(uid, None if existing else 'Без имени', credentials,
                                group_id=None if keep_group else body.group_id,
                                group_name=None if keep_group else body.group_name)
+        if 'usr' in claims:
+            vault.set_username(account['id'], claims['usr'])
         vault.audit('aaid_linked', 'aaid:' + claims['sub'], account['id'])
         await service.changed()
         return {'account_id': account['id']}
@@ -159,7 +173,7 @@ def install(app, service, aaid, calendars, static):
         group_name = session['group_name'] or (own['group_name'] if own else None)
         now = schedule.moscow_now()
         context = {'own': own, 'group_id': group_id, 'group_name': group_name, 'current': None, 'next': None,
-                   'groups': [], 'accounts': [], 'schedule_error': None}
+                   'active': None, 'had_lessons': False, 'groups': [], 'accounts': [], 'schedule_error': None}
         if not group_id:
             return context
         lessons = await calendars.lessons(group_id, now.date())
@@ -167,7 +181,11 @@ def install(app, service, aaid, calendars, static):
             context['schedule_error'] = 'Расписание МИРЭА недоступно'
             return context
         current, upcoming = schedule.current_and_next(lessons, now)
-        context['current'], context['next'] = current, upcoming
+        # Shortly before a lesson its people are already shown, and marks count for it.
+        soon = upcoming if upcoming and (upcoming['start'] - now).total_seconds() <= MARK_LEAD else None
+        context['current'], context['next'], context['active'] = current, upcoming, current or soon
+        context['had_lessons'] = any(lesson['end'] <= now for lesson in lessons)
+        current = current or soon
         if current is None:
             return context
         known = {row['id']: row['name'] for row in vault.groups()}
@@ -187,7 +205,7 @@ def install(app, service, aaid, calendars, static):
     async def state(request: Request):
         session = person(request)
         context = await lesson_context(session)
-        own, current = context['own'], context['current']
+        own, current = context['own'], context['active']
         people = []
         if current is not None:
             rows = context['accounts']
@@ -196,7 +214,7 @@ def install(app, service, aaid, calendars, static):
             names = {group['id']: group['name'] for group in context['groups']}
             for row, here in zip(rows, present):
                 mark = marks.get(row['id'])
-                people.append({'id': row['id'], 'label': row['label'], 'group_id': row['group_id'],
+                people.append({'id': row['id'], 'label': row['label'], 'username': row['username'], 'group_id': row['group_id'],
                                'group_name': row['group_name'] or names.get(row['group_id']),
                                'own': own is not None and row['id'] == own['id'], 'session': row['state'],
                                'inside': here, 'mark': mark and {key: mark[key] for key in ('state', 'message', 'created')}})
@@ -204,7 +222,10 @@ def install(app, service, aaid, calendars, static):
         return {'me': {'group_id': context['group_id'], 'group_name': context['group_name'],
                        'account_id': own['id'] if own else None, 'label': own['label'] if own else None,
                        'connected': bool(own and own['state'] == 'valid')},
-                'lesson': shown(current), 'next': shown(context['next']),
+                'lesson': shown(context['current']), 'next': shown(context['next']),
+                'active': None if current is None else 'now' if context['current'] else 'soon',
+                'had_lessons': context['had_lessons'],
+                'own_group_size': sum(1 for row in vault.accounts(context['group_id']) if row['state'] == 'valid') if context['group_id'] else 0,
                 'schedule_url': schedule.page_url(context['group_id']) if context['group_id'] else schedule.HOST,
                 'schedule_error': context['schedule_error'],
                 'groups': context['groups'], 'people': people, 'aaid_url': aaid.public_url if aaid else None}
@@ -218,12 +239,23 @@ def install(app, service, aaid, calendars, static):
         except ValueError:
             raise HTTPException(400, 'Это не QR-код посещаемости Пульса') from None
         context = await lesson_context(session)
-        if context['current'] is None:
-            raise HTTPException(409, 'Сейчас нет пары')
-        allowed = {row['id']: row for row in context['accounts']}
-        chosen = list(dict.fromkeys(body.account_ids))
+        if body.own_group:
+            if not context['group_id']:
+                raise HTTPException(409, 'Группа не определена')
+            allowed = {row['id']: row for row in vault.accounts(context['group_id'])}
+            chosen = list(dict.fromkeys(body.account_ids)) if body.account_ids else [
+                identifier for identifier, row in allowed.items() if row['state'] == 'valid']
+            if not chosen:
+                raise HTTPException(409, 'В вашей группе нет подключённых людей')
+        else:
+            if context['active'] is None:
+                raise HTTPException(409, 'Сейчас нет пары')
+            if not body.account_ids:
+                raise HTTPException(422, 'Выберите людей')
+            allowed = {row['id']: row for row in context['accounts']}
+            chosen = list(dict.fromkeys(body.account_ids))
         if any(identifier not in allowed for identifier in chosen):
-            raise HTTPException(403, 'Отмечать можно только людей на вашей паре')
+            raise HTTPException(403, 'Отмечать можно только людей на вашей паре' if not body.own_group else 'Отмечать можно только свою группу')
         request_body = protocol.frame(protocol.field(1, token.encode()))
 
         async def one(row):
@@ -240,7 +272,7 @@ def install(app, service, aaid, calendars, static):
         results = []
         for identifier, (result, message) in zip(chosen, outcomes):
             vault.record_mark(identifier, result, message, 'site:' + session['aaid_id'])
-            results.append({'id': identifier, 'state': result, 'message': message})
+            results.append({'id': identifier, 'label': allowed[identifier]['label'], 'state': result, 'message': message})
         return {'results': results}
 
     # The person's own settings, changed on the AA ID site (AA ID token, /api/me/).
@@ -248,12 +280,70 @@ def install(app, service, aaid, calendars, static):
         caller = request.state.aaid
         if caller is None:
             raise HTTPException(401, 'AA ID sign-in required')
-        return vault.account_by_pulse(caller['mirea'])
+        own = vault.account_by_pulse(caller['mirea'])
+        # AA ID owns the username; its signed token carries the current one.
+        if own is not None and 'usr' in caller and own['username'] != caller['usr']:
+            vault.set_username(own['id'], caller['usr'])
+            own = vault.account(own['id'])
+        return own
+
+    def require_own(request):
+        own = own_account(request)
+        if own is None:
+            raise HTTPException(404, 'This MIREA account is not connected to the session server')
+        return own
 
     def settings(own):
         return {'connected': own is not None and own['state'] == 'valid', 'account': own is not None,
                 'label': own['label'] if own else None, 'pass_allowed': bool(own['pass_allowed']) if own else None,
                 'group_name': own['group_name'] if own else None}
+
+    def card(row):
+        return {'account_id': row['id'], 'username': row['username'], 'label': row['label'], 'group_name': row['group_name']}
+
+    def pass_list(own):
+        people = [{**card(row), 'kind': 'aaid', 'id': row['id']} for row in vault.pass_shares(own['id'])]
+        people += [{'kind': 'telegram', 'id': grant['id'], 'account_id': None, 'username': None,
+                    'label': grant['label'], 'group_name': None} for grant in service.agreements.granted(own['id'])]
+        return {'pass_allowed': bool(own['pass_allowed']), 'people': people}
+
+    @app.get('/api/me/people')
+    async def find_people(request: Request, q: str = ''):
+        own = own_account(request)
+        limit(('people', request.state.aaid['sub']), 60, 60)
+        return {'people': [card(row) for row in vault.search_people(q[:60], own['id'] if own else None)]}
+
+    @app.get('/api/me/pass')
+    async def my_pass(request: Request):
+        return pass_list(require_own(request))
+
+    @app.post('/api/me/pass/people')
+    async def share(body: ShareBody, request: Request):
+        own = require_own(request)
+        grantee = vault.account(body.account_id)
+        if grantee is None or grantee['id'] == own['id']:
+            raise HTTPException(404, 'Человек не найден')
+        vault.share_pass(own['id'], grantee['id'])
+        vault.audit('pass_shared', 'aaid:' + request.state.aaid['sub'], own['id'])
+        await service.changed()
+        return pass_list(vault.account(own['id']))
+
+    @app.delete('/api/me/pass/people/{kind}/{identifier}')
+    async def unshare(kind: str, identifier: str, request: Request):
+        own = require_own(request)
+        actor = 'aaid:' + request.state.aaid['sub']
+        if kind == 'aaid':
+            removed = vault.unshare_pass(own['id'], identifier)
+        elif kind == 'telegram':
+            removed = service.agreements.revoke_by_owner_account(identifier, own['id'], actor)
+        else:
+            removed = False
+        if not removed:
+            raise HTTPException(404, 'Такого разрешения нет')
+        if kind == 'aaid':
+            vault.audit('pass_unshared', actor, own['id'])
+        await service.changed()
+        return pass_list(vault.account(own['id']))
 
     @app.get('/api/me/account')
     async def my_account(request: Request):
@@ -261,9 +351,7 @@ def install(app, service, aaid, calendars, static):
 
     @app.put('/api/me/account')
     async def change_my_account(body: SettingsBody, request: Request):
-        own = own_account(request)
-        if own is None:
-            raise HTTPException(404, 'This MIREA account is not connected to the session server')
+        own = require_own(request)
         if body.label is not None:
             try:
                 vault.rename(own['id'], body.label)

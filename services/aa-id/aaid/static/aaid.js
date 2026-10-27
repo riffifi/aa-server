@@ -32,7 +32,11 @@ async function load() {
   showError('');
   try {
     const me = await api('web/me');
-    if (needFresh) { $('account').hidden = true; $('handoff').hidden = true; $('signin').hidden = false; return; }
+    if (needFresh) {
+      $('account').hidden = true; $('handoff').hidden = true; $('signin').hidden = false; $('skip-fresh').hidden = false;
+      $('signin-lead').textContent = 'Сервер AntiAttendance пока не видит вашу сессию МИРЭА, поэтому на паре вас не видно и отметить вас нельзя. Войдите по QR ещё раз, чтобы подключить её.';
+      return;
+    }
     render(me);
   } catch (error) {
     $('account').hidden = true; $('signin').hidden = false;
@@ -55,12 +59,85 @@ async function loadSettings() {
     account = await api('web/account');
     $('settings').hidden = !account.account; $('settings-note').hidden = true;
     $('name').value = account.label === 'Без имени' ? '' : account.label;
-    $('pass-allowed').checked = Boolean(account.pass_allowed);
-    if (account.label && account.label !== 'Без имени') $('who').textContent = account.label + (lastMe && lastMe.group_name ? ' · ' + lastMe.group_name : '');
+    $('username').value = (lastMe && lastMe.username) || '';
+    showWho();
+    if (account.account) await loadPass();
     if (location.hash === '#settings') $('settings').scrollIntoView({ block: 'start' });
   } catch (error) {
-    $('settings').hidden = true; $('settings-note').textContent = error.message; $('settings-note').hidden = false;
+    $('settings').hidden = true; $('pass').hidden = true; $('settings-note').textContent = error.message; $('settings-note').hidden = false;
   }
+}
+
+function showWho() {
+  const name = account && account.label && account.label !== 'Без имени' ? account.label : null;
+  const parts = [lastMe && lastMe.username ? '@' + lastMe.username : null, name, lastMe && lastMe.group_name].filter(Boolean);
+  $('who').textContent = parts.length ? parts.join(' · ') : 'Вы вошли · AA ID';
+}
+
+// Pass: the people allowed to use it, and one switch that blocks everyone, them included.
+let pass = null;
+async function loadPass() {
+  try { renderPass(await api('web/pass')); } catch (error) { $('pass').hidden = true; showError(error.message); }
+}
+
+function personLine(person, extra) {
+  const row = el('div', null, 'row'), body = el('div', null, 'row-body');
+  body.append(el('strong', person.label || (person.username ? '@' + person.username : 'Без имени')));
+  const meta = person.kind === 'telegram' ? 'разрешено в Telegram' : [person.username ? '@' + person.username : null, person.group_name].filter(Boolean).join(' · ');
+  if (meta) body.append(el('span', meta, 'meta'));
+  row.append(body, extra);
+  return row;
+}
+
+function renderPass(data) {
+  pass = data;
+  $('pass').hidden = false;
+  $('pass-state').textContent = data.pass_allowed
+    ? 'Пропуск могут использовать только люди из списка.'
+    : 'Пропуск запрещён всем, даже людям из списка.';
+  $('pass-toggle').textContent = data.pass_allowed ? 'Запретить пропуск всем' : 'Разрешить людям из списка';
+  $('pass-toggle').className = data.pass_allowed ? 'secondary danger' : 'primary';
+  $('pass-empty').hidden = data.people.length > 0;
+  $('pass-people').replaceChildren(...data.people.map(person => {
+    const button = el('button', 'Убрать', 'text-button danger');
+    button.type = 'button';
+    button.addEventListener('click', () => passChange(['Убрать «' + who(person) + '» из списка. Этот человек больше не сможет использовать ваш пропуск.'],
+      () => api('web/pass/people/' + person.kind + '/' + encodeURIComponent(person.id), { method: 'DELETE' }), button));
+    return personLine(person, button);
+  }));
+}
+
+function who(person) { return person.label && person.username ? person.label + ' (@' + person.username + ')' : person.label || '@' + person.username; }
+
+async function passChange(lines, run, button) {
+  if (!await confirmChanges(lines)) return false;
+  if (button) button.disabled = true;
+  try { renderPass(await run()); $('pass-status').textContent = 'Сохранено'; return true; }
+  catch (error) { $('pass-status').textContent = error.message; return false; }
+  finally { if (button) button.disabled = false; }
+}
+
+async function searchPeople(event) {
+  event.preventDefault();
+  const query = $('people-q').value.trim();
+  if (query.replace(/^@/, '').length < 2) { $('pass-status').textContent = 'Введите хотя бы 2 символа'; return; }
+  try {
+    const data = await api('web/people?q=' + encodeURIComponent(query));
+    $('pass-status').textContent = data.people.length ? '' : 'Никого не нашли';
+    const listed = new Set(pass ? pass.people.filter(p => p.kind === 'aaid').map(p => p.account_id) : []);
+    $('people-results').replaceChildren(...data.people.map(person => {
+      const button = el('button', listed.has(person.account_id) ? 'Уже в списке' : 'Разрешить', 'text-button');
+      button.type = 'button'; button.disabled = listed.has(person.account_id);
+      button.addEventListener('click', async () => {
+        const lines = ['Разрешить «' + who(person) + '» использовать ваш пропуск.'];
+        if (pass && !pass.pass_allowed) lines.push('Сейчас пропуск запрещён всем: разрешение заработает, когда вы снова разрешите пропуск.');
+        if (await passChange(lines, () => api('web/pass/people', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ account_id: person.account_id }) }), button)) {
+          button.textContent = 'Уже в списке'; button.disabled = true;
+        }
+      });
+      return personLine(person, button);
+    }));
+  } catch (error) { $('pass-status').textContent = error.message; }
 }
 
 let lastMe = null;
@@ -68,7 +145,7 @@ function render(me) {
   const first = $('account').hidden;
   lastMe = me;
   $('signin').hidden = true; $('account').hidden = false;
-  $('who').textContent = 'Вы вошли · ' + (me.group_name || 'AA ID');
+  showWho();
   if (me.site_url) { $('site-link').href = me.site_url; $('site-link').hidden = false; }
   if (first) loadSettings();
   // Signed in already: go straight back to AntiAttendance, no extra click.
@@ -196,25 +273,41 @@ function confirmChanges(lines) {
 }
 
 $('start').addEventListener('click', start);
+$('skip-fresh').addEventListener('click', () => { needFresh = false; $('skip-fresh').hidden = true; continueToSite(); });
 $('continue').addEventListener('click', continueToSite);
 $('settings').addEventListener('submit', async event => {
   event.preventDefault();
   const body = {};
   if ($('name').value.trim() !== account.label) body.label = $('name').value.trim();
-  if ($('pass-allowed').checked !== Boolean(account.pass_allowed)) body.pass_allowed = $('pass-allowed').checked;
-  if (!Object.keys(body).length) { $('settings-status').textContent = 'Нет изменений'; return; }
-  // Every change is confirmed separately in a dialog before it is saved.
+  const username = $('username').value.trim().replace(/^@/, '').toLowerCase();
+  const usernameChanged = username && username !== ((lastMe && lastMe.username) || '');
+  if (!Object.keys(body).length && !usernameChanged) { $('settings-status').textContent = 'Нет изменений'; return; }
+  // Every change is confirmed in a dialog before it is saved.
   const lines = [];
+  if (usernameChanged) lines.push('Username: @' + username);
   if ('label' in body) lines.push('Имя на паре: «' + body.label + '»');
-  if (body.pass_allowed === true) lines.push('Разрешить использовать ваш пропуск. Его увидят только те, кому вы разрешите в Telegram.');
-  if (body.pass_allowed === false) lines.push('Запретить использовать ваш пропуск. Приложение перестанет его показывать.');
   if (!await confirmChanges(lines)) { $('settings-status').textContent = 'Не сохранено'; return; }
   try {
-    await api('web/account', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (usernameChanged) {
+      const result = await api('web/username', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username }) });
+      lastMe.username = result.username;
+    }
+    if ('label' in body) await api('web/account', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     $('settings-status').textContent = 'Сохранено';
     await loadSettings();
   } catch (error) { $('settings-status').textContent = error.message; }
 });
+$('pass-toggle').addEventListener('click', () => {
+  const allow = !pass.pass_allowed;
+  const lines = [allow
+    ? 'Разрешить пропуск людям из списка (' + pass.people.length + ').'
+    : 'Запретить пропуск всем. Даже люди из списка не смогут им пользоваться, пока вы снова не разрешите. Список сохранится.'];
+  passChange(lines, async () => {
+    await api('web/account', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pass_allowed: allow }) });
+    return api('web/pass');
+  }, $('pass-toggle'));
+});
+$('people-form').addEventListener('submit', searchPeople);
 $('acs-refresh').addEventListener('click', loadAttendance);
 $('logout').addEventListener('click', async () => {
   try { await api('web/logout', { method: 'POST' }); } catch (_) { /* signed out locally anyway */ }

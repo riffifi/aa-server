@@ -17,6 +17,10 @@ AA ID tokens offline with the public key from `/.well-known/jwks.json`.
   signs you out. Refresh tokens rotate on every use, and replaying an old refresh
   token (a copied token) revokes that device session. Owners list and revoke their
   devices; an admin can block an AA ID.
+- **Unique username.** Each AA ID may pick a username (`^[a-z][a-z0-9_]{2,23}$`,
+  stored lowercase, `UNIQUE`) on the site with `PUT /web/username`, so people can find
+  each other. Tokens carry it as the `usr` claim, and the session server copies it from
+  there. The site also proxies the pass list (`/web/pass`, `/web/people`).
 - **No MIREA credentials are kept.** The Pulse cookie from the device is used once
   to ask Pulse `GetMeInfo` (who is this) and `GetSubscribedSchedules` (which group)
   and is then dropped. It is never written to the database or logs.

@@ -55,6 +55,14 @@ def setup(tmp_path, monkeypatch):
                 return httpx.Response(404, json={'detail': 'not connected'})
             label = json.loads(request.content)['label'] if request.method == 'PUT' else 'Алиса'
             return httpx.Response(200, json={'account': True, 'connected': True, 'label': label, 'pass_allowed': True, 'group_name': 'ИКБО-01-24', 'secret': 'x'})
+        if request.url.host == 'sessions' and request.url.path.startswith(('/api/me/pass', '/api/me/people')):
+            claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
+            if request.url.path == '/api/me/people':
+                return httpx.Response(200, json={'people': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X', 'secret': 1}]})
+            if request.url.path.endswith('/missing'):
+                return httpx.Response(404, json={'detail': 'Такого разрешения нет'})
+            people = [] if request.method == 'DELETE' else [{'kind': 'aaid', 'id': 'b1', 'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}]
+            return httpx.Response(200, json={'pass_allowed': True, 'people': people, 'usr': claims['usr']})
         if request.url.host == 'sessions':
             claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
             if claims['mirea'] != 'uid-alice':
@@ -290,3 +298,32 @@ def test_site_settings_go_to_the_session_server(setup):
     client.cookies.clear()
     web_sign_in(client, app, ('uid-bob', None, None))
     assert client.get('/web/account').status_code == 404
+
+def test_username_is_unique_and_reaches_the_session_server(setup):
+    client, app, _, _ = setup
+    assert client.put('/web/username', json={'username': 'alice'}).status_code == 401
+    web_sign_in(client, app, ('uid-bob', 4242, 'ИКБО-01-24'))
+    assert client.put('/web/username', json={'username': 'Alice_1'}).json() == {'username': 'alice_1'}
+    client.cookies.clear()
+    web_sign_in(client, app)
+    for bad in ('ab', '1abc', 'имя', 'a' * 25, 'a b'):
+        assert client.put('/web/username', json={'username': bad}).status_code == 400
+    assert client.put('/web/username', json={'username': '@ALICE_1'}).status_code == 409
+    assert client.put('/web/username', json={'username': '@alice'}).json() == {'username': 'alice'}
+    assert client.get('/web/me').json()['username'] == 'alice'
+    # The new username travels in the signed token the session server reads.
+    last = app.state.seen[-1]
+    assert last.url.path == '/api/me/account'
+    claims = verify(last.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
+    assert claims['usr'] == 'alice'
+
+def test_pass_list_goes_through_aa_id(setup):
+    client, app, _, _ = setup
+    assert client.get('/web/pass').status_code == 401
+    web_sign_in(client, app)
+    assert client.get('/web/people?q=bo').json() == {'people': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}]}
+    shared = client.post('/web/pass/people', json={'account_id': 'b1'}).json()
+    assert shared == {'pass_allowed': True, 'people': [{'kind': 'aaid', 'id': 'b1', 'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}]}
+    assert client.delete('/web/pass/people/aaid/b1').json()['people'] == []
+    assert client.delete('/web/pass/people/aaid/missing').json()['detail'] == 'Такого разрешения нет'
+    assert client.delete('/web/pass/people/other/b1').status_code == 404

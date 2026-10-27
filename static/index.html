@@ -14,8 +14,10 @@
       <span id="lesson-label" class="label">Сейчас</span>
       <h1 id="lesson-title" class="title tight">Загружаем…</h1>
       <p id="lesson-meta" class="lesson-meta"></p>
+      <p id="lesson-countdown" class="countdown" hidden></p>
       <p id="lesson-next" class="caption"></p>
-      <div class="actions"><a id="schedule-link" class="button secondary" href="https://schedule-of.mirea.ru" target="_blank" rel="noopener">Расписание ↗</a></div>
+      <div class="actions"><button id="mark-group" class="secondary" hidden>Отметить свою группу</button><a id="schedule-link" class="button secondary" href="https://schedule-of.mirea.ru" target="_blank" rel="noopener">Расписание ↗</a></div>
+      <p id="mark-group-note" class="caption" hidden>Работает в любом случае, даже если расписание не нашло пару: отмечает всех подключённых из вашей группы.</p>
     </section>
 
     <p id="connect" class="banner info" hidden>Ваш аккаунт МИРЭА не подключён к серверу, поэтому вас не могут отметить. <a href="/auth/aaid?fresh=1">Войти через AA ID заново</a></p>
@@ -38,9 +40,12 @@
   <div id="scanner" class="scanner" role="dialog" aria-modal="true" aria-labelledby="scanner-title" hidden>
     <div class="scanner-body">
       <div class="block-head"><h2 id="scanner-title" class="heading">QR преподавателя</h2><button id="scanner-close" class="text-button">Закрыть</button></div>
-      <video id="video" class="video" playsinline muted></video>
+      <p id="scanner-target" class="caption"></p>
+      <div id="viewfinder" class="viewfinder"><video id="video" class="video" playsinline muted autoplay></video><span class="frame" aria-hidden="true"></span></div>
+      <div class="scanner-tools"><select id="camera-select" class="input select" aria-label="Камера" hidden></select><button id="torch" class="text-button" type="button" hidden>Фонарик</button></div>
       <p id="scanner-status" class="status" role="status">Наведите камеру на QR-код занятия.</p>
       <div id="scanner-results" class="list compact"></div>
+      <div class="actions"><label class="button secondary file-button">Сфотографировать QR<input id="photo" type="file" accept="image/*" capture="environment"></label></div>
       <form id="paste-form" class="field"><input id="paste" class="input" placeholder="Или вставьте ссылку из QR" inputmode="url"><button class="secondary">Отметить</button></form>
     </div>
   </div>

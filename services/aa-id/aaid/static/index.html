@@ -11,13 +11,13 @@
 
   <section id="signin" hidden>
     <h1 class="title">Вход через МИРЭА</h1>
-    <p class="lead">AA ID навсегда привязывается к вашему аккаунту МИРЭА. Войдите, чтобы создать его или открыть. Пароль и сессия МИРЭА не сохраняются.</p>
+    <p id="signin-lead" class="lead">AA ID навсегда привязывается к вашему аккаунту МИРЭА. Войдите, чтобы создать его или открыть. Пароль и сессия МИРЭА не сохраняются.</p>
     <div class="login">
       <p id="status" class="status" role="status" hidden></p>
       <img id="qr" class="qr" width="264" height="264" alt="QR для входа МИРЭА" hidden>
       <a id="qr-link" class="text-button" target="_blank" rel="noopener" hidden>Открыть подтверждение МИРЭА →</a>
     </div>
-    <div class="actions"><button id="start" class="primary">Войти через МИРЭА</button></div>
+    <div class="actions"><button id="start" class="primary">Войти через МИРЭА</button><button id="skip-fresh" class="text-button" hidden>Пропустить</button></div>
     <p class="note">Отсканируйте QR в приложении МИРЭА или откройте ссылку в браузере, где вы уже вошли. Входите только своим аккаунтом: AA ID нельзя передать другому человеку.</p>
   </section>
 
@@ -31,12 +31,26 @@
 
     <form id="settings" class="block" aria-labelledby="settings-heading" hidden>
       <h2 id="settings-heading" class="heading">Настройки AntiAttendance</h2>
+      <label class="label" for="username">Username, по которому вас можно найти</label>
+      <div class="field"><input id="username" class="input" maxlength="24" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ivan_petrov" pattern="@?[A-Za-z][A-Za-z0-9_]{2,23}"></div>
+      <p class="caption">3–24 символа: латинские буквы, цифры и _. Username уникален.</p>
       <label class="label" for="name">Имя, которое видят люди на вашей паре</label>
       <div class="field"><input id="name" class="input" maxlength="60" autocomplete="name" placeholder="Фамилия Имя" required></div>
-      <label class="row toggle"><input id="pass-allowed" type="checkbox"><span class="row-body"><strong>Можно использовать мой пропуск</strong><span class="meta">Приложение показывает пропуск только тем, кому вы разрешили в Telegram.</span></span></label>
       <div class="actions"><button class="primary">Сохранить</button><span id="settings-status" class="caption" role="status"></span></div>
     </form>
     <p id="settings-note" class="note" hidden></p>
+
+    <section id="pass" class="block" aria-labelledby="pass-heading" hidden>
+      <h2 id="pass-heading" class="heading">Пропуск</h2>
+      <p id="pass-state" class="lead small-lead"></p>
+      <div class="actions"><button id="pass-toggle" type="button"></button></div>
+      <h3 class="label list-label">Кому разрешено</h3>
+      <div id="pass-people" class="list"></div>
+      <p id="pass-empty" class="note" hidden>Пока никому. Найдите человека ниже.</p>
+      <form id="people-form" class="field search-field"><input id="people-q" class="input" maxlength="60" autocomplete="off" autocapitalize="none" placeholder="Найти по username или имени"><button class="secondary">Найти</button></form>
+      <div id="people-results" class="list"></div>
+      <p id="pass-status" class="caption" role="status"></p>
+    </section>
     <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-heading"><form method="dialog"><h2 id="confirm-heading" class="heading">Сохранить изменения?</h2><ul id="confirm-list" class="confirm-list"></ul><div class="actions"><button value="ok" class="primary">Подтвердить</button><button value="cancel" class="text-button">Отмена</button></div></form></dialog>
 
     <section class="block" aria-labelledby="schedule-heading">

@@ -84,7 +84,12 @@ from the owner's page (always under a session).
 ### Pass permission and Telegram agreements
 
 `pass_allowed` is the owner's account-wide switch. New accounts start with it **off**;
-the owner turns it on in the AA ID settings (each change is confirmed in a dialog). It is **not** a grant to every
+the owner turns it on in the AA ID settings (each change is confirmed in a dialog). On the AA
+ID site the owner also keeps a list of people allowed to use the pass: they find people by
+their unique AA ID username or name (`/api/me/people`) and add or remove them
+(`/api/me/pass`, `/api/me/pass/people`); an AA ID-signed app request from someone on the
+list gets the pass. Telegram approvals appear in the same list. Turning `pass_allowed` off
+("Запретить пропуск всем") blocks everyone, the list included, and keeps the list. It is **not** a grant to every
 phone. Ordinary pass snapshots, uploads, and `pass-token`/`pass-code`/`pass-issue`
 RPCs additionally require an approval for the requesting Telegram person (or the
 person's own site session). Attendance and session renewal are unchanged.

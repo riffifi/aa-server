@@ -157,3 +157,20 @@ class Agreements:
             self._event(db, grant['account_id'])
         self.vault.audit('pass_revoked', 'telegram:' + str(owner), grant['account_id'])
         return True
+
+    def granted(self, account_id):
+        """Telegram people the owner allowed, for the owner's own settings page."""
+        with self.vault.transaction() as db:
+            return [dict(row) for row in db.execute('SELECT * FROM pass_grants WHERE account_id=? AND allowed=1', (account_id,))]
+
+    def revoke_by_owner_account(self, identifier, account_id, actor):
+        # The owner is signed in with AA ID on the site, which proves ownership directly.
+        with self.vault.transaction() as db:
+            grant = db.execute('SELECT * FROM pass_grants WHERE id=? AND account_id=? AND allowed=1', (identifier, account_id)).fetchone()
+            if not grant:
+                return False
+            db.execute('UPDATE pass_grants SET allowed=0 WHERE id=?', (identifier,))
+            db.execute("UPDATE pass_requests SET state='denied' WHERE account_id=? AND telegram_id=?", (account_id, grant['telegram_id']))
+            self._event(db, account_id)
+        self.vault.audit('pass_revoked', actor, account_id)
+        return True

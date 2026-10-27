@@ -276,8 +276,19 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         access = daily_access(vault.pass_testing_key)
         return access if matches_test_password(password, access) else None
 
+    def shared_with_caller(request, identifier):
+        # The owner added the signed-in AA ID person to their pass list on the AA ID site.
+        caller = getattr(request.state, 'aaid', None)
+        grantee = vault.account_by_pulse(caller['mirea']) if caller else None
+        return grantee is not None and vault.pass_shared(identifier, grantee['id'])
+
     def pass_access(request, identifier):
-        return page_authed(request, identifier) or service.agreements.status(identifier, request.headers.get('x-pass-client', '')) == 'approved'
+        return (page_authed(request, identifier) or shared_with_caller(request, identifier)
+                or service.agreements.status(identifier, request.headers.get('x-pass-client', '')) == 'approved')
+
+    def pass_status(request, row):
+        status = service.agreements.status(row['id'], request.headers.get('x-pass-client', ''))
+        return 'approved' if status not in ('disabled', 'unavailable') and shared_with_caller(request, row['id']) else status
 
     def require_pass(request, row, operation):
         if row['pass_allowed'] and pass_access(request, row['id']):
@@ -475,10 +486,9 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             raise HTTPException(400, 'Invalid group')
         rows = vault.accounts(group_id)
         testing = test_access(request)
-        key = request.headers.get('x-pass-client', '')
         caller = request.state.aaid
         # `own` marks the account of the signed-in AA ID person (same MIREA identity).
-        metadata = [{**vault.public(row), 'pass_access': service.agreements.status(row['id'], key),
+        metadata = [{**vault.public(row), 'pass_access': pass_status(request, row),
                      'own': caller is not None and row['pulse_id'] == caller['mirea']} for row in rows]
         passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if testing or (row['pass_allowed'] and pass_access(request, row['id'])) else None, 'version': row['pass_version']} for row in rows]
         return {'accounts': metadata, 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id,

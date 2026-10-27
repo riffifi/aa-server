@@ -12,6 +12,9 @@ def digest(value):
 class Blocked(Exception):
     pass
 
+class Taken(Exception):
+    pass
+
 class Store:
     """AA ID accounts. One person = one MIREA (Pulse) identity = one AA ID.
 
@@ -45,6 +48,11 @@ class Store:
           CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
           CREATE INDEX IF NOT EXISTS links_group ON mirea_links(group_id);
         ''')
+        user_columns = {row[1] for row in self.db.execute('PRAGMA table_info(users)')}
+        if 'username' not in user_columns:
+            # A unique, person-chosen handle (lowercase) so people can find each other.
+            self.db.execute('ALTER TABLE users ADD COLUMN username TEXT')
+        self.db.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users(username)')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(sessions)')}
         if 'kind' not in columns:
             # 'app' sessions hold tokens for AntiAttendance servers; 'web' sessions only
@@ -56,7 +64,7 @@ class Store:
                         (user_id, action, session_id, time.time()))
 
     def user(self, user_id):
-        return self.db.execute('''SELECT users.id, users.status, users.created, mirea_links.pulse_uid,
+        return self.db.execute('''SELECT users.id, users.status, users.created, users.username, mirea_links.pulse_uid,
             mirea_links.group_id, mirea_links.group_name, mirea_links.verified_at
             FROM users JOIN mirea_links ON mirea_links.user_id = users.id WHERE users.id = ?''', (user_id,)).fetchone()
 
@@ -86,6 +94,16 @@ class Store:
         if user['status'] != 'active':
             raise Blocked(user_id)
         return user
+
+    def set_username(self, user_id, username):
+        """Raises Taken when another AA ID already uses this username."""
+        with self.lock:
+            try:
+                self.db.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
+            except sqlite3.IntegrityError:
+                raise Taken(username) from None
+            self.audit('username', user_id)
+        return self.user(user_id)
 
     def create_session(self, user_id, device, ttl, max_sessions, kind='app'):
         """Open a device session. Beyond `max_sessions` active sessions of the same

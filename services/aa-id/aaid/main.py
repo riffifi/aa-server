@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .pulse import PulseIdentity
 from . import schedule
-from .store import Store, Blocked, digest
+from .store import Store, Blocked, Taken, digest
 from .tokens import Signer, verify
 
 log = logging.getLogger('aaid')
@@ -43,6 +43,14 @@ class ClaimBody(BaseModel):
 class SettingsBody(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=60)
     pass_allowed: bool | None = None
+
+class UsernameBody(BaseModel):
+    username: str = Field(min_length=1, max_length=40)
+
+class ShareBody(BaseModel):
+    account_id: str = Field(min_length=1, max_length=64)
+
+USERNAME = re.compile(r'^[a-z][a-z0-9_]{2,23}$')
 
 class AuthorizeBody(BaseModel):
     state: str = Field(pattern=r'^[A-Za-z0-9_-]{16,128}$')
@@ -130,7 +138,7 @@ def create_app(directory=None, identity=None, logins=None, http=None):
     def access_token(user, session):
         now = int(time.time())
         return signer.sign({'iss': issuer, 'aud': audience, 'sub': user['id'], 'sid': session['id'],
-                            'mirea': user['pulse_uid'], 'grp': user['group_id'], 'iat': now, 'exp': now + 60})
+                            'mirea': user['pulse_uid'], 'grp': user['group_id'], 'usr': user['username'], 'iat': now, 'exp': now + 60})
 
     async def hand_off(user, credentials):
         # The session server keeps MIREA sessions; give it this fresh one, signed by AA ID
@@ -139,7 +147,7 @@ def create_app(directory=None, identity=None, logins=None, http=None):
             return False
         now = int(time.time())
         token = signer.sign({'iss': issuer, 'aud': 'aa-link', 'sub': user['id'], 'mirea': user['pulse_uid'],
-                             'grp': user['group_id'], 'iat': now, 'exp': now + 60})
+                             'grp': user['group_id'], 'usr': user['username'], 'iat': now, 'exp': now + 60})
         try:
             response = await http.post(sessions_url + '/internal/aaid/link', headers={'authorization': 'Bearer ' + token},
                                        json={**credentials, 'group_id': user['group_id'], 'group_name': user['group_name']})
@@ -153,12 +161,12 @@ def create_app(directory=None, identity=None, logins=None, http=None):
     def grant(user, session, refresh):
         now = int(time.time())
         claims = {'iss': issuer, 'aud': audience, 'sub': user['id'], 'sid': session['id'],
-                  'mirea': user['pulse_uid'], 'grp': user['group_id'], 'iat': now, 'exp': now + access_ttl}
+                  'mirea': user['pulse_uid'], 'grp': user['group_id'], 'usr': user['username'], 'iat': now, 'exp': now + access_ttl}
         return {'access_token': signer.sign(claims), 'access_expires_at': claims['exp'],
                 'refresh_token': refresh, 'session_id': session['id'], 'user': public(user)}
 
     def public(user):
-        return {'id': user['id'], 'group_id': user['group_id'], 'group_name': user['group_name'],
+        return {'id': user['id'], 'username': user['username'], 'group_id': user['group_id'], 'group_name': user['group_name'],
                 'created': user['created'], 'verified_at': user['verified_at']}
 
     def caller(request):
@@ -296,29 +304,81 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         devices = [{**dict(row), 'current': row['id'] == session['id']} for row in store.sessions(user['id'])]
         return {**public(user), 'sessions': devices, 'max_sessions': max_sessions, 'site_url': site_url or None}
 
-    async def sessions_call(user, session, method, body=None):
-        # The person's own account on the session server, with a one-minute AA ID token.
+    async def sessions_call(user, session, method, path='/api/me/account', body=None, params=None):
+        # The person's own data on the session server, with a one-minute AA ID token.
         try:
-            response = await http.request(method, sessions_url + '/api/me/account', json=body,
+            response = await http.request(method, sessions_url + path, json=body, params=params,
                                           headers={'authorization': 'Bearer ' + access_token(user, session)})
         except httpx.HTTPError:
             raise HTTPException(503, 'Сервер AntiAttendance недоступен') from None
         if response.status_code == 404:
-            raise HTTPException(404, 'Ваш аккаунт МИРЭА не подключён к серверу AntiAttendance')
+            # Russian details are meant for the person (e.g. «Человек не найден»).
+            detail = response.json().get('detail') if 'json' in response.headers.get('content-type', '') else None
+            raise HTTPException(404, detail if isinstance(detail, str) and not detail.isascii() else 'Ваш аккаунт МИРЭА не подключён к серверу AntiAttendance')
         if response.status_code != 200:
             raise HTTPException(503, 'Сервер AntiAttendance не ответил')
-        data = response.json()
+        return response.json()
+
+    def account_view(data):
         return {key: data.get(key) for key in ('account', 'connected', 'label', 'pass_allowed', 'group_name')}
+
+    def person_view(person):
+        return {key: person.get(key) for key in ('kind', 'id', 'account_id', 'username', 'label', 'group_name') if key in person}
+
+    def pass_view(data):
+        return {'pass_allowed': bool(data.get('pass_allowed')), 'people': [person_view(p) for p in data.get('people', [])]}
 
     @app.get('/web/account')
     async def site_account(request: Request):
         session, user = site_session(request)
-        return await sessions_call(user, session, 'GET')
+        return account_view(await sessions_call(user, session, 'GET'))
 
     @app.put('/web/account')
     async def site_account_change(body: SettingsBody, request: Request):
         session, user = site_session(request)
-        return await sessions_call(user, session, 'PUT', body.model_dump(exclude_none=True))
+        return account_view(await sessions_call(user, session, 'PUT', body=body.model_dump(exclude_none=True)))
+
+    @app.put('/web/username')
+    async def site_username(body: UsernameBody, request: Request):
+        session, user = site_session(request)
+        username = body.username.strip().lstrip('@').lower()
+        if not USERNAME.match(username):
+            raise HTTPException(400, 'Username: 3–24 символа, латинские буквы, цифры и _, начинается с буквы')
+        if username != user['username']:
+            limit(request, ('username', user['id']), 10, 3600)
+            try:
+                user = store.set_username(user['id'], username)
+            except Taken:
+                raise HTTPException(409, 'Этот username уже занят') from None
+            # The session server takes the new username from the signed token.
+            try:
+                await sessions_call(user, session, 'GET')
+            except HTTPException:
+                pass
+        return {'username': user['username']}
+
+    @app.get('/web/people')
+    async def site_people(request: Request, q: str = ''):
+        session, user = site_session(request)
+        data = await sessions_call(user, session, 'GET', '/api/me/people', params={'q': q[:60]})
+        return {'people': [person_view(p) for p in data.get('people', [])]}
+
+    @app.get('/web/pass')
+    async def site_pass(request: Request):
+        session, user = site_session(request)
+        return pass_view(await sessions_call(user, session, 'GET', '/api/me/pass'))
+
+    @app.post('/web/pass/people')
+    async def site_pass_share(body: ShareBody, request: Request):
+        session, user = site_session(request)
+        return pass_view(await sessions_call(user, session, 'POST', '/api/me/pass/people', body=body.model_dump()))
+
+    @app.delete('/web/pass/people/{kind}/{identifier}')
+    async def site_pass_unshare(kind: str, identifier: str, request: Request):
+        session, user = site_session(request)
+        if kind not in ('aaid', 'telegram') or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', identifier):
+            raise HTTPException(404, 'Такого разрешения нет')
+        return pass_view(await sessions_call(user, session, 'DELETE', f'/api/me/pass/people/{kind}/{identifier}'))
 
     @app.get('/web/attendance')
     async def site_attendance(request: Request):

@@ -114,7 +114,16 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
 .list.compact .row { min-height: 40px; padding: 8px 0; }
 .scanner { position: fixed; inset: 0; z-index: 10; overflow-y: auto; background: var(--background); }
 .scanner-body { max-width: 640px; margin: 0 auto; padding: 24px; }
-.video { display: block; width: 100%; max-height: 60vh; margin-top: 16px; background: #000; object-fit: cover; }
+.viewfinder { position: relative; margin-top: 16px; overflow: hidden; background: #000; }
+.video { display: block; width: 100%; max-height: 60vh; background: #000; object-fit: cover; }
+.viewfinder .frame { position: absolute; left: 50%; top: 50%; height: 72%; max-width: 90%; aspect-ratio: 1; transform: translate(-50%, -50%);
+  border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgb(0 0 0 / .35); pointer-events: none; }
+.viewfinder.found .frame { border-color: #fff; border-width: 4px; }
+.scanner-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; }
+.select { flex: 1 1 200px; min-height: 40px; padding: 6px 8px; font-size: 14px; }
+.file-button { position: relative; overflow: hidden; cursor: pointer; }
+.file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.countdown { margin: 8px 0 0; font-size: 20px; line-height: 28px; color: var(--accent-text); }
 .status { margin-top: 16px; }
 @media (max-width: 480px) { .person { flex-wrap: wrap; } .person > .mark { width: 100%; text-align: left; padding-left: 36px; } }
 

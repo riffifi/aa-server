@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
@@ -40,7 +41,8 @@ class LessonPulse(FakePulse):
 
 class Link(Verifier):
     async def exchange(self, code):
-        return {'id': 'aaid-' + code[:3], 'mirea': code[:3], 'group_id': None, 'group_name': None} if code.endswith('x' * 17) else None
+        group = (1, 'ГР-1') if code.startswith('fox') else (None, None)
+        return {'id': 'aaid-' + code[:3], 'mirea': code[:3], 'group_id': group[0], 'group_name': group[1]} if code.endswith('x' * 17) else None
 
 @pytest.fixture
 def setup(tmp_path):
@@ -170,3 +172,95 @@ def test_settings_through_aa_id(setup):
     assert app.state.service.vault.account_by_pulse('ann')['pass_allowed'] == 1
     assert client.put('/api/me/account', json={'label': 'x'}, headers={'authorization': 'Bearer ' + token('nobody')}).status_code == 404
     assert client.get('/api/me/account', headers={'authorization': 'Bearer ' + token('nobody')}).json()['account'] is False
+
+def test_username_search_and_pass_list(setup):
+    client, app, _ = setup
+    vault = app.state.service.vault
+    ann_token = {'authorization': 'Bearer ' + token('ann', usr='anna')}
+    bob_token = {'authorization': 'Bearer ' + token('bob', usr='boris', sub='user-2')}
+    vault.upsert('ann', None, {'cookie': 'session=ann', 'pass_number': '777'})
+    ann, bob = vault.account_by_pulse('ann')['id'], vault.account_by_pulse('bob')['id']
+    # The username comes from the signed AA ID token.
+    assert client.get('/api/me/account', headers=ann_token).status_code == 200
+    client.get('/api/me/account', headers=bob_token)
+    assert vault.account(ann)['username'] == 'anna'
+    found = client.get('/api/me/people?q=@bor', headers=ann_token).json()['people']
+    assert found == [{'account_id': bob, 'username': 'boris', 'label': 'Борис', 'group_name': 'ГР-2'}]
+    assert client.get('/api/me/people?q=Анна', headers=ann_token).json()['people'] == []  # not yourself
+    assert client.get('/api/me/pass', headers=ann_token).json() == {'pass_allowed': False, 'people': []}
+
+    def bob_sees():
+        passes = client.get('/api/accounts', headers=bob_token).json()['passes']
+        return next(p['number'] for p in passes if p['account_id'] == ann)
+
+    shared = client.post('/api/me/pass/people', json={'account_id': bob}, headers=ann_token).json()
+    assert [(p['kind'], p['username']) for p in shared['people']] == [('aaid', 'boris')]
+    assert bob_sees() is None  # the pass is still off for everyone
+    client.put('/api/me/account', json={'pass_allowed': True}, headers=ann_token)
+    assert bob_sees() == '777'
+    cat_token = {'authorization': 'Bearer ' + token('cat', sub='user-3')}
+    assert next(p['number'] for p in client.get('/api/accounts', headers=cat_token).json()['passes'] if p['account_id'] == ann) is None
+    # One switch blocks everyone on the list; the list stays.
+    client.put('/api/me/account', json={'pass_allowed': False}, headers=ann_token)
+    assert bob_sees() is None
+    assert len(client.get('/api/me/pass', headers=ann_token).json()['people']) == 1
+    client.put('/api/me/account', json={'pass_allowed': True}, headers=ann_token)
+    assert client.delete(f'/api/me/pass/people/aaid/{bob}', headers=ann_token).json()['people'] == []
+    assert bob_sees() is None
+    assert client.delete(f'/api/me/pass/people/aaid/{bob}', headers=ann_token).status_code == 404
+    assert client.post('/api/me/pass/people', json={'account_id': ann}, headers=ann_token).status_code == 404
+
+def test_telegram_grants_show_in_the_pass_list(setup):
+    client, app, _ = setup
+    service = app.state.service
+    ann = service.vault.account_by_pulse('ann')['id']
+    with service.vault.transaction() as db:
+        db.execute('INSERT INTO pass_grants VALUES(?,?,?,?,?)', ('g1', ann, 500, 'Телефон Пети', 1))
+    bearer = {'authorization': 'Bearer ' + token('ann')}
+    people = client.get('/api/me/pass', headers=bearer).json()['people']
+    assert [(p['kind'], p['id'], p['label']) for p in people] == [('telegram', 'g1', 'Телефон Пети')]
+    assert client.delete('/api/me/pass/people/telegram/g1', headers={'authorization': 'Bearer ' + token('bob')}).status_code == 404
+    assert client.delete('/api/me/pass/people/telegram/g1', headers=bearer).json()['people'] == []
+
+def test_sign_in_fills_a_missing_group(setup):
+    client, app, _ = setup
+    vault = app.state.service.vault
+    vault.upsert('fox', 'Фокс', {'cookie': 'session=fox'})
+    sign_in(client, 'fox')
+    assert vault.account_by_pulse('fox')['group_id'] == 1
+    assert 'Фокс' in [p['label'] for p in client.get('/site/state').json()['people']]
+
+def later(minutes_from, minutes_to):
+    return ((NOW + timedelta(minutes=minutes_from)).strftime('%Y%m%dT%H%M00'),
+            (NOW + timedelta(minutes=minutes_to)).strftime('%Y%m%dT%H%M00'))
+
+def test_break_shows_the_next_lesson_and_own_group_marks_anyway(setup, monkeypatch):
+    client, app, pulse = setup
+    start, end = later(40, 130)
+    if start[:8] != NOW.strftime('%Y%m%d'):
+        pytest.skip('too close to midnight')
+    monkeypatch.setitem(CALENDARS, 1, calendar('Химия', 'В-1', start=start, end=end))
+    sign_in(client)
+    state = client.get('/site/state').json()
+    assert state['lesson'] is None and state['active'] is None and state['people'] == []
+    assert state['next']['subject'] == 'Химия' and state['next']['starts_at'] - time.time() > 35 * 60
+    assert state['own_group_size'] == 1
+    qr = 'https://pulse.mirea.ru/x?token=t'
+    assert client.post('/site/mark', json={'qr': qr, 'account_ids': ['x']}).status_code == 409
+    pulse.response = reply(protocol.field(2, b''))
+    result = client.post('/site/mark', json={'qr': qr, 'own_group': True}).json()['results']
+    assert [(r['label'], r['state']) for r in result] == [('Анна', 'approved')]
+    bob = app.state.service.vault.account_by_pulse('bob')['id']
+    assert client.post('/site/mark', json={'qr': qr, 'own_group': True, 'account_ids': [bob]}).status_code == 403
+
+def test_people_shown_shortly_before_the_lesson(setup, monkeypatch):
+    client, _, _ = setup
+    start, end = later(10, 100)
+    if start[:8] != NOW.strftime('%Y%m%d'):
+        pytest.skip('too close to midnight')
+    for group in (1, 2):
+        monkeypatch.setitem(CALENDARS, group, calendar('Химия', 'В-1', start=start, end=end))
+    sign_in(client)
+    state = client.get('/site/state').json()
+    assert state['lesson'] is None and state['active'] == 'soon'
+    assert {p['label'] for p in state['people']} == {'Анна', 'Борис'}
