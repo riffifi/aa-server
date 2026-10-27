@@ -129,3 +129,4 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
   background: var(--background); color: var(--foreground); }
 .dialog::backdrop { background: rgb(0 0 0 / .6); }
 .list.compact .mark { font-size: 13px; line-height: 16px; text-align: right; }
+.toggle { margin-top: 16px; border-top: 1px solid var(--line); }

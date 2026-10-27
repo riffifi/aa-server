@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#000000"><title>AntiAttendance</title><link rel="stylesheet" href="/static/site.css"><script src="/static/vendor/jsQR.js" defer></script><script src="/static/site.js" defer></script></head>
 <body><main class="page wide">
-  <header class="masthead"><span class="wordmark">AntiAttendance</span><span id="who" class="label"></span><button id="logout" class="text-button push" hidden>Выйти</button></header>
+  <header class="masthead"><span class="wordmark">AntiAttendance</span><span id="who" class="label"></span><span class="push"></span><button id="settings-open" class="text-button" hidden>Настройки</button><button id="logout" class="text-button" hidden>Выйти</button></header>
 
   <section id="signin" hidden>
     <h1 class="title">Вход через AA ID</h1>
@@ -20,10 +20,12 @@
 
     <p id="connect" class="banner info" hidden>Ваш аккаунт МИРЭА не подключён к серверу, поэтому вас не могут отметить. <a href="/auth/aaid?fresh=1">Войти через AA ID заново</a></p>
 
-    <form id="name-form" class="block" hidden>
-      <h2 class="heading">Как вас подписать?</h2>
-      <p class="note">Это имя видят люди на вашей паре.</p>
-      <div class="field"><input id="name" class="input" maxlength="60" autocomplete="name" placeholder="Фамилия Имя" required><button class="secondary">Сохранить</button></div>
+    <form id="settings" class="block" hidden>
+      <div class="block-head"><h2 class="heading">Настройки</h2><button id="settings-close" type="button" class="text-button">Закрыть</button></div>
+      <label class="label" for="name">Имя, которое видят люди на вашей паре</label>
+      <div class="field"><input id="name" class="input" maxlength="60" autocomplete="name" placeholder="Фамилия Имя" required></div>
+      <label class="row person toggle"><input id="pass-allowed" type="checkbox"><span class="row-body"><strong>Можно использовать мой пропуск</strong><span class="meta">Приложение показывает пропуск только тем, кому вы разрешили в Telegram.</span></span></label>
+      <div class="actions"><button class="primary">Сохранить</button></div>
     </form>
 
     <section id="groups-block" class="block" aria-labelledby="groups-heading" hidden>

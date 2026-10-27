@@ -53,7 +53,7 @@ services:
       LOGIN_SLOTS: ${AAID_LOGIN_SLOTS:-4}
       SESSIONS_URL: http://sessions:8080
       # The AntiAttendance site that signs in with AA ID (codes are sent only there).
-      AA_SITE_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
+      AA_SITE_URL: ${AA_SITE_URL:-${PUBLIC_URL:-http://127.0.0.1:8080}}
       MAX_SESSIONS: ${AAID_MAX_SESSIONS:-2}
       ACCESS_TTL_SECONDS: ${AAID_ACCESS_TTL_SECONDS:-600}
       ADMIN_TOKEN: ${AAID_ADMIN_TOKEN:-}

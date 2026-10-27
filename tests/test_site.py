@@ -158,3 +158,14 @@ def test_large_browser_state_is_accepted_only_for_the_link(setup):
     response = client.post('/internal/aaid/link', json=big, headers={'authorization': 'Bearer ' + token('big', aud='aa-link')})
     assert response.status_code == 200
     assert client.post('/api/accounts/import', json={'cookie': 'session=x', 'label': 'y' * 300000}).status_code == 413
+
+def test_person_sets_name_and_pass_permission(setup):
+    client, app, _ = setup
+    sign_in(client)
+    me = client.get('/site/state').json()['me']
+    assert me['pass_allowed'] is True
+    assert client.put('/site/me/pass', json={'allowed': False}).json() == {'pass_allowed': False}
+    assert client.get('/site/state').json()['me']['pass_allowed'] is False
+    assert app.state.service.vault.account_by_pulse('ann')['pass_allowed'] == 0
+    client.post('/site/logout')
+    assert client.put('/site/me/pass', json={'allowed': True}).status_code == 401

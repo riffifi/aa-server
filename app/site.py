@@ -41,6 +41,9 @@ class MarkBody(BaseModel):
 class NameBody(BaseModel):
     label: str = Field(min_length=1, max_length=60)
 
+class PassBody(BaseModel):
+    allowed: bool
+
 def shown(lesson):
     return lesson and {key: lesson[key] for key in ('subject', 'type', 'location', 'teacher')} | {
         'start': lesson['start'].strftime('%H:%M'), 'end': lesson['end'].strftime('%H:%M')}
@@ -202,6 +205,7 @@ def install(app, service, aaid, calendars, static):
             people.sort(key=lambda p: (not p['own'], p['group_id'] != context['group_id'], p['label'].casefold()))
         return {'me': {'group_id': context['group_id'], 'group_name': context['group_name'],
                        'account_id': own['id'] if own else None, 'label': own['label'] if own else None,
+                       'pass_allowed': bool(own['pass_allowed']) if own else None,
                        'connected': bool(own and own['state'] == 'valid')},
                 'lesson': shown(current), 'next': shown(context['next']),
                 'schedule_url': schedule.page_url(context['group_id']) if context['group_id'] else schedule.HOST,
@@ -254,3 +258,15 @@ def install(app, service, aaid, calendars, static):
             raise HTTPException(400, 'Неверное имя') from None
         await service.changed()
         return {'label': account['label']}
+
+    @app.put('/site/me/pass')
+    async def pass_permission(body: PassBody, request: Request):
+        # Whether the person's digital pass may be used from the app (with the
+        # per-person Telegram approval on top, as before).
+        session = person(request)
+        own = vault.account_by_pulse(session['mirea'])
+        if own is None:
+            raise HTTPException(404, 'Ваш аккаунт МИРЭА ещё не подключён')
+        account = vault.set_pass_allowed(own['id'], body.allowed)
+        await service.changed()
+        return {'pass_allowed': account['pass_allowed']}
