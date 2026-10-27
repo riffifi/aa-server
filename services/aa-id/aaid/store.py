@@ -40,9 +40,16 @@ class Store:
             created REAL NOT NULL, used_at REAL);
           CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, action TEXT NOT NULL,
             session_id TEXT, created REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS web_tokens(hash TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
+            created REAL NOT NULL);
           CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
           CREATE INDEX IF NOT EXISTS links_group ON mirea_links(group_id);
         ''')
+        columns = {row[1] for row in self.db.execute('PRAGMA table_info(sessions)')}
+        if 'kind' not in columns:
+            # 'app' sessions hold tokens for AntiAttendance servers; 'web' sessions only
+            # open the AA ID site and are limited separately.
+            self.db.execute("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'app'")
 
     def audit(self, action, user_id=None, session_id=None):
         self.db.execute('INSERT INTO audit(user_id, action, session_id, created) VALUES (?, ?, ?, ?)',
@@ -80,20 +87,22 @@ class Store:
             raise Blocked(user_id)
         return user
 
-    def create_session(self, user_id, device, ttl, max_sessions):
-        """Open a device session. Beyond `max_sessions` active devices the least
-        recently used ones are signed out, so one AA ID cannot be spread across
-        many phones."""
+    def create_session(self, user_id, device, ttl, max_sessions, kind='app'):
+        """Open a device session. Beyond `max_sessions` active sessions of the same
+        kind the least recently used ones are signed out, so one AA ID cannot be
+        spread across many phones. Returns (session, token): a refresh token for
+        an app session, a cookie token for a web session."""
         now = time.time()
-        session_id, refresh = str(uuid.uuid4()), secrets.token_urlsafe(32)
+        session_id, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
         with self.lock:
             self.db.execute('BEGIN IMMEDIATE')
             try:
-                self.db.execute('INSERT INTO sessions(id, user_id, device, created, last_used, expires) VALUES (?, ?, ?, ?, ?, ?)',
-                                (session_id, user_id, device, now, now, now + ttl))
-                self.db.execute('INSERT INTO refresh_tokens(hash, session_id, created) VALUES (?, ?, ?)', (digest(refresh), session_id, now))
-                active = self.db.execute('''SELECT id FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires > ?
-                    ORDER BY last_used DESC, created DESC''', (user_id, now)).fetchall()
+                self.db.execute('INSERT INTO sessions(id, user_id, device, created, last_used, expires, kind) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                (session_id, user_id, device, now, now, now + ttl, kind))
+                table = 'web_tokens' if kind == 'web' else 'refresh_tokens'
+                self.db.execute(f'INSERT INTO {table}(hash, session_id, created) VALUES (?, ?, ?)', (digest(token), session_id, now))
+                active = self.db.execute('''SELECT id FROM sessions WHERE user_id = ? AND kind = ? AND revoked_at IS NULL AND expires > ?
+                    ORDER BY last_used DESC, created DESC''', (user_id, kind, now)).fetchall()
                 for row in active[max_sessions:]:
                     self._revoke(row['id'], 'evicted', now)
                 self.audit('signed_in', user_id, session_id)
@@ -101,7 +110,17 @@ class Store:
             except BaseException:
                 self.db.execute('ROLLBACK')
                 raise
-        return self.session(session_id), refresh
+        return self.session(session_id), token
+
+    def web_session(self, token):
+        """The active web session behind a site cookie, or None."""
+        if not token:
+            return None
+        row = self.db.execute('''SELECT sessions.* FROM web_tokens JOIN sessions ON sessions.id = web_tokens.session_id
+            WHERE web_tokens.hash = ?''', (digest(token),)).fetchone()
+        if row is None or row['revoked_at'] is not None or row['expires'] <= time.time():
+            return None
+        return row
 
     def _revoke(self, session_id, reason, now=None):
         self.db.execute('UPDATE sessions SET revoked_at = ?, revoke_reason = ? WHERE id = ? AND revoked_at IS NULL',
@@ -147,7 +166,7 @@ class Store:
         return self.session(session['id']), fresh
 
     def sessions(self, user_id):
-        return self.db.execute('''SELECT id, device, created, last_used FROM sessions
+        return self.db.execute('''SELECT id, device, kind, created, last_used FROM sessions
             WHERE user_id = ? AND revoked_at IS NULL AND expires > ? ORDER BY last_used DESC''', (user_id, time.time())).fetchall()
 
     def revoke(self, user_id, session_id, reason):

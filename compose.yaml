@@ -37,16 +37,23 @@ services:
     build: ./services/aa-id
     restart: unless-stopped
     init: true
+    shm_size: 256mb
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
-      - /tmp:size=16m,mode=1777
+      - /tmp:size=256m,mode=1777
+    # The AA ID site on its own port, for a separate domain (e.g. id.example.ru)
+    # proxied by the host Nginx; see nginx/aaid-host.conf.example.
+    ports:
+      - ${BIND_ADDRESS:-127.0.0.1}:${AAID_PORT:-8091}:8090
     environment:
+      AAID_PUBLIC_URL: ${AAID_PUBLIC_URL:-${PUBLIC_URL:-http://127.0.0.1:8080}/id}
+      LOGIN_SLOTS: ${AAID_LOGIN_SLOTS:-4}
       MAX_SESSIONS: ${AAID_MAX_SESSIONS:-2}
       ACCESS_TTL_SECONDS: ${AAID_ACCESS_TTL_SECONDS:-600}
       ADMIN_TOKEN: ${AAID_ADMIN_TOKEN:-}
-      # Only Nginx reaches this container; it passes the client address in X-Real-IP.
+      # Only Nginx (Docker or host) reaches this container; it passes the client address in X-Real-IP.
       TRUST_PROXY_IP: '1'
     volumes:
       - aaid_data:/data

@@ -3,13 +3,17 @@ import re
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+import base64
 import hmac
+from pathlib import Path
+from urllib.parse import urlparse
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .pulse import PulseIdentity
-from .store import Store, Blocked
+from .store import Store, Blocked, digest
 from .tokens import Signer, verify
 
 def _number(name, default, minimum=1):
@@ -27,10 +31,21 @@ class MireaSignIn(BaseModel):
 class RefreshBody(BaseModel):
     refresh_token: str = Field(min_length=20, max_length=200)
 
+class ClaimBody(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
 class StatusBody(BaseModel):
     status: str = Field(pattern='^(active|blocked)$')
 
-def create_app(directory=None, identity=None):
+def browser_name(agent):
+    """A short label such as 'Chrome · Android' for the device list."""
+    browser = next((name for token, name in (('YaBrowser', 'Яндекс Браузер'), ('Edg/', 'Edge'), ('OPR/', 'Opera'),
+        ('Firefox/', 'Firefox'), ('Chrome/', 'Chrome'), ('Safari/', 'Safari')) if token in agent), 'Браузер')
+    system = next((name for token, name in (('Android', 'Android'), ('iPhone', 'iPhone'), ('iPad', 'iPad'),
+        ('Windows', 'Windows'), ('Mac OS X', 'macOS'), ('Linux', 'Linux')) if token in agent), None)
+    return browser + (' · ' + system if system else '')
+
+def create_app(directory=None, identity=None, logins=None):
     directory = directory or os.environ.get('DATA_DIR', '/data')
     issuer = os.environ.get('AAID_ISSUER', 'aa-id')
     audience = os.environ.get('AAID_AUDIENCE', 'aa')
@@ -41,24 +56,39 @@ def create_app(directory=None, identity=None):
     admin_token = os.environ.get('ADMIN_TOKEN', '')
     store, signer = Store(directory), Signer(directory)
     pulse = identity or PulseIdentity()
+    if logins is None:
+        from .mirea_login import MireaLogins
+        logins = MireaLogins(slots=_number('LOGIN_SLOTS', 4), max_active=_number('MAX_ACTIVE_LOGINS', 16),
+                             ttl=_number('LOGIN_TTL_SECONDS', 600, 120))
+    secure_cookie = os.environ.get('AAID_PUBLIC_URL', '').startswith('https://')
+    web_ttl = _number('WEB_SESSION_TTL_SECONDS', 7 * 86400, 600)
     attempts = defaultdict(deque)
+    static = Path(__file__).with_name('static')
 
     @asynccontextmanager
     async def lifespan(app):
         yield
+        await logins.close()
         await pulse.close()
         store.close()
 
     app = FastAPI(title='AA ID', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-    app.state.store, app.state.signer = store, signer
+    app.state.store, app.state.signer, app.state.logins = store, signer, logins
+    app.mount('/static', StaticFiles(directory=static), name='static')
 
     @app.middleware('http')
     async def headers(request, call_next):
         size = request.headers.get('content-length')
         if size and (not size.isdigit() or int(size) > 100000):
             return JSONResponse({'detail': 'Request too large'}, status_code=413)
+        if request.url.path.startswith('/web/') and request.method not in ('GET', 'HEAD'):
+            origin = request.headers.get('origin')
+            if origin and urlparse(origin).netloc != request.headers.get('host'):
+                return JSONResponse({'detail': 'Invalid origin'}, status_code=403)
         response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
+        response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers['X-Frame-Options'] = 'DENY'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         return response
@@ -155,6 +185,83 @@ def create_app(directory=None, identity=None):
         if not store.revoke(user['id'], session_id, 'owner'):
             raise HTTPException(404, 'Session not found')
         return {'ok': True}
+
+    # The AA ID site: sign in with the MIREA QR code, see the account, manage devices.
+    def site_session(request):
+        session = store.web_session(request.cookies.get('aaid_web', ''))
+        if session is None:
+            raise HTTPException(401, 'Войдите в AA ID')
+        user = store.user(session['user_id'])
+        if user is None or user['status'] != 'active':
+            raise HTTPException(403, 'Этот AA ID заблокирован')
+        return session, user
+
+    def login_job(identifier, request):
+        job = logins.jobs.get(identifier)
+        token = request.headers.get('x-login-token', '')
+        if job is None or not token or not hmac.compare_digest(digest(token), job.token_hash):
+            raise HTTPException(404, 'Вход не найден или истёк')
+        return job
+
+    @app.get('/')
+    async def site():
+        return FileResponse(static / 'index.html')
+
+    @app.post('/web/logins')
+    async def site_login(request: Request):
+        limit(request, 'web-login', 10, 300)
+        try:
+            job, token = logins.start(digest)
+        except ValueError as error:
+            raise HTTPException(503, str(error)) from None
+        return {'id': job.id, 'token': token}
+
+    @app.get('/web/logins/{identifier}')
+    async def site_login_state(identifier: str, request: Request):
+        job = login_job(identifier, request)
+        png = logins.qr_png(job)
+        return {'status': job.status, 'error': job.error, 'qr': job.qr,
+                'qr_png': 'data:image/png;base64,' + base64.b64encode(png).decode() if png else None}
+
+    @app.post('/web/logins/{identifier}/claim')
+    async def site_login_claim(identifier: str, request: Request):
+        job = login_job(identifier, request)
+        if job.status != 'complete' or job.identity is None or job.claimed:
+            raise HTTPException(409, 'Вход ещё не завершён')
+        job.claimed = True
+        uid, group_id, group_name = job.identity
+        job.identity = None
+        try:
+            user = store.bind_mirea(uid, group_id, group_name)
+        except Blocked:
+            raise HTTPException(403, 'Этот AA ID заблокирован') from None
+        device = browser_name(request.headers.get('user-agent', ''))
+        _, token = store.create_session(user['id'], device, web_ttl, 1, kind='web')
+        response = JSONResponse({'ok': True})
+        response.set_cookie('aaid_web', token, max_age=web_ttl, httponly=True, secure=secure_cookie, samesite='strict', path='/')
+        return response
+
+    @app.get('/web/me')
+    async def site_me(request: Request):
+        session, user = site_session(request)
+        devices = [{**dict(row), 'current': row['id'] == session['id']} for row in store.sessions(user['id'])]
+        return {**public(user), 'sessions': devices, 'max_sessions': max_sessions}
+
+    @app.delete('/web/sessions/{session_id}')
+    async def site_revoke(session_id: str, request: Request):
+        _, user = site_session(request)
+        if not store.revoke(user['id'], session_id, 'owner'):
+            raise HTTPException(404, 'Устройство не найдено')
+        return {'ok': True}
+
+    @app.post('/web/logout')
+    async def site_logout(request: Request):
+        session = store.web_session(request.cookies.get('aaid_web', ''))
+        if session is not None:
+            store.revoke(session['user_id'], session['id'], 'logout')
+        response = JSONResponse({'ok': True})
+        response.delete_cookie('aaid_web', path='/')
+        return response
 
     @app.put('/v1/admin/users/{user_id}/status')
     async def set_status(user_id: str, body: StatusBody, request: Request):

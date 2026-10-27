@@ -3,6 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from aaid.main import create_app
+from aaid.mirea_login import LoginJob
 from aaid import pulse
 from aaid.tokens import verify, unb64
 
@@ -18,6 +19,21 @@ class FakePulse:
     async def close(self):
         pass
 
+class FakeLogins:
+    def __init__(self):
+        self.jobs = {}
+    def start(self, digest):
+        job = LoginJob('job-%d' % len(self.jobs), digest('t' * 30 + str(len(self.jobs))), time.time(), status='login', qr='https://sso.mirea.ru/realms/mirea/qr-code-auth/scan?x=1')
+        self.jobs[job.id] = job
+        return job, 't' * 30 + str(len(self.jobs) - 1)
+    def approve(self, job_id, identity):
+        job = self.jobs[job_id]
+        job.status, job.qr, job.identity = 'complete', None, identity
+    def qr_png(self, job):
+        return b'png' if job.qr else None
+    async def close(self):
+        pass
+
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     monkeypatch.setenv('MAX_SESSIONS', '2')
@@ -26,7 +42,7 @@ def setup(tmp_path, monkeypatch):
     fake.people['s=alice'] = ('uid-alice', 4242, 'ИКБО-01-24')
     fake.people['s=alice2'] = ('uid-alice', None, None)
     fake.people['s=bob'] = ('uid-bob', 4242, 'ИКБО-01-24')
-    app = create_app(tmp_path, fake)
+    app = create_app(tmp_path, fake, FakeLogins())
     with TestClient(app) as client:
         yield client, app, fake, tmp_path
 
@@ -130,3 +146,55 @@ def test_pulse_reply_parsing():
     teacher = field(1, pulse.varint(8) + pulse.varint(2) + pulse.varint(16) + pulse.varint(5))
     assert pulse.subscribed_group(headers, grpc(field(1, teacher) + field(1, entry))) == (777, 'БСБО-02-23')
     assert pulse.subscribed_group(headers, grpc(b'')) == (None, None)
+
+def web_sign_in(client, app, identity=('uid-alice', 4242, 'ИКБО-01-24')):
+    started = client.post('/web/logins').json()
+    headers = {'X-Login-Token': started['token']}
+    state = client.get('/web/logins/' + started['id'], headers=headers).json()
+    assert state['status'] == 'login' and state['qr_png'].startswith('data:image/png;base64,')
+    assert client.post('/web/logins/' + started['id'] + '/claim', headers=headers).status_code == 409
+    app.state.logins.approve(started['id'], identity)
+    claimed = client.post('/web/logins/' + started['id'] + '/claim', headers=headers)
+    assert claimed.status_code == 200
+    assert 'httponly' in claimed.headers['set-cookie'].lower() and 'samesite=strict' in claimed.headers['set-cookie'].lower()
+    # A finished login can be claimed only once.
+    assert client.post('/web/logins/' + started['id'] + '/claim', headers=headers).status_code == 409
+    return started
+
+def test_site_sign_in_shares_the_aa_id_with_the_app(setup):
+    client, app, _, _ = setup
+    assert client.get('/').status_code == 200 and 'AA ID' in client.get('/').text
+    assert client.get('/static/aaid.js').status_code == 200
+    assert client.get('/web/me').status_code == 401
+    phone = sign_in(client).json()
+    web_sign_in(client, app)
+    me = client.get('/web/me').json()
+    assert me['id'] == phone['user']['id'] and me['group_name'] == 'ИКБО-01-24'
+    kinds = sorted(s['kind'] for s in me['sessions'])
+    assert kinds == ['app', 'web']
+    # The site can sign a phone out.
+    assert client.delete('/web/sessions/' + phone['session_id']).status_code == 200
+    assert client.get('/v1/me', headers=bearer(phone)).status_code == 401
+    # A web session never works as an app token or refresh token.
+    assert client.post('/web/logout').status_code == 200
+    assert client.get('/web/me').status_code == 401
+
+def test_site_login_token_is_required(setup):
+    client, _, _, _ = setup
+    started = client.post('/web/logins').json()
+    assert client.get('/web/logins/' + started['id']).status_code == 404
+    assert client.get('/web/logins/' + started['id'], headers={'X-Login-Token': 'x' * 31}).status_code == 404
+    assert client.post('/web/logins', headers={'Origin': 'https://evil.example'}).status_code == 403
+
+def test_one_browser_at_a_time_and_phones_unaffected(setup):
+    client, app, _, _ = setup
+    phone = sign_in(client).json()
+    web_sign_in(client, app)
+    first_cookie = client.cookies.get('aaid_web')
+    client.cookies.clear()
+    web_sign_in(client, app)
+    assert client.get('/web/me').status_code == 200
+    client.cookies.clear()
+    client.cookies.set('aaid_web', first_cookie)
+    assert client.get('/web/me').status_code == 401
+    assert client.get('/v1/me', headers=bearer(phone)).status_code == 200

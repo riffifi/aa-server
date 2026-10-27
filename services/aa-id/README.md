@@ -34,12 +34,37 @@ All bodies are JSON. Behind the bundled Nginx the service lives at `PUBLIC_URL/i
 | GET | `/v1/me` | Bearer; the person's AA ID, group, device limit |
 | GET | `/v1/me/sessions` | Bearer; signed-in devices |
 | DELETE | `/v1/me/sessions/{id}` | Bearer; sign a device out |
+| GET | `/` | the AA ID website (see below) |
 | PUT | `/v1/admin/users/{id}/status` | `X-Admin-Token`; `{status: active|blocked}` (disabled without `ADMIN_TOKEN`) |
 
 Access tokens are EdDSA JWTs valid for `ACCESS_TTL_SECONDS` (default 600):
 `iss=aa-id`, `aud=aa`, `sub` (AA ID), `sid` (device session), `mirea` (Pulse person
 id), `grp` (group id or null), `iat`, `exp`. Services that verify offline see a
 revocation within one access-token lifetime; AA ID's own endpoints see it at once.
+
+## Website
+
+The service also serves the AA ID site at `/`: sign in with the MIREA QR code
+(a headless browser on the server runs the MIREA login, reads the Pulse person id
+and group, signs that MIREA session out and closes), then see the account and the
+signed-in devices and sign any of them out. The site uses an `HttpOnly`,
+`SameSite=Strict` cookie; one browser is signed in at a time and site sessions do
+not count towards the phone limit. Site endpoints: `POST /web/logins`,
+`GET /web/logins/{id}` and `POST /web/logins/{id}/claim` (both with the
+`X-Login-Token` the start call returned), `GET /web/me`, `DELETE /web/sessions/{id}`,
+`POST /web/logout`.
+
+### Own domain
+
+`compose.yaml` publishes AA ID on `127.0.0.1:${AAID_PORT:-8091}` (besides `/id/` on
+the main server). For a third-level domain such as `id.yellowteacrew.ru`:
+
+1. Point the domain's DNS at the server (or add it in Cloudflare).
+2. Copy `nginx/aaid-host.conf.example` into the host Nginx, adjust `server_name`,
+   add a certificate (`certbot --nginx -d id.yellowteacrew.ru`) and reload Nginx.
+3. Put `AAID_PUBLIC_URL=https://id.yellowteacrew.ru` in `.env` (secure cookies, and
+   the session server advertises this address to the app), then
+   `docker compose up -d --build`.
 
 ## Session server integration
 

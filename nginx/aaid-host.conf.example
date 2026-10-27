@@ -1,0 +1,21 @@
+# AA ID site on its own third-level domain, for an existing host Nginx.
+# compose.yaml publishes AA ID on 127.0.0.1:${AAID_PORT:-8091}. Point the domain's
+# DNS at this host, add a certificate (e.g. certbot --nginx -d id.yellowteacrew.ru),
+# and set AAID_PUBLIC_URL=https://id.yellowteacrew.ru in .env so cookies are Secure.
+server {
+    listen 80;
+    server_name id.yellowteacrew.ru;
+    access_log off;
+    client_max_body_size 100000;
+    location / {
+        proxy_pass http://127.0.0.1:8091;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For "";
+        # Behind Cloudflare use $http_cf_connecting_ip instead of $remote_addr.
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 30s;
+        proxy_redirect off;
+    }
+}
