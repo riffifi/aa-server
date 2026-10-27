@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#000000"><title>AA ID</title><link rel="stylesheet" href="static/aaid.css"><script src="static/aaid.js" defer></script></head>
 <body><main class="page">
-  <header class="masthead"><span class="wordmark">AA ID</span><span class="label">Один аккаунт на человека</span></header>
+  <header class="masthead"><span class="wordmark">AA ID</span><span id="who" class="label">Один аккаунт на человека</span><a id="site-link" class="text-button push" hidden>AntiAttendance ↗</a></header>
 
   <section id="handoff" class="handoff" hidden>
     <h1 class="title">Вход в AntiAttendance</h1>
@@ -28,6 +28,15 @@
       <div><dt class="label">Создан</dt><dd id="created" class="mono">—</dd></div>
       <div><dt class="label">Идентификатор</dt><dd id="user-id" class="mono small"></dd></div>
     </dl>
+
+    <form id="settings" class="block" aria-labelledby="settings-heading" hidden>
+      <h2 id="settings-heading" class="heading">Настройки AntiAttendance</h2>
+      <label class="label" for="name">Имя, которое видят люди на вашей паре</label>
+      <div class="field"><input id="name" class="input" maxlength="60" autocomplete="name" placeholder="Фамилия Имя" required></div>
+      <label class="row toggle"><input id="pass-allowed" type="checkbox"><span class="row-body"><strong>Можно использовать мой пропуск</strong><span class="meta">Приложение показывает пропуск только тем, кому вы разрешили в Telegram.</span></span></label>
+      <div class="actions"><button class="primary">Сохранить</button><span id="settings-status" class="caption" role="status"></span></div>
+    </form>
+    <p id="settings-note" class="note" hidden></p>
 
     <section class="block" aria-labelledby="schedule-heading">
       <h2 id="schedule-heading" class="heading">Расписание</h2>

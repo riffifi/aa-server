@@ -38,11 +38,9 @@ class MarkBody(BaseModel):
     qr: str = Field(min_length=1, max_length=8192)
     account_ids: list[str] = Field(min_length=1, max_length=200)
 
-class NameBody(BaseModel):
-    label: str = Field(min_length=1, max_length=60)
-
-class PassBody(BaseModel):
-    allowed: bool
+class SettingsBody(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=60)
+    pass_allowed: bool | None = None
 
 def shown(lesson):
     return lesson and {key: lesson[key] for key in ('subject', 'type', 'location', 'teacher')} | {
@@ -205,7 +203,6 @@ def install(app, service, aaid, calendars, static):
             people.sort(key=lambda p: (not p['own'], p['group_id'] != context['group_id'], p['label'].casefold()))
         return {'me': {'group_id': context['group_id'], 'group_name': context['group_name'],
                        'account_id': own['id'] if own else None, 'label': own['label'] if own else None,
-                       'pass_allowed': bool(own['pass_allowed']) if own else None,
                        'connected': bool(own and own['state'] == 'valid')},
                 'lesson': shown(current), 'next': shown(context['next']),
                 'schedule_url': schedule.page_url(context['group_id']) if context['group_id'] else schedule.HOST,
@@ -246,27 +243,33 @@ def install(app, service, aaid, calendars, static):
             results.append({'id': identifier, 'state': result, 'message': message})
         return {'results': results}
 
-    @app.put('/site/me/name')
-    async def rename(body: NameBody, request: Request):
-        session = person(request)
-        own = vault.account_by_pulse(session['mirea'])
-        if own is None:
-            raise HTTPException(404, 'Ваш аккаунт МИРЭА ещё не подключён')
-        try:
-            account = vault.rename(own['id'], body.label)
-        except ValueError:
-            raise HTTPException(400, 'Неверное имя') from None
-        await service.changed()
-        return {'label': account['label']}
+    # The person's own settings, changed on the AA ID site (AA ID token, /api/me/).
+    def own_account(request):
+        caller = request.state.aaid
+        if caller is None:
+            raise HTTPException(401, 'AA ID sign-in required')
+        return vault.account_by_pulse(caller['mirea'])
 
-    @app.put('/site/me/pass')
-    async def pass_permission(body: PassBody, request: Request):
-        # Whether the person's digital pass may be used from the app (with the
-        # per-person Telegram approval on top, as before).
-        session = person(request)
-        own = vault.account_by_pulse(session['mirea'])
+    def settings(own):
+        return {'connected': own is not None and own['state'] == 'valid', 'account': own is not None,
+                'label': own['label'] if own else None, 'pass_allowed': bool(own['pass_allowed']) if own else None,
+                'group_name': own['group_name'] if own else None}
+
+    @app.get('/api/me/account')
+    async def my_account(request: Request):
+        return settings(own_account(request))
+
+    @app.put('/api/me/account')
+    async def change_my_account(body: SettingsBody, request: Request):
+        own = own_account(request)
         if own is None:
-            raise HTTPException(404, 'Ваш аккаунт МИРЭА ещё не подключён')
-        account = vault.set_pass_allowed(own['id'], body.allowed)
+            raise HTTPException(404, 'This MIREA account is not connected to the session server')
+        if body.label is not None:
+            try:
+                vault.rename(own['id'], body.label)
+            except ValueError:
+                raise HTTPException(400, 'Invalid name') from None
+        if body.pass_allowed is not None:
+            vault.set_pass_allowed(own['id'], body.pass_allowed)
         await service.changed()
-        return {'pass_allowed': account['pass_allowed']}
+        return settings(vault.account(own['id']))

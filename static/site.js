@@ -20,13 +20,24 @@ async function api(path, options = {}) {
 }
 const json = body => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
+// Without a site session, go to AA ID right away: a person signed in there comes
+// straight back without seeing a sign-in page. Not after a failed sign-in or a sign-out.
+function autoSignIn() {
+  const params = new URLSearchParams(location.search);
+  if (params.has('signin') || params.has('signedout')) return false;
+  try { if (Date.now() - Number(sessionStorage.getItem('aa-auto-signin') || 0) < 60000) return false; sessionStorage.setItem('aa-auto-signin', String(Date.now())); } catch (_) { /* no storage */ }
+  location.assign('/auth/aaid');
+  return true;
+}
+
 async function load() {
   try {
     state = await api('/site/state');
     showError('');
     render();
   } catch (error) {
-    if (error.status === 401) { $('app').hidden = true; $('signin').hidden = false; $('logout').hidden = true; $('settings-open').hidden = true; $('who').textContent = ''; return; }
+    if (error.status === 401 && autoSignIn()) return;
+    if (error.status === 401) { $('app').hidden = true; $('signin').hidden = false; $('logout').hidden = true; $('aaid-link').hidden = true; $('who').textContent = ''; return; }
     showError(error.message);
   }
 }
@@ -36,9 +47,9 @@ function render() {
   const me = state.me;
   $('who').textContent = [me.label && me.label !== 'Без имени' ? me.label : null, me.group_name].filter(Boolean).join(' · ');
   $('connect').hidden = me.connected;
-  $('settings-open').hidden = !me.account_id;
-  // Someone new is asked for their name right away.
-  if (me.account_id && me.label === 'Без имени' && !settingsSeen) openSettings();
+  if (state.aaid_url) { $('aaid-link').href = $('name-link').href = state.aaid_url.replace(/\/$/, '') + '/#settings'; }
+  $('aaid-link').hidden = !state.aaid_url;
+  $('name-banner').hidden = !(me.account_id && me.label === 'Без имени' && state.aaid_url);
   $('schedule-link').href = state.schedule_url;
 
   const lesson = state.lesson;
@@ -184,28 +195,12 @@ $('mark').addEventListener('click', openScanner);
 $('scanner-close').addEventListener('click', closeScanner);
 $('paste-form').addEventListener('submit', event => { event.preventDefault(); lastToken = null; submit($('paste').value); });
 $('select-unmarked').addEventListener('click', () => { touched = true; selected.clear(); state.people.filter(markable).forEach(p => selected.add(p.id)); render(); });
-let settingsSeen = false;
-function openSettings() {
-  settingsSeen = true;
-  $('name').value = state.me.label === 'Без имени' ? '' : state.me.label;
-  $('pass-allowed').checked = Boolean(state.me.pass_allowed);
-  $('settings').hidden = false;
-  $('settings').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-$('settings-open').addEventListener('click', openSettings);
-$('settings-close').addEventListener('click', () => { $('settings').hidden = true; });
-$('settings').addEventListener('submit', async event => {
-  event.preventDefault();
-  const put = (path, body) => api(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  try {
-    if ($('name').value.trim() !== state.me.label) await put('/site/me/name', { label: $('name').value.trim() });
-    if ($('pass-allowed').checked !== Boolean(state.me.pass_allowed)) await put('/site/me/pass', { allowed: $('pass-allowed').checked });
-    $('settings').hidden = true; load();
-  } catch (error) { showError(error.message); }
+$('logout').addEventListener('click', async () => {
+  try { await api('/site/logout', { method: 'POST' }); } catch (_) { /* signed out anyway */ }
+  history.replaceState(null, '', '/?signedout=1'); load();
 });
-$('logout').addEventListener('click', async () => { try { await api('/site/logout', { method: 'POST' }); } catch (_) { /* signed out anyway */ } load(); });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('scanner').hidden) closeScanner(); });
-if (new URLSearchParams(location.search).get('signin') === 'failed') { showError('Не удалось войти через AA ID. Попробуйте ещё раз.'); history.replaceState(null, '', '/'); }
+if (new URLSearchParams(location.search).get('signin') === 'failed') showError('Не удалось войти через AA ID. Попробуйте ещё раз.');
 load();
 setInterval(() => { if (!document.hidden && $('scanner').hidden) load(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && $('scanner').hidden) load(); });

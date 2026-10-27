@@ -134,9 +134,9 @@ def test_aa_id_hands_over_the_mirea_session(setup):
     assert client.post('/internal/aaid/link', json=body, headers={'authorization': 'Bearer ' + link}).status_code == 200
     row = vault.account_by_pulse('new')
     assert row['label'] == 'Без имени' and row['group_id'] == 2 and vault.secret(row)['storage_state'] == {'cookies': []}
-    # The person names themselves on the site.
-    sign_in(client, 'new')
-    assert client.put('/site/me/name', json={'label': 'Новый Человек'}).json()['label'] == 'Новый Человек'
+    # The person names themselves on the AA ID site.
+    renamed = client.put('/api/me/account', json={'label': 'Новый Человек'}, headers={'authorization': 'Bearer ' + token('new')})
+    assert renamed.json()['label'] == 'Новый Человек'
     # A reconnect keeps the name and group.
     client.post('/internal/aaid/link', json={**body, 'group_id': 3}, headers={'authorization': 'Bearer ' + link})
     row = vault.account_by_pulse('new')
@@ -159,13 +159,14 @@ def test_large_browser_state_is_accepted_only_for_the_link(setup):
     assert response.status_code == 200
     assert client.post('/api/accounts/import', json={'cookie': 'session=x', 'label': 'y' * 300000}).status_code == 413
 
-def test_person_sets_name_and_pass_permission(setup):
+def test_settings_through_aa_id(setup):
     client, app, _ = setup
-    sign_in(client)
-    me = client.get('/site/state').json()['me']
-    assert me['pass_allowed'] is True
-    assert client.put('/site/me/pass', json={'allowed': False}).json() == {'pass_allowed': False}
-    assert client.get('/site/state').json()['me']['pass_allowed'] is False
+    bearer = {'authorization': 'Bearer ' + token('ann')}
+    assert client.get('/api/me/account').status_code == 401
+    me = client.get('/api/me/account', headers=bearer).json()
+    assert me == {'connected': True, 'account': True, 'label': 'Анна', 'pass_allowed': True, 'group_name': 'ГР-1'}
+    changed = client.put('/api/me/account', json={'pass_allowed': False}, headers=bearer).json()
+    assert changed['pass_allowed'] is False and changed['label'] == 'Анна'
     assert app.state.service.vault.account_by_pulse('ann')['pass_allowed'] == 0
-    client.post('/site/logout')
-    assert client.put('/site/me/pass', json={'allowed': True}).status_code == 401
+    assert client.put('/api/me/account', json={'label': 'x'}, headers={'authorization': 'Bearer ' + token('nobody')}).status_code == 404
+    assert client.get('/api/me/account', headers={'authorization': 'Bearer ' + token('nobody')}).json()['account'] is False

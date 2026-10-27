@@ -36,6 +36,7 @@ async function load() {
     render(me);
   } catch (error) {
     $('account').hidden = true; $('signin').hidden = false;
+    $('who').textContent = 'Один аккаунт на человека'; $('site-link').hidden = true;
     if (error.status !== 401) showError(error.message);
   }
 }
@@ -48,9 +49,30 @@ async function continueToSite() {
   } catch (error) { showError(error.message); $('continue').disabled = false; }
 }
 
+let account = null;
+async function loadSettings() {
+  try {
+    account = await api('web/account');
+    $('settings').hidden = !account.account; $('settings-note').hidden = true;
+    $('name').value = account.label === 'Без имени' ? '' : account.label;
+    $('pass-allowed').checked = Boolean(account.pass_allowed);
+    if (account.label && account.label !== 'Без имени') $('who').textContent = account.label + (lastMe && lastMe.group_name ? ' · ' + lastMe.group_name : '');
+    if (location.hash === '#settings') $('settings').scrollIntoView({ block: 'start' });
+  } catch (error) {
+    $('settings').hidden = true; $('settings-note').textContent = error.message; $('settings-note').hidden = false;
+  }
+}
+
+let lastMe = null;
 function render(me) {
   const first = $('account').hidden;
+  lastMe = me;
   $('signin').hidden = true; $('account').hidden = false;
+  $('who').textContent = 'Вы вошли · ' + (me.group_name || 'AA ID');
+  if (me.site_url) { $('site-link').href = me.site_url; $('site-link').hidden = false; }
+  if (first) loadSettings();
+  // Signed in already: go straight back to AntiAttendance, no extra click.
+  if (handoff && first) { continueToSite(); }
   if (handoff) {
     $('handoff').hidden = false;
     $('handoff-lead').textContent = 'Сайт AntiAttendance просит войти как ' + (me.group_name || 'вы') + '. Он узнает ваш AA ID и группу.';
@@ -166,6 +188,18 @@ async function poll(id) {
 
 $('start').addEventListener('click', start);
 $('continue').addEventListener('click', continueToSite);
+$('settings').addEventListener('submit', async event => {
+  event.preventDefault();
+  const body = {};
+  if ($('name').value.trim() !== account.label) body.label = $('name').value.trim();
+  if ($('pass-allowed').checked !== Boolean(account.pass_allowed)) body.pass_allowed = $('pass-allowed').checked;
+  if (!Object.keys(body).length) { $('settings-status').textContent = 'Нет изменений'; return; }
+  try {
+    await api('web/account', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    $('settings-status').textContent = 'Сохранено';
+    await loadSettings();
+  } catch (error) { $('settings-status').textContent = error.message; }
+});
 $('acs-refresh').addEventListener('click', loadAttendance);
 $('logout').addEventListener('click', async () => {
   try { await api('web/logout', { method: 'POST' }); } catch (_) { /* signed out locally anyway */ }

@@ -1,3 +1,4 @@
+import json
 import struct
 import httpx
 import time
@@ -48,6 +49,12 @@ def setup(tmp_path, monkeypatch):
         if request.url.host == 'sessions' and request.url.path == '/internal/aaid/link':
             claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa-link')
             return httpx.Response(200 if claims and claims['mirea'] == 'uid-alice' else 422, json={})
+        if request.url.host == 'sessions' and request.url.path == '/api/me/account':
+            claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
+            if claims['mirea'] != 'uid-alice':
+                return httpx.Response(404, json={'detail': 'not connected'})
+            label = json.loads(request.content)['label'] if request.method == 'PUT' else 'Алиса'
+            return httpx.Response(200, json={'account': True, 'connected': True, 'label': label, 'pass_allowed': True, 'group_name': 'ИКБО-01-24', 'secret': 'x'})
         if request.url.host == 'sessions':
             claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
             if claims['mirea'] != 'uid-alice':
@@ -272,3 +279,14 @@ def test_antiattendance_site_signs_in_with_a_one_time_code(setup):
     person = client.post('/v1/site/exchange', json={'code': code}).json()
     assert person['mirea'] == 'uid-alice' and person['group_id'] == 4242
     assert client.post('/v1/site/exchange', json={'code': code}).status_code == 400  # once only
+
+def test_site_settings_go_to_the_session_server(setup):
+    client, app, _, _ = setup
+    assert client.get('/web/account').status_code == 401
+    web_sign_in(client, app)
+    assert client.get('/web/me').json()['site_url'] == 'https://aa.example'
+    assert client.get('/web/account').json() == {'account': True, 'connected': True, 'label': 'Алиса', 'pass_allowed': True, 'group_name': 'ИКБО-01-24'}
+    assert client.put('/web/account', json={'label': 'Алиса Петрова'}).json()['label'] == 'Алиса Петрова'
+    client.cookies.clear()
+    web_sign_in(client, app, ('uid-bob', None, None))
+    assert client.get('/web/account').status_code == 404

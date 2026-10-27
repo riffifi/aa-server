@@ -40,6 +40,10 @@ class RefreshBody(BaseModel):
 class ClaimBody(BaseModel):
     token: str = Field(min_length=20, max_length=200)
 
+class SettingsBody(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=60)
+    pass_allowed: bool | None = None
+
 class AuthorizeBody(BaseModel):
     state: str = Field(pattern=r'^[A-Za-z0-9_-]{16,128}$')
 
@@ -73,7 +77,7 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         logins = MireaLogins(slots=_number('LOGIN_SLOTS', 4), max_active=_number('MAX_ACTIVE_LOGINS', 16),
                              ttl=_number('LOGIN_TTL_SECONDS', 600, 120))
     secure_cookie = os.environ.get('AAID_PUBLIC_URL', '').startswith('https://')
-    web_ttl = _number('WEB_SESSION_TTL_SECONDS', 7 * 86400, 600)
+    web_ttl = _number('WEB_SESSION_TTL_SECONDS', 30 * 86400, 600)
     attempts = defaultdict(deque)
     static = Path(__file__).with_name('static')
     # The session server, reached inside the Compose network. It holds the Pulse
@@ -290,7 +294,31 @@ def create_app(directory=None, identity=None, logins=None, http=None):
     async def site_me(request: Request):
         session, user = site_session(request)
         devices = [{**dict(row), 'current': row['id'] == session['id']} for row in store.sessions(user['id'])]
-        return {**public(user), 'sessions': devices, 'max_sessions': max_sessions}
+        return {**public(user), 'sessions': devices, 'max_sessions': max_sessions, 'site_url': site_url or None}
+
+    async def sessions_call(user, session, method, body=None):
+        # The person's own account on the session server, with a one-minute AA ID token.
+        try:
+            response = await http.request(method, sessions_url + '/api/me/account', json=body,
+                                          headers={'authorization': 'Bearer ' + access_token(user, session)})
+        except httpx.HTTPError:
+            raise HTTPException(503, 'Сервер AntiAttendance недоступен') from None
+        if response.status_code == 404:
+            raise HTTPException(404, 'Ваш аккаунт МИРЭА не подключён к серверу AntiAttendance')
+        if response.status_code != 200:
+            raise HTTPException(503, 'Сервер AntiAttendance не ответил')
+        data = response.json()
+        return {key: data.get(key) for key in ('account', 'connected', 'label', 'pass_allowed', 'group_name')}
+
+    @app.get('/web/account')
+    async def site_account(request: Request):
+        session, user = site_session(request)
+        return await sessions_call(user, session, 'GET')
+
+    @app.put('/web/account')
+    async def site_account_change(body: SettingsBody, request: Request):
+        session, user = site_session(request)
+        return await sessions_call(user, session, 'PUT', body.model_dump(exclude_none=True))
 
     @app.get('/web/attendance')
     async def site_attendance(request: Request):

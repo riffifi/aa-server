@@ -86,3 +86,13 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
 
 .banner { margin: 24px 0 0; padding: 16px; background: var(--surface); border-left: 4px solid var(--danger); }
 .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* Settings and links to AntiAttendance */
+.masthead .push { margin-left: auto; }
+.field { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.input { flex: 1 1 220px; min-height: 48px; padding: 12px; border: 2px solid var(--line-strong); border-radius: 0;
+  background: var(--background); color: var(--foreground); font: 400 16px/24px "Geist", system-ui, sans-serif; }
+.input:focus { outline: none; border-color: var(--accent); }
+.toggle { justify-content: flex-start; cursor: pointer; margin-top: 16px; border-top: 1px solid var(--line); }
+.toggle input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--accent); }
+.actions .caption { align-self: center; }
