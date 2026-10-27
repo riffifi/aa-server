@@ -1,9 +1,10 @@
 """MIREA QR sign-in for the AA ID site.
 
 A headless browser opens the Pulse login, shows the person the MIREA QR code,
-and after approval asks Pulse who signed in. The browser context, with every
-MIREA cookie, is closed right after; AA ID keeps only the Pulse person id and
-group."""
+and after approval asks Pulse who signed in. AA ID keeps only the Pulse person id
+and group. The fresh MIREA session (cookie and browser state) is handed once to the
+session server, which keeps it for marking and turnstile data; it is never stored
+here."""
 import asyncio
 import io
 import json
@@ -31,6 +32,7 @@ class LoginJob:
     approval_submitted: bool = False
     approved_at: float | None = None
     identity: tuple | None = None
+    session: dict | None = None
     claimed: bool = False
     task: object = None
 
@@ -113,6 +115,16 @@ class MireaLogins:
         except Exception:
             group = (None, None)
         return uid, *group
+
+    async def session(self, context):
+        """The Pulse cookie header and browser state, for the session server."""
+        cookies = await context.cookies([pulse.HOST + pulse.PROFILE])
+        header = '; '.join(f"{c['name']}={c['value']}" for c in cookies if c['value']
+                           and not c['name'].startswith(('.AspNetCore.Correlation.', '.AspNetCore.OpenIdConnect.Nonce.')))
+        pulse.validate_cookie(header)
+        expiry = [c['expires'] for c in cookies if re.fullmatch(r'\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?', c['name']) and c.get('expires', -1) > time.time()]
+        return {'cookie': header, 'storage_state': await context.storage_state(),
+                'expires_at': min(expiry) if expiry else None, 'renewed_at': time.time()}
 
     async def _click(self, page, selector_or_locator):
         try:
@@ -218,12 +230,11 @@ class MireaLogins:
                         except Exception:
                             identity = None
                         if identity:
-                            job.identity, job.status, job.qr = identity, 'complete', None
-                            # Best-effort: end this MIREA session; AA ID needed it only once.
                             try:
-                                await context.request.get(pulse.HOST + '/api/auth/logout?redirectUri=https%3A%2F%2Fpulse.mirea.ru', timeout=10000, max_redirects=0)
+                                job.session = await self.session(context)
                             except Exception:
-                                pass
+                                job.session = None
+                            job.identity, job.status, job.qr = identity, 'complete', None
                             return
                         await self.advance(page)
                     elif host == 'sso.mirea.ru':

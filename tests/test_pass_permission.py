@@ -1,3 +1,4 @@
+from test_server import site_session
 import pytest
 from fastapi.testclient import TestClient
 from app.main import create_app
@@ -34,7 +35,7 @@ def setup(tmp_path):
 
 def signin(client, service, account_id):
     # A page session (normally from a university sign-in) unlocks detail and the toggle.
-    client.cookies.set('page_session', service.vault.create_page_session(account_id))
+    client.cookies.set('aa_site', site_session(service.vault, account_id))
 
 
 def test_pass_defaults_on_and_single_account_endpoint(setup):
@@ -44,8 +45,9 @@ def test_pass_defaults_on_and_single_account_endpoint(setup):
     detail = client.get('/api/accounts/' + row['id'])
     assert detail.status_code == 200 and detail.json()['pass_allowed'] is True
     assert client.get('/api/accounts/missing').status_code == 404
-    page = client.get('/u/' + row['id'])
-    assert page.status_code == 200 and 'Мой аккаунт' in page.text
+    # The 1.x owner page now leads to the site.
+    page = client.get('/u/' + row['id'], follow_redirects=False)
+    assert page.status_code == 301 and page.headers['location'] == '/'
 
 
 def test_toggling_permission_blocks_pass_rpcs_only(setup):

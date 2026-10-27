@@ -5,12 +5,13 @@ import json
 import logging
 import os
 import time
+import httpx
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .vault import Vault, Conflict, digest
@@ -19,6 +20,7 @@ from .telegram import TelegramBot
 from .agreements import Agreements
 from . import protocol
 from . import aaid as aa_id
+from . import schedule, site
 from .pass_testing import daily_access, matches as matches_test_password
 
 logger = logging.getLogger(__name__)
@@ -174,7 +176,7 @@ class Service:
         await self.transport.close()
         self.vault.close()
 
-def create_app(directory=None, password=None, transport=None, background=True, aaid=None):
+def create_app(directory=None, password=None, transport=None, background=True, aaid=None, calendar_fetch=None):
     # AA ID sign-in is enforced on the app API when a verifier is configured
     # (AAID_JWKS_URL), and left off for development servers without AA ID.
     aaid = aaid if aaid is not None else aa_id.from_environment(os.environ)
@@ -222,7 +224,7 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         size = request.headers.get('content-length')
         if size and (not size.isdigit() or int(size) > 200000):
             return JSONResponse({'detail': 'Request too large'}, status_code=413)
-        if request.url.path.startswith('/api/') and request.method not in ('GET', 'HEAD'):
+        if request.url.path.startswith(('/api/', '/site/')) and request.method not in ('GET', 'HEAD'):
             origin = request.headers.get('origin')
             if origin and urlparse(origin).netloc != request.headers.get('host'):
                 return JSONResponse({'detail': 'Invalid origin'}, status_code=403)
@@ -258,7 +260,10 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         return row
 
     def page_authed(request, account_id):
-        return vault.page_session_account(request.cookies.get('page_session', '')) == account_id
+        # The account's own person, signed in to the site with AA ID.
+        session = vault.site_session(request.cookies.get(site.SESSION_COOKIE, ''))
+        row = vault.account(account_id) if session else None
+        return row is not None and row['pulse_id'] == session['mirea']
 
     def test_access(request):
         password = request.headers.get('x-pass-test-key', '')
@@ -279,11 +284,6 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         raise HTTPException(403, 'Owner approval in Telegram is required for this person',
                             headers={'X-Pass-Test-Invalid': '1'} if request.headers.get('x-pass-test-key') else None)
 
-    def set_page_cookie(response, token):
-        secure = os.environ.get('PUBLIC_URL', '').startswith('https://')
-        response.set_cookie('page_session', token, max_age=2592000, httponly=True, secure=secure, samesite='lax', path='/')
-        return response
-
     async def bounded_body(request, limit=65536):
         result = bytearray()
         async for part in request.stream():
@@ -301,23 +301,23 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         return {'ok': True, 'protocol': 2, 'sync': 'automatic',
                 'aaid': {'required': aaid.enforce, 'url': aaid.public_url} if aaid is not None else {'required': False}}
 
-    @app.get('/')
-    async def index():
-        return FileResponse(static / 'picker.html')
+    calendar_http = None
+    async def fetch_calendar(url):
+        nonlocal calendar_http
+        calendar_http = calendar_http or httpx.AsyncClient(timeout=20, follow_redirects=False)
+        response = await calendar_http.get(url)
+        return response.text if response.status_code == 200 else None
+    site.install(app, service, aaid, schedule.Calendars(calendar_fetch or fetch_calendar), static)
 
     @app.get('/panel')
     async def panel_page():
         return FileResponse(static / 'panel.html')
 
     @app.get('/login')
-    async def login_page():
-        return FileResponse(static / 'login.html')
-
     @app.get('/u/{identifier}')
-    async def user_page(identifier: str):
-        # Each account's own page. The identifier is the account's opaque UUID,
-        # which acts as the capability for this page under the URL-only model.
-        return FileResponse(static / 'user.html')
+    async def old_pages(identifier: str = ''):
+        # 1.x pages; everything is on the AA ID site now.
+        return RedirectResponse('/', status_code=301)
 
     @app.post('/panel/api/login')
     async def login(body: LoginBody, request: Request):
@@ -390,31 +390,6 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             raise HTTPException(429, str(error)) from None
         return {'id': job.id, 'enrollment_path': '/enroll/' + job.id + '/' + token, 'expires_in': 600}
 
-    @app.post('/api/logins')
-    async def public_start_login(body: LoginStart, request: Request):
-        # Self-service: an account owner opens the picker, chooses their account
-        # (or adds a new one) and starts a login without the panel password. This
-        # matches the URL-is-the-capability model; destructive actions still need
-        # the panel. The enrollment job is reached through the public /enroll token.
-        # Soft anti-spam only. Behind the bundled Nginx every caller shares one
-        # source address, so this is effectively a global burst limit; the real
-        # resource guard is the browser's active-login cap below.
-        address = request.client.host if request.client else 'unknown'
-        queue = attempts[('public-login', address)]
-        now = time.time()
-        while queue and queue[0] < now - 180:
-            queue.popleft()
-        if len(queue) >= 40:
-            raise HTTPException(429, 'Too many login attempts right now; wait a minute')
-        queue.append(now)
-        if body.account_id and vault.account(body.account_id) is None:
-            raise HTTPException(404, 'Account not found')
-        try:
-            job, token = service.browser.start(body.label, body.account_id)
-        except ValueError as error:
-            raise HTTPException(429, str(error)) from None
-        return {'id': job.id, 'enrollment_path': '/enroll/' + job.id + '/' + token, 'expires_in': 600}
-
     def login_job(identifier):
         job = service.browser.jobs.get(identifier)
         if job is None or time.time() - job.created > 900:
@@ -469,13 +444,11 @@ def create_app(directory=None, password=None, transport=None, background=True, a
 
     @app.post('/enroll/{identifier}/{token}/claim')
     async def owner_claim(identifier: str, token: str):
-        # After "sign in via university" completes, the holder of this enrollment
-        # token (who just approved the login in MIREA) gets a page session for the
-        # account it produced, and is sent to that account's page.
+        # A panel-issued enrollment finished; the person then signs in to the site with AA ID.
         job = public_job(identifier, token)
         if job.status != 'complete' or not job.result_id:
             raise HTTPException(409, 'Login is not complete yet')
-        return set_page_cookie(JSONResponse({'account_id': job.result_id}), vault.create_page_session(job.result_id))
+        return {'account_id': job.result_id}
 
     @app.post('/panel/api/accounts/{identifier}/refresh')
     async def refresh_account(identifier: str, request: Request):
@@ -624,55 +597,6 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             raise HTTPException(503, 'Pulse is unavailable; try again')
         events, inside = result
         return {'inside': inside, 'events': events, 'since': start}
-
-    @app.get('/api/accounts/{identifier}/page')
-    async def account_page_state(identifier: str, request: Request):
-        row = vault.account(identifier)
-        if row is None:
-            raise HTTPException(404, 'Account not found')
-        if page_authed(request, identifier):
-            data = vault.public(row)
-            data['authed'] = True
-            data['has_password'] = vault.has_page_password(identifier)
-            return data
-        return {'authed': False, 'has_password': vault.has_page_password(identifier),
-                'id': identifier, 'label': row['label']}
-
-    @app.post('/api/accounts/{identifier}/page/password')
-    async def account_set_page_password(identifier: str, body: PagePasswordBody, request: Request):
-        if vault.account(identifier) is None:
-            raise HTTPException(404, 'Account not found')
-        # Setting OR changing the password always requires an active session, so a
-        # passwordless account cannot be hijacked by whoever sets a password first.
-        # The only way to get that first session is signing in via the university
-        # (the /claim path), which proves the account is yours.
-        if not page_authed(request, identifier):
-            raise HTTPException(401, 'Sign in via the university first to set a password')
-        vault.set_page_password(identifier, body.password)
-        return JSONResponse({'ok': True, 'authed': True})
-
-    @app.post('/api/accounts/{identifier}/page/login')
-    async def account_page_login(identifier: str, body: PagePasswordBody, request: Request):
-        if vault.account(identifier) is None:
-            raise HTTPException(404, 'Account not found')
-        address = request.client.host if request.client else 'unknown'
-        queue = attempts[('page-login', identifier, address)]
-        now = time.time()
-        while queue and queue[0] < now - 300:
-            queue.popleft()
-        if len(queue) >= 10:
-            raise HTTPException(429, 'Too many attempts; wait a few minutes')
-        queue.append(now)
-        if not vault.verify_page_password(identifier, body.password):
-            raise HTTPException(401, 'Wrong password')
-        return set_page_cookie(JSONResponse({'ok': True, 'authed': True}), vault.create_page_session(identifier))
-
-    @app.post('/api/accounts/{identifier}/page/logout')
-    async def account_page_logout(identifier: str, request: Request):
-        vault.delete_page_session(request.cookies.get('page_session', ''))
-        response = JSONResponse({'ok': True})
-        response.delete_cookie('page_session', path='/')
-        return response
 
     @app.put('/api/accounts/{identifier}/label')
     @app.put('/panel/api/accounts/{identifier}/label')
@@ -841,6 +765,10 @@ def create_app(directory=None, password=None, transport=None, background=True, a
                 raise HTTPException(503, 'Account identity mismatch')
             vault.update_state(identifier, state, row['version'])
             await service.changed()
+        if method == 'attendance':
+            # Marks from the app count on the site too.
+            result, message = protocol.approval(reply.status, reply.headers, reply.body)
+            vault.record_mark(identifier, result, message, 'app')
         if reply.status == 200 and method in ('pass-token', 'pass-issue'):
             try:
                 message, grpc_status = protocol.grpc_message(reply.body, reply.headers)

@@ -1,6 +1,11 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let job = null;
+// Sign-in for the AntiAttendance site: ?continue=aa&state=…, with fresh=1 asking for a
+// new MIREA QR sign-in so the site gets a working MIREA session again.
+const params = new URLSearchParams(location.search);
+const handoff = params.get('continue') === 'aa' && /^[A-Za-z0-9_-]{16,128}$/.test(params.get('state') || '') ? params.get('state') : null;
+let needFresh = Boolean(handoff) && params.get('fresh') === '1';
 
 const STATUS = {
   waiting: 'Готовим безопасный вход…',
@@ -26,16 +31,30 @@ async function api(path, options = {}) {
 async function load() {
   showError('');
   try {
-    render(await api('web/me'));
+    const me = await api('web/me');
+    if (needFresh) { $('account').hidden = true; $('handoff').hidden = true; $('signin').hidden = false; return; }
+    render(me);
   } catch (error) {
     $('account').hidden = true; $('signin').hidden = false;
     if (error.status !== 401) showError(error.message);
   }
 }
 
+async function continueToSite() {
+  $('continue').disabled = true;
+  try {
+    const result = await api('web/authorize', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: handoff }) });
+    location.assign(result.redirect);
+  } catch (error) { showError(error.message); $('continue').disabled = false; }
+}
+
 function render(me) {
   const first = $('account').hidden;
   $('signin').hidden = true; $('account').hidden = false;
+  if (handoff) {
+    $('handoff').hidden = false;
+    $('handoff-lead').textContent = 'Сайт AntiAttendance просит войти как ' + (me.group_name || 'вы') + '. Он узнает ваш AA ID и группу.';
+  }
   if (first) { loadSchedule(); loadAttendance(); }
   $('group').textContent = me.group_name || (me.group_id ? 'Группа ' + me.group_id : 'не определена');
   $('created').textContent = when(me.created);
@@ -127,9 +146,12 @@ async function poll(id) {
     if (state.qr_png) { $('qr').src = state.qr_png; $('qr').hidden = false; $('qr-link').href = state.qr; $('qr-link').hidden = false; }
     else { $('qr').hidden = true; $('qr-link').hidden = true; }
     if (state.status === 'complete') {
-      await api('web/logins/' + encodeURIComponent(id) + '/claim', { method: 'POST', headers });
-      job = null;
+      const claimed = await api('web/logins/' + encodeURIComponent(id) + '/claim', { method: 'POST', headers });
+      job = null; needFresh = false;
       $('status').hidden = true; $('start').disabled = false;
+      // Straight back to the site after signing in for it.
+      if (handoff && claimed.linked !== false) { await continueToSite(); return; }
+      if (handoff) showError('Вход выполнен, но сервер AntiAttendance не принял сессию МИРЭА. Продолжите или попробуйте ещё раз.');
       await load();
       return;
     }
@@ -143,6 +165,7 @@ async function poll(id) {
 }
 
 $('start').addEventListener('click', start);
+$('continue').addEventListener('click', continueToSite);
 $('acs-refresh').addEventListener('click', loadAttendance);
 $('logout').addEventListener('click', async () => {
   try { await api('web/logout', { method: 'POST' }); } catch (_) { /* signed out locally anyway */ }

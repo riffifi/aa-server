@@ -78,10 +78,15 @@ the main server). For a third-level domain such as `id.yellowteacrew.ru`:
 
 The session server verifies AA ID tokens with the keys from `AAID_JWKS_URL`
 (Compose points it at the `aaid` container). With `AAID_ENFORCE=1` it rejects every
-`/api/*` request without a valid AA ID bearer token (`401`, `X-AAID-Required: 1`). The browser pages
-keep working through their own MIREA sign-in: `POST /api/logins`,
-`/api/groups/search`, the owner page endpoints, and owner endpoints of the account
-whose `page_session` cookie is presented. `GET /health` reports `aaid.required` and
+`/api/*` request without a valid AA ID bearer token (`401`, `X-AAID-Required: 1`). The
+AntiAttendance site (2.0) signs people in with AA ID: `?continue=aa&state=…` on this
+site shows "Продолжить в AntiAttendance", `POST /web/authorize` issues a one-time code
+(60 s) sent only to `AA_SITE_URL/auth/callback`, and the session server trades it at
+`POST /v1/site/exchange` for the person (id, MIREA id, group). A QR sign-in on this site
+also hands the fresh MIREA session to the session server (`POST /internal/aaid/link`,
+signed with audience `aa-link`), so the person's account appears there without a second
+QR; AA ID itself still stores no MIREA cookie. With `fresh=1` the site asks for a new QR
+sign-in even when signed in. `GET /health` reports `aaid.required` and
 `aaid.url` so the app can find AA ID. `GET /api/accounts` marks the caller's own
 account with `own: true` (same Pulse identity).
 

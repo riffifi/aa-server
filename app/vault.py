@@ -60,7 +60,12 @@ class Vault:
             version INTEGER NOT NULL, kind TEXT NOT NULL, created REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS telegram_links(chat_id INTEGER NOT NULL, account_id TEXT NOT NULL,
             created REAL NOT NULL, PRIMARY KEY(chat_id, account_id));
-          CREATE TABLE IF NOT EXISTS page_sessions(key_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS site_sessions(key_hash TEXT PRIMARY KEY, aaid_id TEXT NOT NULL, mirea TEXT NOT NULL,
+            group_id INTEGER, group_name TEXT, expires REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS marks(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL,
+            state TEXT NOT NULL, message TEXT NOT NULL, source TEXT NOT NULL, created REAL NOT NULL);
+          CREATE INDEX IF NOT EXISTS marks_account ON marks(account_id, created);
+          DROP TABLE IF EXISTS page_sessions;
         ''')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
@@ -70,8 +75,8 @@ class Vault:
             # on so existing passes keep working; owners can revoke it per account.
             self.db.execute('ALTER TABLE accounts ADD COLUMN pass_allowed INTEGER NOT NULL DEFAULT 1')
         if 'page_seen_at' not in columns:
-            # Last time the owner signed in to their own page (sets the "has logged in"
-            # indicator in the panel). NULL means they have never opened it.
+            # Last time the person signed in to the site (the "has logged in" indicator
+            # in the panel). NULL means they never have.
             self.db.execute('ALTER TABLE accounts ADD COLUMN page_seen_at REAL')
         event_columns = {row[1] for row in self.db.execute('PRAGMA table_info(events)')}
         for column in ('group_id', 'previous_group_id'):
@@ -271,50 +276,52 @@ class Vault:
             for table in ('pass_requests', 'pass_grants'):
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     db.execute(f'DELETE FROM {table} WHERE account_id=?', (account_id,))
-            db.execute('DELETE FROM page_sessions WHERE account_id=?', (account_id,))
+            db.execute('DELETE FROM marks WHERE account_id=?', (account_id,))
             self._event(db, account_id, 0, 'deleted', row['group_id'] if row else None)
 
-    def set_page_password(self, account_id, password):
+    def account_by_pulse(self, pulse_id):
         with self.transaction() as db:
-            row = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
-            if row is None:
-                raise KeyError(account_id)
-            secret = self.secret(row)
-            secret['page_password'] = password_hash(password)
-            db.execute('UPDATE accounts SET secret=? WHERE id=?', (self.seal(secret), account_id))
+            row = db.execute('SELECT * FROM accounts WHERE pulse_id=?', (pulse_id,)).fetchone()
+            return dict(row) if row else None
 
-    def has_page_password(self, account_id):
-        row = self.account(account_id)
-        return bool(row and self.secret(row).get('page_password'))
-
-    def verify_page_password(self, account_id, password):
-        row = self.account(account_id)
-        if row is None:
-            return False
-        record = self.secret(row).get('page_password')
-        return bool(record) and password_matches(password, record)
-
-    def create_page_session(self, account_id, ttl=2592000):
+    def create_site_session(self, aaid_id, mirea, group_id, group_name, ttl=2592000):
         token = secrets.token_urlsafe(32)
         with self.transaction() as db:
-            db.execute('DELETE FROM page_sessions WHERE expires < ?', (time.time(),))
-            db.execute('INSERT INTO page_sessions VALUES(?,?,?)', (digest(token), account_id, time.time() + ttl))
-            # A new session means the owner just signed in to their page.
-            db.execute('UPDATE accounts SET page_seen_at=? WHERE id=?', (time.time(), account_id))
+            db.execute('DELETE FROM site_sessions WHERE expires < ?', (time.time(),))
+            db.execute('INSERT INTO site_sessions VALUES(?,?,?,?,?,?)', (digest(token), aaid_id, mirea, group_id, group_name, time.time() + ttl))
+            db.execute('UPDATE accounts SET page_seen_at=? WHERE pulse_id=?', (time.time(), mirea))
         return token
 
-    def page_session_account(self, token):
+    def site_session(self, token):
         if not token:
             return None
         with self.transaction() as db:
-            row = db.execute('SELECT account_id FROM page_sessions WHERE key_hash=? AND expires>?', (digest(token), time.time())).fetchone()
-            return row[0] if row else None
+            row = db.execute('SELECT * FROM site_sessions WHERE key_hash=? AND expires>?', (digest(token), time.time())).fetchone()
+            return dict(row) if row else None
 
-    def delete_page_session(self, token):
-        if not token:
-            return
+    def delete_site_session(self, token):
+        if token:
+            with self.transaction() as db:
+                db.execute('DELETE FROM site_sessions WHERE key_hash=?', (digest(token),))
+
+    def record_mark(self, account_id, state, message, source):
         with self.transaction() as db:
-            db.execute('DELETE FROM page_sessions WHERE key_hash=?', (digest(token),))
+            db.execute('INSERT INTO marks(account_id,state,message,source,created) VALUES(?,?,?,?,?)',
+                       (account_id, state, message[:200], source, time.time()))
+            db.execute('DELETE FROM marks WHERE created < ?', (time.time() - 30 * 86400,))
+
+    def latest_marks(self, account_ids, since):
+        """The newest mark of each account since `since`; an approval wins over later failures."""
+        if not account_ids:
+            return {}
+        with self.transaction() as db:
+            marks = {}
+            for row in db.execute(f'SELECT * FROM marks WHERE created>=? AND account_id IN ({",".join("?" * len(account_ids))}) ORDER BY created',
+                                  (since, *account_ids)):
+                previous = marks.get(row['account_id'])
+                if previous is None or previous['state'] != 'approved':
+                    marks[row['account_id']] = dict(row)
+            return marks
 
     def link_telegram(self, chat_id, account_id):
         with self.transaction() as db:

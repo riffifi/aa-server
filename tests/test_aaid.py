@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import serialization
 from fastapi.testclient import TestClient
 from app.main import create_app
 from app.aaid import Verifier
-from test_server import FakePulse, PASSWORD, account
+from test_server import FakePulse, PASSWORD, account, site_session
 
 KEY = Ed25519PrivateKey.generate()
 OTHER = Ed25519PrivateKey.generate()
@@ -67,17 +67,17 @@ def test_own_account_is_marked(setup):
     listed = client.get('/api/accounts', headers=auth(token('person-two'))).json()['accounts']
     assert sorted((a['own'] for a in listed)) == [False, True]
 
-def test_browser_pages_keep_working_without_aa_id(setup):
+def test_site_session_opens_only_the_own_account(setup):
     client, service = setup
     row = account(service)
-    assert client.get(f'/api/accounts/{row["id"]}/page').status_code == 200
+    assert client.get(f'/api/accounts/{row["id"]}/page').status_code == 401
     assert client.get('/api/groups/search?q=a').status_code == 200
-    # Without a page session the owner endpoints still demand AA ID.
+    # Without a site session the owner endpoints still demand an AA ID token.
     assert client.get(f'/api/accounts/{row["id"]}').status_code == 401
-    session = service.vault.create_page_session(row['id'])
-    client.cookies.set('page_session', session)
+    session = site_session(service.vault, row['id'])
+    client.cookies.set('aa_site', session)
     assert client.get(f'/api/accounts/{row["id"]}').status_code == 200
-    # A page session for one account does not open another account or the shared list.
+    # The site session of one person does not open another account or the shared list.
     other = account(service, 'person-two')
     assert client.get(f'/api/accounts/{other["id"]}').status_code == 401
     assert client.get('/api/accounts').status_code == 401

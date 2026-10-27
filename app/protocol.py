@@ -2,7 +2,7 @@
 import struct
 import json
 import base64
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 HOST = 'https://pulse.mirea.ru'
 LOGIN_URL = HOST + '/api/auth/login?redirectUri=https%3A%2F%2Fpulse.mirea.ru%2Fservices&rememberMe=True'
@@ -304,3 +304,45 @@ def token_expiry(token):
         return expiry
     except (ValueError, KeyError, IndexError, TypeError):
         raise ValueError('Invalid pass token') from None
+
+def attendance_token(value):
+    """The lesson token from a Pulse attendance QR link, as the app reads it."""
+    url = urlparse(value.strip())
+    if url.scheme != 'https' or url.hostname not in ('pulse.mirea.ru', 'attendance-app.mirea.ru') or url.username or url.password:
+        raise ValueError('Not a Pulse attendance link')
+    tokens = parse_qs(url.query).get('token', [])
+    if len(tokens) != 1 or not tokens[0] or len(tokens[0]) > 4096:
+        raise ValueError('Missing lesson token')
+    return tokens[0]
+
+APPROVAL_REASONS = {1: 'Неверный или просроченный QR-код', 2: 'Ожидается подтверждение',
+                    3: 'Аккаунт не записан на занятие', 4: 'Журнал занятия в архиве',
+                    5: 'Присутствие в кампусе не подтверждено', 6: 'Указано уважительное отсутствие',
+                    7: 'Указано нарушение распорядка'}
+
+def approval(status, headers, body):
+    """Parse SelfApproveAttendanceThroughQRCode into (state, message). The state is
+    approved, waiting, rejected, expired (the MIREA session) or error."""
+    if status == 401 or status in (301, 302, 303, 307, 308):
+        return 'expired', 'Сессия МИРЭА истекла'
+    if status != 200:
+        return 'error', f'Пульс вернул HTTP {status}'
+    try:
+        message, grpc_status = grpc_message(body, headers)
+    except (ValueError, UnicodeError):
+        return 'error', 'Некорректный ответ Пульса'
+    if grpc_status == 16:
+        return 'expired', 'Сессия МИРЭА истекла'
+    if grpc_status != 0 or message is None:
+        return 'error', f'Пульс отклонил запрос (gRPC {grpc_status})'
+    try:
+        outer = fields(message)
+        if 2 in outer:
+            return 'approved', 'Присутствие подтверждено'
+        if 1 in outer:
+            reason = fields(outer[1]).get(1, 0) if isinstance(outer[1], bytes) else 0
+            reason = reason if isinstance(reason, int) else 0
+            return ('waiting' if reason == 2 else 'rejected'), APPROVAL_REASONS.get(reason, 'Пульс не подтвердил присутствие')
+    except (ValueError, TypeError):
+        pass
+    return 'error', 'Неизвестный ответ Пульса'

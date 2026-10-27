@@ -1,3 +1,4 @@
+from test_server import site_session
 import pytest
 from fastapi.testclient import TestClient
 from app.main import create_app
@@ -33,7 +34,7 @@ def setup(tmp_path):
 
 
 def session(service, client, account_id):
-    client.cookies.set('page_session', service.vault.create_page_session(account_id))
+    client.cookies.set('aa_site', site_session(service.vault, account_id))
 
 
 def test_end_session_clears_cookie_and_marks_expired(setup):
@@ -110,9 +111,9 @@ async def test_end_session_serializes_with_an_in_flight_refresh(tmp_path):
     pulse.identity = identity
     refresh = asyncio.create_task(service.refresh_account(identifier))
     await started.wait()
-    token = service.vault.create_page_session(identifier)
+    token = site_session(service.vault, identifier)
     try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://testserver', cookies={'page_session': token}) as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://testserver', cookies={'aa_site': token}) as client:
             ending = asyncio.create_task(client.post(f'/api/accounts/{identifier}/end-session'))
             try:
                 await asyncio.sleep(.05)

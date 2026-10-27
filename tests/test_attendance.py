@@ -1,3 +1,4 @@
+from test_server import site_session
 import pytest
 from fastapi.testclient import TestClient
 from app.main import create_app
@@ -63,7 +64,7 @@ def test_attendance_endpoint_requires_session(tmp_path):
     with TestClient(app) as client:
         aid = app.state.service.vault.upsert('person-123', 'Me', {'cookie': 'session=x'})['id']
         assert client.get(f'/api/accounts/{aid}/attendance').status_code == 401
-        client.cookies.set('page_session', app.state.service.vault.create_page_session(aid))
+        client.cookies.set('aa_site', site_session(app.state.service.vault, aid))
         data = client.get(f'/api/accounts/{aid}/attendance').json()
         assert data['inside'] is True and data['events'][0]['direction'] == 'in'
         assert pulse.captured[0] == 'person-123'

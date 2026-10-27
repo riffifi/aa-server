@@ -4,3 +4,4 @@ cryptography==50.0.2
 playwright==1.63.0
 httpx==0.28.1
 qrcode[pil]==8.2
+python-dateutil==2.9.0.post0

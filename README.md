@@ -22,58 +22,48 @@ The administration panel still requires its own password and CSRF token for
 account removal and login management. HTTPS encrypts traffic; it does not add
 phone authentication. Plain HTTP is supported.
 
-## AA ID (required sign-in)
+## Site 2.0: sign in with AA ID
 
-[AA ID](services/aa-id/README.md) is a separate account service: one account per
-person, bound to their MIREA identity. Tokens are verified offline with the keys
-from `AAID_JWKS_URL`; with `AAID_ENFORCE=1` every app API call needs one.
-`GET /api/me/attendance` returns the AA ID caller's own turnstile log. Browser pages keep their own
-MIREA sign-in. See the AA ID README for the rollout order.
+Opening the server URL shows the AntiAttendance site in the AA ID design (Brockmann:
+Geist, black and white, one accent). Nothing works there without signing in, and the
+only sign-in is **AA ID** ([services/aa-id](services/aa-id/README.md)). The 1.x picker,
+`/u/{id}` owner pages, page passwords and `POST /api/logins` are gone; `/login` and
+`/u/…` redirect to `/`.
 
-## Self-service account picker
+* **Sign-in.** `GET /auth/aaid` sends the browser to the AA ID site
+  (`AAID_PUBLIC_URL/?continue=aa&state=…`). There the person confirms (or signs in with
+  the MIREA QR), AA ID redirects to `/auth/callback?code=…&state=…`, and this server
+  trades the one-time code with AA ID inside the Compose network (`AAID_JWKS_URL`
+  without `/.well-known/jwks.json`, then `/v1/site/exchange`). The site session is the
+  `aa_site` cookie (HttpOnly, SameSite=Strict, 30 days). AA ID sends codes only to
+  `AA_SITE_URL` (Compose sets it to `PUBLIC_URL`).
+* **One QR for both.** A MIREA QR sign-in on the AA ID site hands the fresh MIREA session
+  (cookie and browser state for renewal) to `POST /internal/aaid/link`, signed by AA ID
+  with audience `aa-link`. The server checks with Pulse that the session belongs to that
+  person and creates or renews their account, so people who sign in to AA ID show up
+  here. New accounts are called "Без имени" until the person names themselves on the
+  site. `GET /auth/aaid?fresh=1` asks for a new QR sign-in when the server has no working
+  session for the person.
+* **The lesson decides who you see.** `GET /site/state` returns the person's current
+  lesson (their group's schedule from schedule-of.mirea.ru), the groups at the same class
+  (same time and room; for online classes the same subject and teacher), and the
+  connected people in those groups with their mark status for this lesson and whether
+  they are in the university (direction of today's last turnstile pass, cached 2 min).
+* **Marking.** `POST /site/mark` (`{qr, account_ids}`) sends the teacher's QR token to
+  Pulse for each chosen person, only if they are at the person's current lesson. The page
+  reads the rotating QR with the camera (BarcodeDetector, or the bundled jsQR) or a
+  pasted link. Results are stored per account; marks made from the app through
+  `/api/accounts/{id}/rpc/attendance` count too.
+* `PUT /site/me/name` renames the person's own account; `POST /site/logout` signs out.
 
-Opening the server URL now shows a **self-service picker** instead of the admin
-sign-in: account owners see every account with its connection state, tap their own
-to renew it (confirming the normal MIREA sign-in), or **Add my account** to enroll
-for the first time. No panel password is needed — this matches the URL-is-the-
-capability model, so restrict access with your network/Nginx if required. The
-administration panel (account removal and login management) moved to
-`PUBLIC_URL/panel` and still requires its password and CSRF token.
-
-`POST /api/accounts/import`, `GET /api/accounts` and the new unauthenticated
-`POST /api/logins` (`{label, account_id?}` → a temporary `/enroll/{id}/{token}`
-path the picker polls) back this flow. Destructive panel endpoints are unchanged.
-
-The QR login now presses through Pulse's post-approval "continue"/consent page
-automatically, so a sign-in no longer stalls at *confirming the session*; the same
-step runs during silent renewal.
-
-### Per-account page (password-protected)
-
-Every account has its own page at `/u/{account_id}` showing the session status, a Renew
-button and the pass permission. The page is **protected by a per-account password**: on
-the first visit the owner sets one, and after that it must be entered (or a session
-obtained by signing in via the university — see below). The password is scrypt-hashed in
-the account's encrypted secret; a `page_session` cookie (30 days) unlocks the page and
-gates the account-detail read and the pass toggle. Endpoints: `GET /…/page` (status),
-`POST /…/page/password` (set or change — **always requires an active session**, so a
-passwordless account cannot be hijacked by whoever sets a password first; the first
-session comes from signing in via the university),
-`POST /…/page/login`, `POST /…/page/logout`. Manual group entry is **not** on this page —
-it lives only in the admin panel.
-
-### Sign in via the university (dedicated page)
-
-The home page keeps the account list and adds a **"Войти через университет"** button
-that links to a dedicated page at **`/login`**. That page runs the normal MIREA QR
-login and, on completion, `POST /enroll/{id}/{token}/claim` issues a page session for
-the account the login produced and sends the user to `/u/{account_id}`. Because the
-login also captures and stores the session, signing in this way renews it at the same
-time. The sign-in sends **no label**, so it never overwrites an existing account's name.
+The app API (`/api/*`) is unchanged for the app; tokens are verified offline with the
+keys from `AAID_JWKS_URL`, and `AAID_ENFORCE=1` requires them on every call.
+Owner-only endpoints (`label`, `end-session`, `pass-allowed`, `attendance`) accept the
+person's own site session instead of the 1.x page session.
 
 ### Ending a session
 
-`POST /api/accounts/{id}/end-session` (owner page session, or the `/panel/...` variant for
+`POST /api/accounts/{id}/end-session` (the person's site session, or the `/panel/...` variant for
 admins) terminates the Pulse session without deleting the account: it best-effort calls
 MIREA's logout with the stored cookie, then clears the cookie and browser state from the
 encrypted secret, marks the account `expired`, and emits a sync event. The label, group,
@@ -87,7 +77,7 @@ of the client's logic server-side for security.
 
 An account is renamed via `PUT /api/accounts/{id}/label` (`{label, expected_version?}`) —
 allowed only from the admin panel (the `/panel/...` variant, password + CSRF) or from the
-owner's own page (a valid page session). Renames bump the version and emit a `label` sync
+person's own site session. Renames bump the version and emit a `label` sync
 event. The owner's page and the panel both expose it. Page passwords are set and changed
 from the owner's page (always under a session).
 
@@ -96,7 +86,7 @@ from the owner's page (always under a session).
 `pass_allowed` is the owner's account-wide switch. It is **not** a grant to every
 phone. Ordinary pass snapshots, uploads, and `pass-token`/`pass-code`/`pass-issue`
 RPCs additionally require an approval for the requesting Telegram person (or the
-owner's authenticated page session). Attendance and session renewal are unchanged.
+person's own site session). Attendance and session renewal are unchanged.
 Snapshots omit pass numbers for unauthorized callers. The separate daily admin
 password remains the explicit testing exception and does not create agreements.
 
@@ -174,7 +164,7 @@ group name and numeric schedule ID, then wire automatic assignment.
 
 ## Attendance (turnstile entry/exit)
 
-`GET /api/accounts/{id}/attendance` (owner page session, or the `/panel/...` variant for
+`GET /api/accounts/{id}/attendance` (the person's site session, or the `/panel/...` variant for
 admins) returns today's turnstile events for the account, via Pulse's
 `HumanPassService/GetHumanAcsTimeline` (request: the account's pulse id + a Moscow-day
 window + flags 3=1, 4=2). Events are collected recursively (an event is any submessage

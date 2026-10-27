@@ -1,0 +1,119 @@
+/* Brockmann (riffifi/brockmann-flutter) for the web: achromatic chrome, one accent,
+   square edges, hairline divisions, Geist typography, a 4 px rhythm. */
+@font-face { font-family: "Geist"; src: url("fonts/Geist.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("fonts/GeistMono.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Geist Pixel Square"; src: url("fonts/GeistPixel-Square.ttf") format("truetype"); font-display: swap; }
+
+:root {
+  --background: #000; --surface: #121212; --foreground: #fff; --secondary: #a6a6a6;
+  --disabled: #5c5c5c; --line: #3a3a3a; --line-strong: #8a8a8a; --danger: #e51400;
+  --accent: #00aba9; --on-accent: #000; --accent-text: #00aba9;
+  --press: 60ms; --release: 160ms;
+}
+@media (prefers-color-scheme: light) {
+  :root { --background: #fff; --surface: #f2f2f2; --foreground: #000; --secondary: #5a5a5a;
+    --disabled: #a8a8a8; --line: #bdbdbd; --line-strong: #4a4a4a; --accent-text: #00716f; }
+}
+@media (prefers-reduced-motion: reduce) { :root { --press: 0ms; --release: 0ms; } }
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--background); color: var(--foreground);
+  font: 400 14px/20px "Geist", system-ui, sans-serif; }
+[hidden] { display: none !important; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.page { max-width: 640px; margin: 0 auto; padding: 24px 24px 48px; }
+@media (min-width: 720px) { .page { padding: 48px 48px 64px; } }
+
+/* Type roles */
+.wordmark { font: 400 32px/36px "Geist Pixel Square", "Geist Mono", monospace; letter-spacing: 0; }
+.title { margin: 40px 0 16px; font-size: clamp(32px, 9vw, 40px); line-height: 1.1; font-weight: 300; letter-spacing: -.01em; }
+.heading { margin: 0; font-size: 24px; line-height: 28px; font-weight: 400; }
+.value { font-size: 20px; line-height: 24px; font-weight: 500; }
+.label { font-size: 12px; line-height: 16px; letter-spacing: .5px; color: var(--secondary); }
+.caption { font-size: 11px; line-height: 16px; letter-spacing: .2px; color: var(--secondary); }
+.mono { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.mono.large { font-size: 32px; line-height: 36px; font-weight: 300; }
+.mono.small { font-size: 12px; line-height: 16px; color: var(--secondary); word-break: break-all; }
+.lead { margin: 0 0 24px; color: var(--secondary); max-width: 52ch; font-size: 16px; line-height: 24px; }
+.note { margin: 16px 0 0; color: var(--secondary); max-width: 60ch; }
+
+.masthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+
+/* Buttons: typography-led, square, no shadows. */
+button, .button { appearance: none; display: inline-flex; align-items: center; min-height: 48px; margin: 0;
+  padding: 12px 16px; border: 0; border-radius: 0; background: none; color: var(--foreground);
+  font: 500 20px/24px "Geist", system-ui, sans-serif; text-decoration: none; cursor: pointer;
+  transition: background-color var(--release), color var(--release), border-color var(--release); }
+button:active, .button:active { transition-duration: var(--press); }
+.primary { background: var(--accent); color: var(--on-accent); }
+.primary:active { background: color-mix(in srgb, var(--accent), #000 18%); }
+.secondary { border: 2px solid var(--line-strong); }
+.secondary:active, .text-button:active { background: var(--surface); }
+.text-button { padding: 12px 0; font-size: 14px; line-height: 20px; font-weight: 400; color: var(--accent-text); }
+button:disabled { cursor: default; color: var(--disabled); border-color: var(--line); }
+.primary:disabled { background: var(--line); color: var(--disabled); }
+.danger { color: var(--danger); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 24px; }
+
+/* Sign-in */
+.login { display: grid; justify-items: start; gap: 16px; }
+.status { margin: 0; font-size: 16px; line-height: 24px; }
+.qr { width: 264px; height: 264px; padding: 12px; background: #fff; image-rendering: pixelated; }
+
+/* Account */
+.facts { display: grid; gap: 16px; margin: 0 0 8px; }
+.facts div { display: grid; gap: 4px; }
+.facts dd { margin: 0; }
+.facts.pair { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-top: 16px; }
+.block { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.lesson { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
+.lesson-now { display: grid; gap: 4px; min-width: 0; flex: 1 1 220px; }
+
+/* Lists: hairline rows, at least 48 px, title + caption. */
+.list { margin-top: 16px; border-top: 1px solid var(--line); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.row-body { display: grid; gap: 4px; min-width: 0; }
+.row-body strong { font-size: 16px; line-height: 20px; font-weight: 500; }
+.row-body .meta { font-size: 11px; line-height: 16px; letter-spacing: .2px; color: var(--secondary); }
+.row .actions { margin: 0; }
+.row button { font-size: 14px; line-height: 20px; font-weight: 400; padding: 12px 0; }
+.acs-in { color: var(--accent-text); }
+.badge { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--line-strong); font-size: 11px; line-height: 16px; font-weight: 400; vertical-align: 2px; }
+
+.banner { margin: 24px 0 0; padding: 16px; background: var(--surface); border-left: 4px solid var(--danger); }
+.footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* AntiAttendance site */
+.page.wide { max-width: 760px; }
+.masthead .push { margin-left: auto; }
+.wordmark { overflow-wrap: anywhere; }
+.lesson-block { margin-top: 32px; }
+.title.tight { margin: 8px 0 8px; }
+.lesson-meta { margin: 0; font-size: 16px; line-height: 24px; }
+.banner.info { border-left-color: var(--accent); }
+.banner a { color: var(--accent-text); }
+.field { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.input { flex: 1 1 220px; min-height: 48px; padding: 12px; border: 2px solid var(--line-strong); border-radius: 0;
+  background: var(--background); color: var(--foreground); font: 400 16px/24px "Geist", system-ui, sans-serif; }
+.input:focus { outline: none; border-color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chip { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 12px; border: 1px solid var(--line-strong); font-size: 14px; }
+.chip.own { border-color: var(--accent); }
+.person { cursor: pointer; justify-content: flex-start; }
+.person input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--accent); }
+.person .row-body { flex: 1; }
+.mark { flex: none; font-size: 13px; line-height: 16px; text-align: right; color: var(--secondary); }
+.mark.ok, .here { color: var(--accent-text); }
+.mark.bad { color: var(--danger); }
+.mark.wait { color: var(--foreground); }
+.actions.sticky { position: sticky; bottom: 0; padding: 12px 0; background: var(--background); }
+.list.compact .row { min-height: 40px; padding: 8px 0; }
+.scanner { position: fixed; inset: 0; z-index: 10; overflow-y: auto; background: var(--background); }
+.scanner-body { max-width: 640px; margin: 0 auto; padding: 24px; }
+.video { display: block; width: 100%; max-height: 60vh; margin-top: 16px; background: #000; object-fit: cover; }
+.status { margin-top: 16px; }
+@media (max-width: 480px) { .person { flex-wrap: wrap; } .mark { width: 100%; text-align: left; padding-left: 36px; } }

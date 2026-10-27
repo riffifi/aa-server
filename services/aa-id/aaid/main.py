@@ -4,10 +4,11 @@ import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 import base64
+import secrets
 from datetime import datetime, timedelta, timezone
 import hmac
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -35,6 +36,12 @@ class RefreshBody(BaseModel):
 
 class ClaimBody(BaseModel):
     token: str = Field(min_length=20, max_length=200)
+
+class AuthorizeBody(BaseModel):
+    state: str = Field(pattern=r'^[A-Za-z0-9_-]{16,128}$')
+
+class CodeBody(BaseModel):
+    code: str = Field(min_length=20, max_length=200)
 
 class StatusBody(BaseModel):
     status: str = Field(pattern='^(active|blocked)$')
@@ -71,6 +78,9 @@ def create_app(directory=None, identity=None, logins=None, http=None):
     sessions_url = os.environ.get('SESSIONS_URL', 'http://sessions:8080').rstrip('/')
     http = http or httpx.AsyncClient(timeout=20, follow_redirects=False)
     calendars = {}
+    # The AntiAttendance site that signs people in with AA ID, and its one-time codes.
+    site_url = os.environ.get('AA_SITE_URL', '').strip().rstrip('/')
+    codes = {}
 
     @asynccontextmanager
     async def lifespan(app):
@@ -114,6 +124,21 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         now = int(time.time())
         return signer.sign({'iss': issuer, 'aud': audience, 'sub': user['id'], 'sid': session['id'],
                             'mirea': user['pulse_uid'], 'grp': user['group_id'], 'iat': now, 'exp': now + 60})
+
+    async def hand_off(user, credentials):
+        # The session server keeps MIREA sessions; give it this fresh one, signed by AA ID
+        # so it knows whose session it is. Nothing is kept here.
+        if not credentials:
+            return False
+        now = int(time.time())
+        token = signer.sign({'iss': issuer, 'aud': 'aa-link', 'sub': user['id'], 'mirea': user['pulse_uid'],
+                             'grp': user['group_id'], 'iat': now, 'exp': now + 60})
+        try:
+            response = await http.post(sessions_url + '/internal/aaid/link', headers={'authorization': 'Bearer ' + token},
+                                       json={**credentials, 'group_id': user['group_id'], 'group_name': user['group_name']})
+        except httpx.HTTPError:
+            return False
+        return response.status_code == 200
 
     def grant(user, session, refresh):
         now = int(time.time())
@@ -243,14 +268,15 @@ def create_app(directory=None, identity=None, logins=None, http=None):
             raise HTTPException(409, 'Вход ещё не завершён')
         job.claimed = True
         uid, group_id, group_name = job.identity
-        job.identity = None
+        credentials, job.identity, job.session = job.session, None, None
         try:
             user = store.bind_mirea(uid, group_id, group_name)
         except Blocked:
             raise HTTPException(403, 'Этот AA ID заблокирован') from None
+        linked = await hand_off(user, credentials)
         device = browser_name(request.headers.get('user-agent', ''))
         _, token = store.create_session(user['id'], device, web_ttl, 1, kind='web')
-        response = JSONResponse({'ok': True})
+        response = JSONResponse({'ok': True, 'linked': linked})
         response.set_cookie('aaid_web', token, max_age=web_ttl, httponly=True, secure=secure_cookie, samesite='strict', path='/')
         return response
 
@@ -313,6 +339,33 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         response = JSONResponse({'ok': True})
         response.delete_cookie('aaid_web', path='/')
         return response
+
+    @app.post('/web/authorize')
+    async def site_authorize(body: AuthorizeBody, request: Request):
+        # "Sign in with AA ID" on the AntiAttendance site: a one-time code for the
+        # signed-in person, sent only to the configured site address.
+        _, user = site_session(request)
+        if not site_url:
+            raise HTTPException(404, 'Вход на сайт AntiAttendance не настроен')
+        now = time.time()
+        for key, (expires, _) in list(codes.items()):
+            if expires < now:
+                del codes[key]
+        code = secrets.token_urlsafe(32)
+        codes[digest(code)] = (now + 60, user['id'])
+        return {'redirect': site_url + '/auth/callback?' + urlencode({'code': code, 'state': body.state})}
+
+    @app.post('/v1/site/exchange')
+    async def site_exchange(body: CodeBody, request: Request):
+        # The site's server trades the code for the person, once.
+        limit(request, 'exchange', 60, 60)
+        entry = codes.pop(digest(body.code), None)
+        if entry is None or entry[0] < time.time():
+            raise HTTPException(400, 'Код входа недействителен')
+        user = store.user(entry[1])
+        if user is None or user['status'] != 'active':
+            raise HTTPException(403, 'Этот AA ID заблокирован')
+        return {'id': user['id'], 'mirea': user['pulse_uid'], 'group_id': user['group_id'], 'group_name': user['group_name']}
 
     @app.put('/v1/admin/users/{user_id}/status')
     async def set_status(user_id: str, body: StatusBody, request: Request):

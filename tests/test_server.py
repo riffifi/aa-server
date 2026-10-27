@@ -269,3 +269,8 @@ def test_cookie_renewal_does_not_restore_a_stale_phone_group(setup):
     assert result.json()['group_id'] == 43
     assert result.json()['group_name'] == 'Group B'
     assert result.json()['session_version'] == first['session_version'] + 1
+
+def site_session(vault, account_id):
+    # The account's person signed in to the site with AA ID.
+    row = vault.account(account_id)
+    return vault.create_site_session('aaid-' + row['pulse_id'], row['pulse_id'], None, None)

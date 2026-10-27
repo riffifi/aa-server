@@ -1,3 +1,4 @@
+from test_server import site_session
 import pytest
 from fastapi.testclient import TestClient
 from app.main import create_app
@@ -20,7 +21,7 @@ def app(tmp_path):
 
 
 def session(app, client, account_id):
-    client.cookies.set('page_session', app.state.service.vault.create_page_session(account_id))
+    client.cookies.set('aa_site', site_session(app.state.service.vault, account_id))
 
 
 def test_login_without_label_keeps_existing_name(app):
@@ -64,4 +65,4 @@ def test_rename_rejects_empty_and_emits_event(app):
 def test_login_page_is_served(app):
     with TestClient(app) as client:
         page = client.get('/login')
-        assert page.status_code == 200 and 'Вход через университет' in page.text
+        assert page.status_code == 200 and 'Вход через AA ID' in page.text

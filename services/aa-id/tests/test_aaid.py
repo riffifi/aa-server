@@ -27,9 +27,9 @@ class FakeLogins:
         job = LoginJob('job-%d' % len(self.jobs), digest('t' * 30 + str(len(self.jobs))), time.time(), status='login', qr='https://sso.mirea.ru/realms/mirea/qr-code-auth/scan?x=1')
         self.jobs[job.id] = job
         return job, 't' * 30 + str(len(self.jobs) - 1)
-    def approve(self, job_id, identity):
+    def approve(self, job_id, identity, session=None):
         job = self.jobs[job_id]
-        job.status, job.qr, job.identity = 'complete', None, identity
+        job.status, job.qr, job.identity, job.session = 'complete', None, identity, session
     def qr_png(self, job):
         return b'png' if job.qr else None
     async def close(self):
@@ -45,6 +45,9 @@ def setup(tmp_path, monkeypatch):
     fake.people['s=bob'] = ('uid-bob', 4242, 'ИКБО-01-24')
     def upstream(request):
         seen.append(request)
+        if request.url.host == 'sessions' and request.url.path == '/internal/aaid/link':
+            claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa-link')
+            return httpx.Response(200 if claims and claims['mirea'] == 'uid-alice' else 422, json={})
         if request.url.host == 'sessions':
             claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
             if claims['mirea'] != 'uid-alice':
@@ -53,6 +56,7 @@ def setup(tmp_path, monkeypatch):
                 'last_out': {'direction': 'out', 'time': 300, 'zone': 'Выход'}, 'events': [], 'account_id': 'secret'})
         return httpx.Response(200, text=CALENDAR)
     seen = []
+    monkeypatch.setenv('AA_SITE_URL', 'https://aa.example/')
     app = create_app(tmp_path, fake, FakeLogins(), httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
     app.state.seen = seen
     with TestClient(app) as client:
@@ -241,3 +245,30 @@ def test_site_turnstile_for_unconnected_person(setup):
     web_sign_in(client, app, ('uid-bob', None, None))
     assert client.get('/web/attendance').status_code == 404
     assert client.get('/web/schedule').json()['group_id'] is None
+
+def test_site_sign_in_hands_the_mirea_session_to_the_server(setup):
+    client, app, _, directory = setup
+    started = client.post('/web/logins').json()
+    headers = {'X-Login-Token': started['token']}
+    app.state.logins.approve(started['id'], ('uid-alice', 4242, 'ИКБО-01-24'), {'cookie': 's=alice', 'storage_state': {}})
+    assert client.post('/web/logins/' + started['id'] + '/claim', headers=headers).json() == {'ok': True, 'linked': True}
+    link = [r for r in app.state.seen if r.url.path == '/internal/aaid/link'][-1]
+    assert b's=alice' in link.content and b'4242' in link.content
+    assert b's=alice' not in (directory / 'aaid.sqlite3').read_bytes()
+    # Without a captured session nothing is handed over.
+    client.cookies.clear()
+    web_sign_in(client, app)
+    assert len([r for r in app.state.seen if r.url.path == '/internal/aaid/link']) == 1
+
+def test_antiattendance_site_signs_in_with_a_one_time_code(setup):
+    client, app, _, _ = setup
+    state = 's' * 24
+    assert client.post('/web/authorize', json={'state': state}).status_code == 401
+    web_sign_in(client, app)
+    assert client.post('/web/authorize', json={'state': 'bad state'}).status_code == 422
+    redirect = client.post('/web/authorize', json={'state': state}).json()['redirect']
+    assert redirect.startswith('https://aa.example/auth/callback?code=') and redirect.endswith('&state=' + state)
+    code = redirect.split('code=')[1].split('&')[0]
+    person = client.post('/v1/site/exchange', json={'code': code}).json()
+    assert person['mirea'] == 'uid-alice' and person['group_id'] == 4242
+    assert client.post('/v1/site/exchange', json={'code': code}).status_code == 400  # once only

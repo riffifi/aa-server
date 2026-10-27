@@ -15,14 +15,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 def _unb64(text):
     return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
 
-# Browser pages (the picker, /login and the owner's /u/{id} page) keep their own
-# MIREA sign-in and page sessions; only these endpoints stay reachable without AA ID.
+# Endpoints that stay reachable without an AA ID token.
 BROWSER_OPEN = (
-    re.compile(r'^/api/logins$'),
     re.compile(r'^/api/groups/search$'),
-    re.compile(r'^/api/accounts/[^/]+/page(?:/(?:login|logout|password))?$'),
 )
-# Owner endpoints that a browser page reaches with a page session for that account.
+# Owner endpoints the site reaches with its AA ID site session (the account's person).
 BROWSER_OWNER = re.compile(r'^/api/accounts/([^/]+)(?:/(?:attendance|label|end-session|pass-allowed))?$')
 
 class Verifier:
@@ -35,6 +32,8 @@ class Verifier:
         self.fetched_at = 0.0
         self.lock = asyncio.Lock()
         self.http = httpx.AsyncClient(timeout=5, follow_redirects=False) if jwks_url else None
+        # AA ID's own address inside the Compose network, for the site sign-in code exchange.
+        self.base_url = jwks_url.removesuffix('/.well-known/jwks.json') if jwks_url else None
 
     async def _refresh(self):
         # At most one fetch a minute, so forged kids cannot hammer AA ID.
@@ -51,7 +50,7 @@ class Verifier:
             if keys:
                 self.keys = keys
 
-    async def verify(self, token):
+    async def verify(self, token, audience=None):
         try:
             header_text, payload_text, signature_text = token.split('.')
             header = json.loads(_unb64(header_text))
@@ -66,13 +65,26 @@ class Verifier:
             claims = json.loads(_unb64(payload_text))
         except (ValueError, TypeError, AttributeError, InvalidSignature):
             return None
-        if not isinstance(claims, dict) or claims.get('iss') != self.issuer or claims.get('aud') != self.audience:
+        if not isinstance(claims, dict) or claims.get('iss') != self.issuer or claims.get('aud') != (audience or self.audience):
             return None
         if not isinstance(claims.get('exp'), int) or claims['exp'] <= time.time():
             return None
         if not isinstance(claims.get('sub'), str) or not isinstance(claims.get('mirea'), str):
             return None
         return claims
+
+    async def exchange(self, code):
+        """Trade a one-time site sign-in code for the AA ID person, server to server."""
+        if self.http is None:
+            return None
+        try:
+            response = await self.http.post(self.base_url + '/v1/site/exchange', json={'code': code})
+            data = response.json() if response.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get('id'), str) or not isinstance(data.get('mirea'), str):
+            return None
+        return data
 
     async def close(self):
         if self.http is not None:
