@@ -590,11 +590,14 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             raise HTTPException(409, 'The session was ended; sign in again')
         now = time.time()
         today = (int((now + 3 * 3600) // 86400)) * 86400 - 3 * 3600  # Moscow midnight
-        result = await service.transport.acs_timeline(cookie, row['pulse_id'], today - (days - 1) * 86400, today + 86400 - 1)
-        if result is None:
+        # Pulse answers one-day windows (what the app and /attendance use); a wider
+        # window comes back empty, so ask day by day.
+        results = await asyncio.gather(*(service.transport.acs_timeline(cookie, row['pulse_id'], start, start + 86400 - 1)
+                                         for start in (today - day * 86400 for day in range(days))))
+        if all(result is None for result in results):
             raise HTTPException(503, 'Pulse is unavailable; try again')
-        events, inside = result
-        events = sorted(events, key=lambda e: e['time'], reverse=True)
+        events = sorted((event for result in results if result for event in result[0]), key=lambda e: e['time'], reverse=True)
+        inside = bool(results[0] and results[0][1])
         last = lambda direction: next((e for e in events if e['direction'] == direction), None)
         return {'account_id': row['id'], 'state': row['state'], 'inside': inside,
                 'last_in': last('in'), 'last_out': last('out'), 'events': events[:30]}

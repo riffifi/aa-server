@@ -89,8 +89,11 @@ def test_server_without_aa_id_stays_open(tmp_path):
         assert client.get('/api/accounts').status_code == 200
 
 class AcsPulse(FakePulse):
+    windows = ()
     async def acs_timeline(self, cookie, uid, start, end):
-        self.window = (uid, start, end)
+        self.windows += ((uid, start, end),)
+        if len(self.windows) != 2:  # passes only on one of the days
+            return [], False
         return [{'direction': 'in', 'time': 100, 'zone': 'Вход'}, {'direction': 'out', 'time': 300, 'zone': 'Выход'},
                 {'direction': 'in', 'time': 200, 'zone': 'Вход'}], False
 
@@ -107,7 +110,10 @@ def test_own_attendance_for_the_aa_id_person(tmp_path):
         assert client.get('/health').json()['aaid']['required'] is False
         assert client.get('/api/me/attendance').status_code == 401
         result = client.get('/api/me/attendance', headers=auth(token('person-two'))).json()
-        assert pulse.window[0] == 'person-two'
+        # Pulse is asked one day at a time, newest day first.
+        assert len(pulse.windows) == 7 and {w[0] for w in pulse.windows} == {'person-two'}
+        assert all(end - start == 86399 for _, start, end in pulse.windows)
+        assert pulse.windows[0][1] - pulse.windows[1][1] == 86400
         assert [e['time'] for e in result['events']] == [300, 200, 100]
         assert result['last_in']['time'] == 200 and result['last_out']['time'] == 300
         assert client.get('/api/me/attendance', headers=auth(token('nobody'))).status_code == 404
