@@ -26,6 +26,8 @@ SESSION_TTL = 30 * 86400
 MARK_LEAD = 15 * 60
 INSIDE_TTL = 120
 INSIDE_WAIT = 2
+# Lesson attendance read from the Pulse group journal, per group, at most this often.
+MIREA_TTL = 120
 
 class LinkBody(BaseModel):
     cookie: str = Field(min_length=1, max_length=65536)
@@ -62,6 +64,8 @@ def install(app, service, aaid, calendars, static):
     inside_checks = {}
     pulse_slots = asyncio.Semaphore(4)
     app.state.presence = {'cache': inside_cache, 'checks': inside_checks, 'ttl': INSIDE_TTL}
+    mirea_days, mirea_tasks = {}, {}
+    app.state.mirea = mirea_days
 
     def limit(key, count, window):
         queue, now = attempts[key], time.time()
@@ -80,6 +84,10 @@ def install(app, service, aaid, calendars, static):
     @app.get('/')
     async def index():
         return FileResponse(static / 'index.html')
+
+    @app.get('/today')
+    async def today_page():
+        return FileResponse(static / 'today.html')
 
     @app.get('/auth/aaid')
     async def sign_in(fresh: int = 0):
@@ -180,6 +188,77 @@ def install(app, service, aaid, calendars, static):
             return cached[1] if cached else None
         return inside_cache[row['id']][1]
 
+    async def read_journal(group_id, day):
+        # One working account of the group reads the whole group's journal: its
+        # current semester journal, the day's lessons, and everyone's status at each
+        # lesson that has begun. Lessons read well after they ended are not re-read.
+        transport = service.transport
+        previous = mirea_days.get(group_id)
+        previous = previous if previous and previous['day'] == day else None
+        known = {lesson['id']: lesson for lesson in previous['lessons']} if previous else {}
+        entry = {'day': day, 'fetched': time.time(), 'lessons': [], 'error': 'Нет подключённых аккаунтов группы'}
+        try:
+            for row in [row for row in vault.accounts(group_id) if row['state'] == 'valid'][:2]:
+                cookie = vault.secret(row).get('cookie')
+                if not cookie:
+                    continue
+                async with pulse_slots:
+                    journals = await transport.visiting_logs(cookie)
+                    lessons = await transport.day_lessons(cookie, day) if journals else None
+                if not journals or lessons is None:
+                    entry['error'] = 'Пульс не отдал журнал группы'
+                    continue
+                now = time.time()
+                journal = next((j for j in journals if j['start'] and j['end'] and j['start'] <= now <= j['end']), journals[0])
+                async def status(lesson):
+                    old = known.get(lesson['id'])
+                    if old and old['status'] and lesson['end'] < previous['fetched'] - 3600:
+                        return old['status']
+                    if lesson['start'] > now + MARK_LEAD:
+                        return {}
+                    async with pulse_slots:
+                        return await transport.lesson_attendance(cookie, lesson['id'], journal['id']) or {}
+                found = await asyncio.gather(*(status(lesson) for lesson in lessons))
+                entry.update(lessons=[lesson | {'status': got} for lesson, got in zip(lessons, found)], error=None, journal=journal['group'])
+                break
+        except Exception as error:
+            log.warning('Pulse journal for group %s failed: %s: %s', group_id, type(error).__name__, error)
+            entry['error'] = 'Ошибка чтения журнала Пульса'
+        finally:
+            mirea_days[group_id] = entry
+            mirea_tasks.pop(group_id, None)
+        if entry['error']:
+            log.info('Pulse journal for group %s: %s', group_id, entry['error'])
+
+    async def journals(group_ids):
+        """Today's Pulse journal of each group, refreshed in the background when stale.
+        A first read is waited for briefly; after that the page never waits for Pulse."""
+        if not hasattr(service.transport, 'lesson_attendance'):
+            return {}
+        day = schedule.moscow_now().date()
+        waiting = []
+        for gid in set(filter(None, group_ids)):
+            entry = mirea_days.get(gid)
+            if entry and entry['day'] == day and time.time() - entry['fetched'] < MIREA_TTL:
+                continue
+            task = mirea_tasks.get(gid)
+            if task is None:
+                task = mirea_tasks[gid] = asyncio.ensure_future(read_journal(gid, day))
+            if entry is None or entry['day'] != day:
+                waiting.append(task)
+        if waiting:
+            await asyncio.wait([asyncio.shield(task) for task in waiting], timeout=INSIDE_WAIT)
+        return {gid: entry for gid, entry in mirea_days.items() if entry['day'] == day}
+
+    def mirea_status(found, row, lesson):
+        # The person's status at our schedule's lesson, matched to Pulse's by start time.
+        entry = found.get(row['group_id'])
+        start = schedule.epoch(lesson['start'])
+        for theirs in entry['lessons'] if entry else ():
+            if abs(theirs['start'] - start) <= 600:
+                return theirs['status'].get(row['pulse_id'])
+        return None
+
     async def lesson_context(session):
         """The person's current lesson, the groups at it and the accounts in them."""
         own = vault.account_by_pulse(session['mirea'])
@@ -215,6 +294,54 @@ def install(app, service, aaid, calendars, static):
         context['accounts'] = [row for row in vault.accounts() if row['group_id'] in ids]
         return context
 
+    @app.get('/site/today')
+    async def today(request: Request):
+        """Today's lessons of the person's group with everyone's marks. Another group
+        joins a lesson's column only when it was at that same class."""
+        session = person(request)
+        own = vault.account_by_pulse(session['mirea'])
+        group_id = session['group_id'] or (own['group_id'] if own else None)
+        group_name = session['group_name'] or (own['group_name'] if own else None)
+        now = schedule.moscow_now()
+        result = {'date': now.strftime('%d.%m.%Y'), 'group_id': group_id, 'group_name': group_name,
+                  'lessons': [], 'people': [], 'schedule_error': None}
+        if not group_id:
+            return result
+        lessons = await calendars.lessons(group_id, now.date())
+        if lessons is None:
+            result['schedule_error'] = 'Расписание МИРЭА недоступно'
+            return result
+        known = {row['id']: row['name'] for row in vault.groups()}
+        known.setdefault(group_id, group_name)
+        others = [gid for gid in known if gid != group_id]
+        found = dict(zip(others, await asyncio.gather(*(calendars.lessons(gid, now.date()) for gid in others))))
+        columns = []
+        for lesson in lessons:
+            groups = [group_id] + [gid for gid in others if found[gid] and any(schedule.same_lesson(lesson, theirs) for theirs in found[gid])]
+            columns.append((lesson, groups))
+        present = {gid for _, groups in columns for gid in groups} | {group_id}
+        rows = [row for row in vault.accounts() if row['group_id'] in present]
+        start_of_day = schedule.epoch(now.replace(hour=0, minute=0, second=0, microsecond=0))
+        marks = vault.marks_since([row['id'] for row in rows], start_of_day - MARK_LEAD)
+        found = await journals(present)
+        result['mirea'] = {str(gid): {'fetched': entry['fetched'], 'error': entry['error']} for gid, entry in found.items() if gid in present}
+        for lesson, groups in columns:
+            begins, ends = schedule.epoch(lesson['start']) - MARK_LEAD, schedule.epoch(lesson['end'])
+            # A mark counts for the lesson it was made around; an approval wins over later failures.
+            cells = {}
+            for mark in marks:
+                if begins <= mark['created'] < ends and (cells.get(mark['account_id'], {}).get('state') != 'approved'):
+                    cells[mark['account_id']] = {key: mark[key] for key in ('state', 'message', 'created', 'source')}
+            state = 'past' if lesson['end'] <= now else 'now' if lesson['start'] <= now else 'future'
+            result['lessons'].append(shown(lesson) | {'state': state, 'groups': [{'id': gid, 'name': known.get(gid)} for gid in groups],
+                                                      'marks': {row['id']: cells.get(row['id']) for row in rows if row['group_id'] in groups},
+                                                      'mirea': {row['id']: mirea_status(found, row, lesson) for row in rows if row['group_id'] in groups}})
+        result['people'] = sorted(({'id': row['id'], 'label': row['label'], 'username': row['username'], 'group_id': row['group_id'],
+                                    'group_name': row['group_name'] or known.get(row['group_id']), 'session': row['state'],
+                                    'own': own is not None and row['id'] == own['id']} for row in rows),
+                                  key=lambda p: (p['group_id'] != group_id, p['group_name'] or '', p['label'].casefold()))
+        return result
+
     @app.get('/site/state')
     async def state(request: Request):
         session = person(request)
@@ -224,14 +351,16 @@ def install(app, service, aaid, calendars, static):
         if current is not None:
             rows = context['accounts']
             marks = vault.latest_marks([row['id'] for row in rows], schedule.epoch(current['start']) - MARK_LEAD)
-            present = await asyncio.gather(*(inside(row) for row in rows))
+            present, found = await asyncio.gather(asyncio.gather(*(inside(row) for row in rows)),
+                                                  journals(group['id'] for group in context['groups']))
             names = {group['id']: group['name'] for group in context['groups']}
             for row, here in zip(rows, present):
                 mark = marks.get(row['id'])
                 people.append({'id': row['id'], 'label': row['label'], 'username': row['username'], 'group_id': row['group_id'],
                                'group_name': row['group_name'] or names.get(row['group_id']),
                                'own': own is not None and row['id'] == own['id'], 'session': row['state'],
-                               'inside': here, 'mark': mark and {key: mark[key] for key in ('state', 'message', 'created')}})
+                               'inside': here, 'mark': mark and {key: mark[key] for key in ('state', 'message', 'created')},
+                               'mirea': mirea_status(found, row, current)})
             people.sort(key=lambda p: (not p['own'], p['group_id'] != context['group_id'], p['label'].casefold()))
         return {'me': {'group_id': context['group_id'], 'group_name': context['group_name'],
                        'account_id': own['id'] if own else None, 'label': own['label'] if own else None,

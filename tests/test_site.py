@@ -36,8 +36,18 @@ CALENDARS = {
 }
 
 class LessonPulse(FakePulse):
+    journal_reads = 0
     async def acs_timeline(self, cookie, uid, start, end):
         return [], uid == 'ann'
+    async def visiting_logs(self, cookie):
+        self.journal_reads += 1
+        return [{'id': 'old', 'group': 'ГР', 'start': 0, 'end': 1}, {'id': 'now', 'group': 'ГР', 'start': 1, 'end': 4_000_000_000}]
+    async def day_lessons(self, cookie, day):
+        start = schedule.epoch(datetime.strptime(START, '%Y%m%dT%H%M00'))
+        return [{'id': 'L1', 'start': start, 'end': start + 5400, 'subject': 'Физика'}]
+    async def lesson_attendance(self, cookie, lesson_id, log_id):
+        assert (lesson_id, log_id) == ('L1', 'now')
+        return {'bob': 'present', 'ann': 'absent', 'cat': 'excused'}
 
 class Link(Verifier):
     async def exchange(self, code):
@@ -303,3 +313,56 @@ def test_slow_pulse_does_not_hold_the_lesson_page(setup, monkeypatch):
     started = time.time()
     people = client.get('/site/state').json()['people']
     assert time.time() - started < 2 and all(p['inside'] is None for p in people)
+
+def test_today_shows_every_lesson_with_marks_of_the_groups_that_were_there(setup):
+    client, app, pulse = setup
+    vault = app.state.service.vault
+    sign_in(client)
+    bob = next(row for row in vault.accounts() if row['label'] == 'Борис')
+    vault.record_mark(bob['id'], 'rejected', 'нет', 'site')
+    vault.record_mark(bob['id'], 'approved', '', 'site')
+    vault.record_mark(bob['id'], 'error', 'later', 'site')
+    data = client.get('/site/today').json()
+    assert data['group_name'] == 'ГР-1' and len(data['lessons']) == 1
+    lesson = data['lessons'][0]
+    assert lesson['subject'] == 'Физика' and lesson['state'] == 'now'
+    assert [g['id'] for g in lesson['groups']] == [1, 2]
+    labels = {p['id']: p['label'] for p in data['people']}
+    assert sorted(labels[i] for i in lesson['marks']) == ['Анна', 'Борис']
+    assert lesson['marks'][bob['id']]['state'] == 'approved'
+    assert [p['label'] for p in data['people']] == ['Анна', 'Борис']
+    assert client.get('/today').status_code == 200
+
+def test_today_needs_sign_in(setup):
+    assert setup[0].get('/site/today').status_code == 401
+
+def test_mirea_journal_status_shows_on_the_lesson_and_today(setup):
+    client, app, pulse = setup
+    sign_in(client)
+    people = {p['label']: p for p in client.get('/site/state').json()['people']}
+    assert people['Борис']['mirea'] == 'present' and people['Анна']['mirea'] == 'absent'
+    today = client.get('/site/today').json()
+    lesson = today['lessons'][0]
+    by_label = {p['label']: p['id'] for p in today['people']}
+    assert lesson['mirea'][by_label['Борис']] == 'present' and lesson['mirea'][by_label['Анна']] == 'absent'
+    reads = pulse.journal_reads
+    client.get('/site/state')
+    assert pulse.journal_reads == reads          # cached for MIREA_TTL
+
+def test_pulse_journal_parsers():
+    from app.protocol import field, frame, _vfield, visiting_logs, day_lessons, lesson_attendance, day_lessons_request
+    headers = {'content-type': 'application/grpc-web+proto', 'grpc-status': '0'}
+    stamp = lambda n, t: field(n, _vfield(1, t))
+    journal = field(1, b'J1') + field(2, 'ГР-1'.encode()) + field(6, field(2, 'Осень'.encode()) + stamp(3, 100) + stamp(4, 200))
+    logs = frame(field(2, field(1, field(3, b'25X') ) + field(2, journal) + _vfield(3, 1)))
+    assert visiting_logs(logs, headers) == [{'id': 'J1', 'group': 'ГР-1', 'start': 100, 'end': 200}]
+    lesson = field(1, b'L1') + stamp(2, 1000) + stamp(3, 6400) + field(4, field(1, b'd') + field(2, 'Физика'.encode()))
+    lessons = frame(field(2, field(3, lesson) + field(4, field(1, b''))))
+    assert day_lessons(lessons, headers) == [{'id': 'L1', 'start': 1000, 'end': 6400, 'subject': 'Физика'}]
+    student = lambda human, word: field(1, field(1, b's') + field(9, human.encode()) + field(7, field(1, f'x|1|{word}'.encode()) + field(7, field(1, b''))))
+    attendance = frame(student('h1', 'Present') + student('h2', 'Absent') + student('h3', 'ExcusedAbsence'))
+    assert lesson_attendance(attendance, headers) == {'h1': 'present', 'h2': 'absent', 'h3': 'excused'}
+    assert lesson_attendance(frame(b''), headers) == {}
+    assert visiting_logs(frame(b''), {**headers, 'grpc-status': '16'}) is None
+    from datetime import date
+    assert day_lessons_request(date(2026, 10, 27)) == bytes.fromhex('0000000009120708ea0f100a181b')

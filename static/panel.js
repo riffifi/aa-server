@@ -224,6 +224,7 @@ async function loadTables() {
 function fact(label, value) { const box = el('div'); box.append(el('span', label), el('span', value === null || value === undefined ? '—' : String(value))); return box; }
 async function loadSystem() {
   const s = await api('debug/system');
+  fillRecordAccounts();
   const p = s.process, up = Math.round(s.now - s.started);
   $('system-facts').replaceChildren(
     fact('Работает', `${Math.floor(up / 86400)} дн ${Math.floor(up % 86400 / 3600)} ч ${Math.floor(up % 3600 / 60)} мин`),
@@ -240,13 +241,37 @@ async function loadSystem() {
     fact('Ключи AA ID обновлены', s.aaid ? ago(s.aaid.keys_fetched) : '—'),
     fact('Telegram', s.telegram ? `@${s.telegram.username || '…'}, ${s.telegram.task === 'running' ? 'работает' : 'остановлен'}` : 'не настроен'),
   );
-  grid($('calendars-table'), ['Группа', 'ID', 'Скачано', 'Последняя ошибка', 'Размер'],
-    s.calendars.map(c => [c.name, c.group_id, ago(c.fetched), c.failed ? ago(c.failed) : null, bytes(c.size)]),
+  grid($('calendars-table'), ['Группа', 'ID', 'Скачано', 'Последняя ошибка', 'Размер', 'Журнал МИРЭА'],
+    s.calendars.map(c => [c.name, c.group_id, ago(c.fetched), c.failed ? ago(c.failed) : null, bytes(c.size),
+      !c.journal ? null : c.journal.error ? c.journal.error + ', ' + ago(c.journal.fetched) : `${c.journal.lessons} пар, ${c.journal.statuses} отметок, ${ago(c.journal.fetched)}`]),
     i => s.calendars[i].failed ? 'bad' : '');
   grid($('jobs-table'), ['ID', 'Имя', 'Статус', 'Возраст', 'Ошибка', 'Диагностика'],
     s.browser.jobs.map(j => [j.id, j.label, j.status, ago(Date.now() / 1000 - j.age), j.error, j.diag]),
     i => s.browser.jobs[i].status === 'failed' ? 'bad' : '');
 }
+function fillRecordAccounts() {
+  const select = $('record-account'), keep = select.value;
+  const usable = accounts.filter(a => a.automatic_renewal && a.state === 'valid');
+  select.replaceChildren(...usable.map(a => { const option = el('option', a.label + (a.group_name ? ' · ' + a.group_name : '')); option.value = a.id; return option; }));
+  if (usable.some(a => a.id === keep)) select.value = keep;
+  $('record-start').disabled = !usable.length;
+  if (!usable.length) $('record-status').textContent = 'Нет аккаунтов с рабочей сессией и автопродлением.';
+}
+$('record-start').onclick = async () => {
+  const button = $('record-start'); button.disabled = true;
+  $('record-status').textContent = 'Открываем Пульс и записываем запросы…'; $('record-output').hidden = true; $('record-copy').hidden = true;
+  try {
+    const report = await api('debug/pulse-record', 'POST', { account_id: $('record-account').value });
+    $('record-output').textContent = JSON.stringify(report, null, 1);
+    $('record-output').hidden = false; $('record-copy').hidden = false;
+    $('record-status').textContent = `Готово: страниц ${report.visited.length}, запросов ${report.calls.length}, методов в коде ${report.methods.length}.`;
+  } catch (error) { $('record-status').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('record-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('record-output').textContent); notice('Отчёт скопирован'); }
+  catch (_) { notice('Выделите текст отчёта и скопируйте вручную.'); }
+};
 document.querySelectorAll('[data-tab]').forEach(button => { button.onclick = () => showTab(button.dataset.tab); });
 let typing = null;
 function later(run) { clearTimeout(typing); typing = setTimeout(() => run().catch(error => notice(error.message)), 300); }

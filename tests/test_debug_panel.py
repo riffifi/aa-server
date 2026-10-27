@@ -38,3 +38,12 @@ def test_debug_logs_requests_and_system(setup):
     assert routes['GET /health']['count'] >= 1
     system = client.get('/panel/api/debug/system').json()
     assert system['background']['refresh_loop'] == 'off' and 'sessions.sqlite3' in system['files']
+
+def test_pulse_recording_needs_a_saved_browser_session(setup):
+    client, service = setup[0], setup[1]
+    row = account(service)
+    csrf = client.post('/panel/api/login', json={'password': PASSWORD}).json()['csrf']
+    assert client.post('/panel/api/debug/pulse-record', json={'account_id': row['id']}).status_code == 403
+    response = client.post('/panel/api/debug/pulse-record', json={'account_id': row['id']}, headers={'x-csrf-token': csrf})
+    assert response.status_code == 409
+    assert client.post('/panel/api/debug/pulse-record', json={'account_id': 'nope'}, headers={'x-csrf-token': csrf}).status_code == 404

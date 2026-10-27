@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import io
 import json
@@ -103,6 +104,23 @@ class PulseTransport:
             return None
         return protocol.acs_events(reply.body, reply.headers)
 
+    async def _read(self, cookie, method, body, parse):
+        try:
+            reply = await self.rpc(cookie, method, body)
+        except (httpx.HTTPError, ValueError, OSError):
+            return None
+        return parse(reply.body, reply.headers) if reply.status == 200 else None
+
+    async def visiting_logs(self, cookie):
+        return await self._read(cookie, 'visiting-logs', protocol.frame(b''), protocol.visiting_logs)
+
+    async def day_lessons(self, cookie, day):
+        return await self._read(cookie, 'day-lessons', protocol.day_lessons_request(day), protocol.day_lessons)
+
+    async def lesson_attendance(self, cookie, lesson_id, log_id):
+        return await self._read(cookie, 'lesson-attendance', protocol.lesson_attendance_request(lesson_id, log_id),
+                                protocol.lesson_attendance)
+
     async def search_groups(self, query):
         # Resolve a group name to its numeric schedule id via the public MIREA
         # schedule API (schedule-of.mirea.ru) — the same source the official app
@@ -178,7 +196,7 @@ class BrowserLogins:
                 self.browser = await self.playwright.chromium.launch(headless=True, args=['--disable-dev-shm-usage'])
             return self.browser
 
-    async def _context(self, state=None):
+    async def _context(self, state=None, hosts=()):
         browser = await self._browser()
         context = await browser.new_context(storage_state=state, viewport={'width': 900, 'height': 900})
         # Playwright's default is 30s per action. advance() touches up to 25
@@ -190,7 +208,7 @@ class BrowserLogins:
             parsed = urlparse(route.request.url)
             # No caller-controlled URL is ever navigated or proxied. Prevent
             # browser resources from accessing arbitrary hosts or local services.
-            allowed = parsed.scheme == 'https' and (parsed.hostname in {'pulse.mirea.ru', 'sso.mirea.ru'} or
+            allowed = parsed.scheme == 'https' and (parsed.hostname in {'pulse.mirea.ru', 'sso.mirea.ru', *hosts} or
               (parsed.hostname or '').endswith('.ddos-guard.net') or parsed.hostname == 'ddos-guard.net')
             if allowed:
                 await route.continue_()
@@ -477,6 +495,75 @@ class BrowserLogins:
             if context:
                 await context.close()
         return False
+
+    async def record(self, account, seconds=8):
+        """Open the Pulse web pages with the account's saved session and record every
+        gRPC call they make, plus the gRPC methods named in their scripts. For the
+        admin panel: it shows where Pulse keeps data the server does not read yet,
+        such as lesson attendance. Nothing is sent but what the pages themselves send."""
+        secret = self.vault.secret(account)
+        if not secret.get('storage_state'):
+            raise ValueError('У аккаунта нет сохранённого входа браузера')
+        calls, methods, visited, pending = [], set(), [], []
+        method_pattern = re.compile(r'/(?:rtu[_a-z]*|rtu_tc)\.[A-Za-z0-9_.]+/[A-Z][A-Za-z0-9]+')
+        async def on_response(response):
+            try:
+                kind = response.headers.get('content-type', '')
+                url = urlparse(response.url)
+                if 'javascript' in kind:
+                    text = await response.text()
+                    methods.update(method_pattern.findall(text[:8_000_000]))
+                    return
+                if 'grpc-web' not in kind:
+                    return
+                body = await response.body()
+                if 'grpc-web-text' in kind:
+                    body = base64.b64decode(body)
+                headers = dict(response.headers)
+                headers['content-type'] = 'application/grpc-web+proto'
+                try:
+                    message, status = protocol.grpc_message(body[:MAX_RESPONSE], headers)
+                except ValueError as error:
+                    message, status = None, str(error)
+                request = response.request
+                sent = request.post_data_buffer or b''
+                if 'grpc-web-text' in (request.headers.get('content-type') or ''):
+                    sent = base64.b64decode(sent)
+                calls.append({'host': url.hostname, 'method': url.path, 'status': response.status, 'grpc_status': status,
+                              'request': protocol.decode_tree(sent[5:]) if len(sent) > 5 else {},
+                              'response': protocol.decode_tree(message) if message else {},
+                              'response_bytes': len(message or b'')})
+            except Exception as error:
+                calls.append({'method': response.url, 'error': type(error).__name__})
+        context = None
+        async with self.renew_slots:
+            try:
+                context = await self._context(secret['storage_state'], hosts=('attendance-app.mirea.ru',))
+                page = await context.new_page()
+                page.on('response', lambda response: pending.append(asyncio.ensure_future(on_response(response))))
+                queue = [protocol.HOST + '/services', 'https://attendance-app.mirea.ru/']
+                while queue and len(visited) < 8:
+                    url = queue.pop(0)
+                    if url in visited:
+                        continue
+                    visited.append(url)
+                    try:
+                        await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        await asyncio.sleep(seconds)
+                        links = await page.eval_on_selector_all('a[href]', 'nodes => nodes.map(n => [n.href, n.textContent || ""])')
+                    except Exception as error:
+                        log.warning('Pulse recording: %s failed: %s', url, type(error).__name__)
+                        continue
+                    for href, text in links:
+                        host = urlparse(href).hostname
+                        if host in ('pulse.mirea.ru', 'attendance-app.mirea.ru') and href not in visited and \
+                                re.search(r'посещ|attend|журнал|visit|lesson|занят|отмет', href + ' ' + text, re.I):
+                            queue.append(href)
+                await asyncio.gather(*pending, return_exceptions=True)
+            finally:
+                if context:
+                    await context.close()
+        return {'visited': visited, 'calls': calls, 'methods': sorted(methods)}
 
     def qr_png(self, job):
         if not job.qr:

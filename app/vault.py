@@ -383,6 +383,15 @@ class Vault:
                     marks[row['account_id']] = dict(row)
             return marks
 
+    def marks_since(self, account_ids, since):
+        """Every mark of these accounts since `since`, oldest first."""
+        if not account_ids:
+            return []
+        with self.transaction() as db:
+            return [dict(row) for row in db.execute(
+                f'SELECT * FROM marks WHERE created>=? AND account_id IN ({",".join("?" * len(account_ids))}) ORDER BY created',
+                (since, *account_ids))]
+
     def link_telegram(self, chat_id, account_id):
         with self.transaction() as db:
             if db.execute('SELECT 1 FROM accounts WHERE id=?', (account_id,)).fetchone() is None:

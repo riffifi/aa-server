@@ -14,6 +14,9 @@ METHODS = {
     'pass-issue': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetDigitalPass',
     'schedules': '/rtu.schedule.api.PersonalScheduleService/GetSubscribedSchedules',
     'acs-timeline': '/rtu_tc.rtu_attend.humanpass.HumanPassService/GetHumanAcsTimeline',
+    'visiting-logs': '/rtu_tc.attendance.api.VisitingLogService/GetAvailableVisitingLogsOfStudent',
+    'day-lessons': '/rtu_tc.attendance.api.LessonService/GetAvailableLessonsOfVisitingLogs',
+    'lesson-attendance': '/rtu_tc.attendance.api.AttendanceService/GetAttendanceForLesson',
 }
 PROFILE_PATH = METHODS['profile']
 
@@ -346,3 +349,67 @@ def approval(status, headers, body):
     except (ValueError, TypeError):
         pass
     return 'error', 'Неизвестный ответ Пульса'
+
+# Lesson attendance in Pulse's group journal ("visiting log"), as the Pulse web app
+# reads it: the student's journals, the journal lessons on a day, and every student's
+# status at one lesson. Field numbers come from recorded Pulse traffic.
+ATTENDANCE = {'Present': 'present', 'Absent': 'absent', 'ExcusedAbsence': 'excused'}
+
+def _many(value):
+    return value if isinstance(value, list) else [] if value is None else [value]
+
+def _message(body, headers):
+    try:
+        message, status = grpc_message(body, headers)
+    except (ValueError, UnicodeError):
+        return None
+    return decode_tree(message) if status == 0 and message else ({} if status == 0 else None)
+
+def day_lessons_request(day):
+    return frame(field(2, _vfield(1, day.year) + _vfield(2, day.month) + _vfield(3, day.day)))
+
+def lesson_attendance_request(lesson_id, log_id):
+    return frame(field(1, lesson_id.encode()) + field(2, log_id.encode()))
+
+def visiting_logs(body, headers):
+    """The student's group journals: [{'id', 'group', 'start', 'end'}] (Unix times)."""
+    tree = _message(body, headers)
+    result = []
+    for item in _many((tree or {}).get('2')):
+        journal = item.get('2') if isinstance(item, dict) else None
+        if not isinstance(journal, dict) or not isinstance(journal.get('1'), str):
+            continue
+        semester = journal.get('6') if isinstance(journal.get('6'), dict) else {}
+        stamp = lambda key: semester.get(key, {}).get('1') if isinstance(semester.get(key), dict) else None
+        result.append({'id': journal['1'], 'group': journal.get('2') if isinstance(journal.get('2'), str) else None,
+                       'start': stamp('3'), 'end': stamp('4')})
+    return None if tree is None else result
+
+def day_lessons(body, headers):
+    """Journal lessons on the requested day: [{'id', 'start', 'end', 'subject'}]."""
+    tree = _message(body, headers)
+    result = []
+    for item in _many((tree or {}).get('2')):
+        lesson = item.get('3') if isinstance(item, dict) else None
+        if not isinstance(lesson, dict) or not isinstance(lesson.get('1'), str):
+            continue
+        start, end = lesson.get('2'), lesson.get('3')
+        discipline = lesson.get('4') if isinstance(lesson.get('4'), dict) else {}
+        if isinstance(start, dict) and isinstance(end, dict) and isinstance(start.get('1'), int) and isinstance(end.get('1'), int):
+            result.append({'id': lesson['1'], 'start': start['1'], 'end': end['1'],
+                           'subject': discipline.get('2') if isinstance(discipline.get('2'), str) else ''})
+    return None if tree is None else result
+
+def lesson_attendance(body, headers):
+    """Every student's status at a lesson: {human id: 'present' | 'absent' | 'excused'}."""
+    tree = _message(body, headers)
+    result = {}
+    for student in _many((tree or {}).get('1')):
+        if not isinstance(student, dict) or not isinstance(student.get('9'), str):
+            continue
+        mark = student.get('7')
+        label = mark.get('1') if isinstance(mark, dict) else None
+        if isinstance(label, str) and '|' in label:
+            word = label.rsplit('|', 1)[1]
+            result[student['9']] = ATTENDANCE.get(word, word.lower()[:32])
+    return None if tree is None else result

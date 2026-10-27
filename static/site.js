@@ -117,7 +117,7 @@ function renderLesson() {
   if (edge && now >= edge && now - edge < 60 && $('scanner').hidden) load();
 }
 
-function markable(person) { return person.session === 'valid' && (!person.mark || person.mark.state !== 'approved'); }
+function markable(person) { return person.session === 'valid' && person.mirea !== 'present' && (!person.mark || person.mark.state !== 'approved'); }
 
 function row(person) {
   const line = el('label', null, 'row person');
@@ -133,9 +133,11 @@ function row(person) {
   meta.append(el('span', person.group_name || '', ''), document.createTextNode(' · '), el('span', place, person.inside ? 'here' : ''));
   if (person.session !== 'valid') meta.append(document.createTextNode(' · сессия МИРЭА истекла'));
   body.append(meta);
-  const [text, tone] = person.mark ? (MARK[person.mark.state] || [person.mark.state, '']) : ['Не отмечался', 'none'];
+  // The Pulse journal is the final word once it shows the person present or excused.
+  const [text, tone] = person.mirea === 'present' ? ['Отмечен в МИРЭА', 'ok'] : person.mirea === 'excused' ? ['Уважительная причина', 'wait']
+    : person.mark ? (MARK[person.mark.state] || [person.mark.state, '']) : ['Не отмечался', 'none'];
   const status = el('span', text, 'mark ' + tone);
-  if (person.mark && person.mark.message) status.title = person.mark.message;
+  if (!person.mirea && person.mark && person.mark.message) status.title = person.mark.message;
   line.append(box, body, status);
   return line;
 }

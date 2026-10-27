@@ -433,6 +433,30 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             raise HTTPException(404, 'No such table')
         return result
 
+    class RecordBody(BaseModel):
+        account_id: str = Field(min_length=1, max_length=64)
+
+    @app.post('/panel/api/debug/pulse-record')
+    async def debug_pulse_record(body: RecordBody, request: Request):
+        panel(request, True)
+        row = vault.account(body.account_id)
+        if row is None:
+            raise HTTPException(404, 'Account not found')
+        try:
+            report = await asyncio.wait_for(service.browser.record(row), 150)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+        except asyncio.TimeoutError:
+            raise HTTPException(504, 'Pulse did not answer in time') from None
+        vault.audit('pulse_recorded', 'panel', row['id'])
+        logger.info('Pulse recording for %s: %d calls, %d methods', row['id'], len(report['calls']), len(report['methods']))
+        return report
+
+    def journal_state(group_id):
+        entry = getattr(app.state, 'mirea', {}).get(group_id)
+        return entry and {'fetched': entry['fetched'], 'error': entry['error'], 'lessons': len(entry['lessons']),
+                          'statuses': sum(len(lesson['status']) for lesson in entry['lessons'])}
+
     @app.get('/panel/api/debug/system')
     async def debug_system(request: Request):
         panel(request)
@@ -454,7 +478,8 @@ def create_app(directory=None, password=None, transport=None, background=True, a
                         'login_slots_free': browser.login_slots._value, 'renew_slots_free': browser.renew_slots._value,
                         'max_active': browser.max_active, 'jobs': jobs},
             'calendars': [{'group_id': gid, 'name': names.get(gid), 'fetched': calendars.cache.get(gid, (None,))[0],
-                           'failed': calendars.failed.get(gid), 'size': len(calendars.cache[gid][1]) if gid in calendars.cache else 0}
+                           'failed': calendars.failed.get(gid), 'size': len(calendars.cache[gid][1]) if gid in calendars.cache else 0,
+                           'journal': journal_state(gid)}
                           for gid in sorted(set(calendars.cache) | set(calendars.failed) | set(names))],
             'presence': {'cached': len(presence['cache']), 'checking': len(presence['checks']), 'ttl': presence['ttl']},
             'aaid': None if aaid is None else {'enforce': aaid.enforce, 'url': aaid.public_url, 'keys': sorted(aaid.keys),

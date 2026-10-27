@@ -80,8 +80,13 @@
     <section id="tab-system" class="tab" role="tabpanel" hidden>
       <div class="block-head top"><h1 class="title tight">Система</h1></div>
       <div id="system-facts" class="facts"></div>
-      <h2 class="heading block-gap">Расписания групп</h2>
+      <h2 class="heading block-gap">Расписания и журналы групп</h2>
       <div class="table-wrap"><table id="calendars-table" class="grid"></table></div>
+      <h2 class="heading block-gap">Пульс: запись запросов</h2>
+      <p class="note">Сервер открывает страницы Пульса под выбранным аккаунтом и записывает, какие запросы они делают и что получают в ответ. Так видно, откуда брать данные, которые сервер пока не читает, например отметки посещаемости. Нужен аккаунт с автопродлением. Занимает до двух минут.</p>
+      <div class="field"><select id="record-account" class="input select" aria-label="Аккаунт"></select><button id="record-start" class="secondary">Записать</button><button id="record-copy" class="text-button" hidden>Скопировать отчёт</button></div>
+      <p id="record-status" class="caption" role="status"></p>
+      <pre id="record-output" class="report" hidden></pre>
       <h2 class="heading block-gap">Входы через браузер</h2>
       <div class="table-wrap"><table id="jobs-table" class="grid"></table></div>
     <section class="block" aria-labelledby="testing-heading">

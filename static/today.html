@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#000000"><title>AntiAttendance · Сегодня</title><link rel="stylesheet" href="/static/site.css"><script src="/static/today.js" defer></script></head>
+<body><main class="page console">
+  <header class="masthead"><span class="wordmark">AntiAttendance</span><span id="who" class="label"></span><a class="text-button push" href="/">← Текущая пара</a></header>
+
+  <section id="today">
+    <span id="today-date" class="label">Сегодня</span>
+    <h1 class="title tight">Отметки за день</h1>
+    <p id="today-note" class="note">Своя группа на всех парах. Другие группы появляются у тех пар, где они были вместе с вами. Отметки берутся с этого сайта и из журнала посещаемости МИРЭА; наведите на клетку, чтобы увидеть источник.</p>
+    <p class="caption legend"><span class="mark ok">✓ отмечен</span> · <span class="mark wait">… ждёт</span> · <span class="mark wait">У уважительная</span> · <span class="mark bad">✗ не отмечен</span> · <span class="null">— нет отметки</span> · <span class="null">пусто: группы не было на паре</span></p>
+    <div class="table-wrap"><table id="today-table" class="grid attendance"></table></div>
+    <p id="today-empty" class="note" hidden></p>
+    <p id="today-updated" class="caption"></p>
+  </section>
+
+  <p id="error" class="banner" role="alert" hidden></p>
+</main></body></html>
