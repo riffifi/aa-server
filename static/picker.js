@@ -31,6 +31,14 @@ async function loadAccounts() {
   $('load-error').hidden = true;
   try {
     const response = await fetch('/api/accounts', { cache: 'no-store' });
+    if (response.status === 401 && response.headers.get('X-AAID-Required') === '1') {
+      // The shared account list is visible only in the app, after AA ID sign-in.
+      // Owners still reach their own page through "Continue to MIREA".
+      $('account-count').textContent = '–';
+      $('accounts').replaceChildren();
+      $('empty-accounts').hidden = true;
+      throw Error('The account list is available in the AntiAttendance app after AA ID sign-in. Use “Continue to MIREA” to open your own page.');
+    }
     if (!response.ok) throw Error('Could not load accounts. Try again.');
     const data = await response.json();
     const accounts = data.accounts.slice().sort((a, b) => (a.state === 'expired') === (b.state === 'expired') ? a.label.localeCompare(b.label) : a.state === 'expired' ? -1 : 1);

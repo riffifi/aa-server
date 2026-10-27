@@ -22,6 +22,13 @@ The administration panel still requires its own password and CSRF token for
 account removal and login management. HTTPS encrypts traffic; it does not add
 phone authentication. Plain HTTP is supported.
 
+## AA ID (required sign-in)
+
+[AA ID](services/aa-id/README.md) is a separate account service: one account per
+person, bound to their MIREA identity. With `AAID_JWKS_URL` set, every app API call
+needs an AA ID bearer token; tokens are verified offline. Browser pages keep their own
+MIREA sign-in. See the AA ID README for the rollout order.
+
 ## Self-service account picker
 
 Opening the server URL now shows a **self-service picker** instead of the admin

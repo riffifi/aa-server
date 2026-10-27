@@ -5,3 +5,4 @@ __pycache__/
 *.sqlite*
 master.key
 data/
+*.patch

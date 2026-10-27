@@ -26,8 +26,30 @@ services:
       TELEGRAM_RELAY_KEY: ${TELEGRAM_RELAY_KEY:-}
       TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
       TELEGRAM_PROXY_KEY: ${TELEGRAM_PROXY_KEY:-}
+      # Set AAID_JWKS_URL=http://aaid:8090/.well-known/jwks.json to require AA ID
+      # sign-in on the app API (see services/aa-id/README.md for the rollout order).
+      AAID_JWKS_URL: ${AAID_JWKS_URL:-}
+      AAID_PUBLIC_URL: ${AAID_PUBLIC_URL:-${PUBLIC_URL:-http://127.0.0.1:8080}/id}
     volumes:
       - session_data:/data
+  # AA ID: separate account service (own process, database and signing key).
+  aaid:
+    build: ./services/aa-id
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      MAX_SESSIONS: ${AAID_MAX_SESSIONS:-2}
+      ACCESS_TTL_SECONDS: ${AAID_ACCESS_TTL_SECONDS:-600}
+      ADMIN_TOKEN: ${AAID_ADMIN_TOKEN:-}
+      # Only Nginx reaches this container; it passes the client address in X-Real-IP.
+      TRUST_PROXY_IP: '1'
+    volumes:
+      - aaid_data:/data
   nginx:
     image: nginx:1.28-alpine
     restart: unless-stopped
@@ -43,5 +65,8 @@ services:
     depends_on:
       sessions:
         condition: service_healthy
+      aaid:
+        condition: service_healthy
 volumes:
   session_data:
+  aaid_data:

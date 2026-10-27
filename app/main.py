@@ -18,6 +18,7 @@ from .pulse import PulseTransport, BrowserLogins, validate_header
 from .telegram import TelegramBot
 from .agreements import Agreements
 from . import protocol
+from . import aaid as aa_id
 from .pass_testing import daily_access, matches as matches_test_password
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,10 @@ class Service:
         await self.transport.close()
         self.vault.close()
 
-def create_app(directory=None, password=None, transport=None, background=True):
+def create_app(directory=None, password=None, transport=None, background=True, aaid=None):
+    # AA ID sign-in is enforced on the app API when a verifier is configured
+    # (AAID_JWKS_URL), and left off for development servers without AA ID.
+    aaid = aaid if aaid is not None else aa_id.from_environment(os.environ)
     vault = Vault(directory or os.environ.get('DATA_DIR', '/data'), password or os.environ.get('ADMIN_PASSWORD', ''))
     service = Service(vault, transport)
     bot = None
@@ -204,6 +208,8 @@ def create_app(directory=None, password=None, transport=None, background=True):
                 await bot.task
             await bot.close()
         await service.close()
+        if aaid is not None:
+            await aaid.close()
     app = FastAPI(title='AntiAttendance session server', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.add_middleware(BodyLimitMiddleware)
     app.state.service = service
@@ -220,12 +226,27 @@ def create_app(directory=None, password=None, transport=None, background=True):
             origin = request.headers.get('origin')
             if origin and urlparse(origin).netloc != request.headers.get('host'):
                 return JSONResponse({'detail': 'Invalid origin'}, status_code=403)
+        request.state.aaid = None
+        if aaid is not None and request.url.path.startswith('/api/') and not browser_allowed(request):
+            scheme, _, token = request.headers.get('authorization', '').partition(' ')
+            claims = await aaid.verify(token) if scheme.lower() == 'bearer' and token else None
+            if claims is None:
+                return JSONResponse({'detail': 'AA ID sign-in required', 'aaid_url': aaid.public_url},
+                                    status_code=401, headers={'WWW-Authenticate': 'Bearer', 'X-AAID-Required': '1', 'Cache-Control': 'no-store'})
+            request.state.aaid = claims
         response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
         return response
+
+    def browser_allowed(request):
+        path = request.url.path
+        if any(pattern.match(path) for pattern in aa_id.BROWSER_OPEN):
+            return True
+        owner = aa_id.BROWSER_OWNER.match(path)
+        return owner is not None and not request.headers.get('authorization') and page_authed(request, owner.group(1))
 
     def panel(request, write=False):
         token = request.cookies.get('panel_session', '')
@@ -277,7 +298,8 @@ def create_app(directory=None, password=None, transport=None, background=True):
 
     @app.get('/health')
     async def health():
-        return {'ok': True, 'protocol': 2, 'sync': 'automatic'}
+        return {'ok': True, 'protocol': 2, 'sync': 'automatic',
+                'aaid': {'required': True, 'url': aaid.public_url} if aaid is not None else {'required': False}}
 
     @app.get('/')
     async def index():
@@ -477,7 +499,10 @@ def create_app(directory=None, password=None, transport=None, background=True):
         rows = vault.accounts(group_id)
         testing = test_access(request)
         key = request.headers.get('x-pass-client', '')
-        metadata = [{**vault.public(row), 'pass_access': service.agreements.status(row['id'], key)} for row in rows]
+        caller = request.state.aaid
+        # `own` marks the account of the signed-in AA ID person (same MIREA identity).
+        metadata = [{**vault.public(row), 'pass_access': service.agreements.status(row['id'], key),
+                     'own': caller is not None and row['pulse_id'] == caller['mirea']} for row in rows]
         passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if testing or (row['pass_allowed'] and pass_access(request, row['id'])) else None, 'version': row['pass_version']} for row in rows]
         return {'accounts': metadata, 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id,
                 'pass_agreements_required': True, 'pass_access_expires_at': time.time() + 300,
