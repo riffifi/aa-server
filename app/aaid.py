@@ -26,7 +26,10 @@ BROWSER_OPEN = (
 BROWSER_OWNER = re.compile(r'^/api/accounts/([^/]+)(?:/(?:attendance|label|end-session|pass-allowed))?$')
 
 class Verifier:
-    def __init__(self, jwks_url=None, keys=None, issuer='aa-id', audience='aa', public_url=''):
+    def __init__(self, jwks_url=None, keys=None, issuer='aa-id', audience='aa', public_url='', enforce=True):
+        # Without `enforce` tokens are still verified (for /api/me/...), but the
+        # app API stays open to clients that do not send one yet.
+        self.enforce = enforce
         self.jwks_url, self.keys = jwks_url, dict(keys or {})
         self.issuer, self.audience, self.public_url = issuer, audience, public_url
         self.fetched_at = 0.0
@@ -80,4 +83,5 @@ def from_environment(environ):
     if not url:
         return None
     return Verifier(url, issuer=environ.get('AAID_ISSUER', 'aa-id'), audience=environ.get('AAID_AUDIENCE', 'aa'),
-                    public_url=environ.get('AAID_PUBLIC_URL', '').strip())
+                    public_url=environ.get('AAID_PUBLIC_URL', '').strip(),
+                    enforce=environ.get('AAID_ENFORCE', '0').strip() in ('1', 'true', 'yes'))

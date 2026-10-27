@@ -87,3 +87,27 @@ def test_server_without_aa_id_stays_open(tmp_path):
     with TestClient(app) as client:
         assert client.get('/health').json()['aaid'] == {'required': False}
         assert client.get('/api/accounts').status_code == 200
+
+class AcsPulse(FakePulse):
+    async def acs_timeline(self, cookie, uid, start, end):
+        self.window = (uid, start, end)
+        return [{'direction': 'in', 'time': 100, 'zone': 'Вход'}, {'direction': 'out', 'time': 300, 'zone': 'Выход'},
+                {'direction': 'in', 'time': 200, 'zone': 'Вход'}], False
+
+def test_own_attendance_for_the_aa_id_person(tmp_path):
+    pulse = AcsPulse()
+    verifier = Verifier(keys={'k1': RAW}, enforce=False)
+    app = create_app(tmp_path, PASSWORD, pulse, background=False, aaid=verifier)
+    with TestClient(app) as client:
+        service = app.state.service
+        account(service, 'person-one')
+        account(service, 'person-two')
+        # Not enforcing: the app API stays open, but /api/me needs a token.
+        assert client.get('/api/accounts').status_code == 200
+        assert client.get('/health').json()['aaid']['required'] is False
+        assert client.get('/api/me/attendance').status_code == 401
+        result = client.get('/api/me/attendance', headers=auth(token('person-two'))).json()
+        assert pulse.window[0] == 'person-two'
+        assert [e['time'] for e in result['events']] == [300, 200, 100]
+        assert result['last_in']['time'] == 200 and result['last_out']['time'] == 300
+        assert client.get('/api/me/attendance', headers=auth(token('nobody'))).status_code == 404

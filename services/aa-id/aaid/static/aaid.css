@@ -329,3 +329,6 @@ button,.btnlink { color:#111116; }
 .device-list .row { align-items: center; }
 .id-facts { display: grid; gap: 6px; margin: 12px 0 0; }
 .id-facts span { color: var(--muted); }
+.lesson-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; margin-top: 12px; }
+.lesson-now { display: grid; gap: 2px; min-width: 0; flex: 1 1 180px; }
+.acs-in { color: var(--accent-strong); }

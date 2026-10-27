@@ -4,6 +4,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 import base64
+from datetime import datetime, timedelta, timezone
 import hmac
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .pulse import PulseIdentity
+from . import schedule
 from .store import Store, Blocked, digest
 from .tokens import Signer, verify
 
@@ -45,7 +47,7 @@ def browser_name(agent):
         ('Windows', 'Windows'), ('Mac OS X', 'macOS'), ('Linux', 'Linux')) if token in agent), None)
     return browser + (' · ' + system if system else '')
 
-def create_app(directory=None, identity=None, logins=None):
+def create_app(directory=None, identity=None, logins=None, http=None):
     directory = directory or os.environ.get('DATA_DIR', '/data')
     issuer = os.environ.get('AAID_ISSUER', 'aa-id')
     audience = os.environ.get('AAID_AUDIENCE', 'aa')
@@ -64,11 +66,17 @@ def create_app(directory=None, identity=None, logins=None):
     web_ttl = _number('WEB_SESSION_TTL_SECONDS', 7 * 86400, 600)
     attempts = defaultdict(deque)
     static = Path(__file__).with_name('static')
+    # The session server, reached inside the Compose network. It holds the Pulse
+    # sessions; AA ID asks it only for the signed-in person's own turnstile log.
+    sessions_url = os.environ.get('SESSIONS_URL', 'http://sessions:8080').rstrip('/')
+    http = http or httpx.AsyncClient(timeout=20, follow_redirects=False)
+    calendars = {}
 
     @asynccontextmanager
     async def lifespan(app):
         yield
         await logins.close()
+        await http.aclose()
         await pulse.close()
         store.close()
 
@@ -101,6 +109,11 @@ def create_app(directory=None, identity=None, logins=None):
         if len(queue) >= count:
             raise HTTPException(429, 'Too many attempts; try again later')
         queue.append(now)
+
+    def access_token(user, session):
+        now = int(time.time())
+        return signer.sign({'iss': issuer, 'aud': audience, 'sub': user['id'], 'sid': session['id'],
+                            'mirea': user['pulse_uid'], 'grp': user['group_id'], 'iat': now, 'exp': now + 60})
 
     def grant(user, session, refresh):
         now = int(time.time())
@@ -246,6 +259,44 @@ def create_app(directory=None, identity=None, logins=None):
         session, user = site_session(request)
         devices = [{**dict(row), 'current': row['id'] == session['id']} for row in store.sessions(user['id'])]
         return {**public(user), 'sessions': devices, 'max_sessions': max_sessions}
+
+    @app.get('/web/attendance')
+    async def site_attendance(request: Request):
+        session, user = site_session(request)
+        try:
+            response = await http.get(sessions_url + '/api/me/attendance',
+                                      headers={'authorization': 'Bearer ' + access_token(user, session)})
+        except httpx.HTTPError:
+            raise HTTPException(503, 'Сервер сессий недоступен') from None
+        if response.status_code == 404:
+            raise HTTPException(404, 'Ваш аккаунт МИРЭА не подключён к серверу AntiAttendance')
+        if response.status_code == 409:
+            raise HTTPException(409, 'Сессия МИРЭА на сервере завершена, войдите на сервере заново')
+        if response.status_code != 200:
+            raise HTTPException(503, 'Не удалось получить данные турникетов')
+        data = response.json()
+        return {key: data.get(key) for key in ('inside', 'last_in', 'last_out', 'events')}
+
+    @app.get('/web/schedule')
+    async def site_schedule(request: Request):
+        _, user = site_session(request)
+        group_id = user['group_id']
+        if not group_id:
+            return {'group_id': None, 'url': schedule.HOST, 'current': None, 'next': None}
+        cached = calendars.get(group_id)
+        if cached is None or time.time() - cached[0] > 900:
+            try:
+                response = await http.get(schedule.ical_url(group_id))
+                if response.status_code != 200 or len(response.content) > 2 * 1024 * 1024 or b'BEGIN:VCALENDAR' not in response.content:
+                    raise ValueError('Invalid calendar')
+                cached = calendars[group_id] = (time.time(), response.text)
+            except (httpx.HTTPError, ValueError):
+                if cached is None:
+                    raise HTTPException(503, 'Расписание МИРЭА недоступно') from None
+        now = datetime.now(timezone(timedelta(hours=3))).replace(tzinfo=None)  # Moscow civil time
+        current, upcoming = schedule.current_and_next(schedule.lessons_on(cached[1], now.date()), now)
+        shown = lambda lesson: lesson and {**lesson, 'start': lesson['start'].strftime('%H:%M'), 'end': lesson['end'].strftime('%H:%M')}
+        return {'group_id': group_id, 'url': schedule.page_url(group_id), 'current': shown(current), 'next': shown(upcoming)}
 
     @app.delete('/web/sessions/{session_id}')
     async def site_revoke(session_id: str, request: Request):

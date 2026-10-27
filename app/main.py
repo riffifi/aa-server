@@ -230,7 +230,7 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         if aaid is not None and request.url.path.startswith('/api/') and not browser_allowed(request):
             scheme, _, token = request.headers.get('authorization', '').partition(' ')
             claims = await aaid.verify(token) if scheme.lower() == 'bearer' and token else None
-            if claims is None:
+            if claims is None and (aaid.enforce or request.url.path.startswith('/api/me/')):
                 return JSONResponse({'detail': 'AA ID sign-in required', 'aaid_url': aaid.public_url},
                                     status_code=401, headers={'WWW-Authenticate': 'Bearer', 'X-AAID-Required': '1', 'Cache-Control': 'no-store'})
             request.state.aaid = claims
@@ -299,7 +299,7 @@ def create_app(directory=None, password=None, transport=None, background=True, a
     @app.get('/health')
     async def health():
         return {'ok': True, 'protocol': 2, 'sync': 'automatic',
-                'aaid': {'required': True, 'url': aaid.public_url} if aaid is not None else {'required': False}}
+                'aaid': {'required': aaid.enforce, 'url': aaid.public_url} if aaid is not None else {'required': False}}
 
     @app.get('/')
     async def index():
@@ -572,6 +572,32 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         if not page_authed(request, identifier):
             raise HTTPException(401, 'Sign in to this account first')
         return vault.public(row)
+
+    @app.get('/api/me/attendance')
+    async def my_attendance(request: Request, days: int = 7):
+        # Turnstile entries and exits of the AA ID caller's own account (same MIREA
+        # person), newest first. Used by the AA ID site; never another person's data.
+        caller = request.state.aaid
+        if caller is None:
+            raise HTTPException(401, 'AA ID sign-in required')
+        if not 1 <= days <= 14:
+            raise HTTPException(400, 'Invalid period')
+        row = next((item for item in vault.accounts() if item['pulse_id'] == caller['mirea']), None)
+        if row is None:
+            raise HTTPException(404, 'This MIREA account is not connected to the session server')
+        cookie = vault.secret(row).get('cookie')
+        if not cookie:
+            raise HTTPException(409, 'The session was ended; sign in again')
+        now = time.time()
+        today = (int((now + 3 * 3600) // 86400)) * 86400 - 3 * 3600  # Moscow midnight
+        result = await service.transport.acs_timeline(cookie, row['pulse_id'], today - (days - 1) * 86400, today + 86400 - 1)
+        if result is None:
+            raise HTTPException(503, 'Pulse is unavailable; try again')
+        events, inside = result
+        events = sorted(events, key=lambda e: e['time'], reverse=True)
+        last = lambda direction: next((e for e in events if e['direction'] == direction), None)
+        return {'account_id': row['id'], 'state': row['state'], 'inside': inside,
+                'last_in': last('in'), 'last_out': last('out'), 'events': events[:30]}
 
     @app.get('/api/accounts/{identifier}/attendance')
     @app.get('/panel/api/accounts/{identifier}/attendance')

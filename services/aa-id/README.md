@@ -47,12 +47,16 @@ revocation within one access-token lifetime; AA ID's own endpoints see it at onc
 The service also serves the AA ID site at `/`: sign in with the MIREA QR code
 (a headless browser on the server runs the MIREA login, reads the Pulse person id
 and group, signs that MIREA session out and closes), then see the account and the
-signed-in devices and sign any of them out. The site uses an `HttpOnly`,
+signed-in devices and sign any of them out. It also shows the person's turnstile
+entries and exits for the last week (newest first; read from the session server's
+`GET /api/me/attendance` with a one-minute AA ID token, only when that MIREA account
+is connected there) and today's current or next lesson of their group from
+schedule-of.mirea.ru, with a link to the group's schedule. The site uses an `HttpOnly`,
 `SameSite=Strict` cookie; one browser is signed in at a time and site sessions do
 not count towards the phone limit. Site endpoints: `POST /web/logins`,
 `GET /web/logins/{id}` and `POST /web/logins/{id}/claim` (both with the
 `X-Login-Token` the start call returned), `GET /web/me`, `DELETE /web/sessions/{id}`,
-`POST /web/logout`.
+`GET /web/attendance`, `GET /web/schedule`, `POST /web/logout`.
 
 ### Own domain
 
@@ -68,8 +72,9 @@ the main server). For a third-level domain such as `id.yellowteacrew.ru`:
 
 ## Session server integration
 
-When `AAID_JWKS_URL` is set, the session server rejects every `/api/*` request
-without a valid AA ID bearer token (`401`, `X-AAID-Required: 1`). The browser pages
+The session server verifies AA ID tokens with the keys from `AAID_JWKS_URL`
+(Compose points it at the `aaid` container). With `AAID_ENFORCE=1` it rejects every
+`/api/*` request without a valid AA ID bearer token (`401`, `X-AAID-Required: 1`). The browser pages
 keep working through their own MIREA sign-in: `POST /api/logins`,
 `/api/groups/search`, the owner page endpoints, and owner endpoints of the account
 whose `page_session` cookie is presented. `GET /health` reports `aaid.required` and
@@ -81,8 +86,8 @@ account with `own: true` (same Pulse identity).
 1. Deploy: `docker compose up -d --build` starts `aaid` next to `sessions`, and
    Nginx routes `/id/` to it. Nothing is enforced yet.
 2. Release the app version with the AA ID gate and let phones update.
-3. Enforce: put `AAID_JWKS_URL=http://aaid:8090/.well-known/jwks.json` in `.env`
-   and rerun `./install.sh`. Older app builds then stop working against the server.
+3. Enforce: put `AAID_ENFORCE=1` in `.env` and run `docker compose up -d`. Older
+   app builds then stop working against the server.
 
 Back up the `aaid_data` volume (`aaid.sqlite3` and `signing.key`) together. Losing
 `signing.key` only signs everyone out; losing the database loses the AA ID ↔ MIREA

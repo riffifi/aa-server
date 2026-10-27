@@ -1,4 +1,5 @@
 import struct
+import httpx
 import time
 import pytest
 from fastapi.testclient import TestClient
@@ -42,9 +43,33 @@ def setup(tmp_path, monkeypatch):
     fake.people['s=alice'] = ('uid-alice', 4242, 'ИКБО-01-24')
     fake.people['s=alice2'] = ('uid-alice', None, None)
     fake.people['s=bob'] = ('uid-bob', 4242, 'ИКБО-01-24')
-    app = create_app(tmp_path, fake, FakeLogins())
+    def upstream(request):
+        seen.append(request)
+        if request.url.host == 'sessions':
+            claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
+            if claims['mirea'] != 'uid-alice':
+                return httpx.Response(404, json={'detail': 'not connected'})
+            return httpx.Response(200, json={'inside': False, 'last_in': {'direction': 'in', 'time': 200, 'zone': 'Вход'},
+                'last_out': {'direction': 'out', 'time': 300, 'zone': 'Выход'}, 'events': [], 'account_id': 'secret'})
+        return httpx.Response(200, text=CALENDAR)
+    seen = []
+    app = create_app(tmp_path, fake, FakeLogins(), httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
+    app.state.seen = seen
     with TestClient(app) as client:
         yield client, app, fake, tmp_path
+
+CALENDAR = '''BEGIN:VCALENDAR\r
+BEGIN:VEVENT\r
+DTSTART;TZID=Europe/Moscow:20260101T000000\r
+DTEND;TZID=Europe/Moscow:20260101T235900\r
+RRULE:FREQ=DAILY\r
+SUMMARY:ЛК Весь день\r
+X-META-DISCIPLINE:Весь день\r
+X-META-LESSON_TYPE:ЛК\r
+LOCATION:А-1\r
+END:VEVENT\r
+END:VCALENDAR\r
+'''
 
 def sign_in(client, cookie='s=alice', device='Pixel'):
     return client.post('/v1/auth/mirea', json={'pulse_cookie': cookie, 'device': device})
@@ -198,3 +223,21 @@ def test_one_browser_at_a_time_and_phones_unaffected(setup):
     client.cookies.set('aaid_web', first_cookie)
     assert client.get('/web/me').status_code == 401
     assert client.get('/v1/me', headers=bearer(phone)).status_code == 200
+
+def test_site_turnstile_and_current_lesson(setup):
+    client, app, _, _ = setup
+    assert client.get('/web/attendance').status_code == 401
+    web_sign_in(client, app)
+    attendance = client.get('/web/attendance').json()
+    assert attendance['last_out']['time'] == 300 and 'account_id' not in attendance
+    lesson = client.get('/web/schedule').json()
+    assert lesson['url'].endswith('1_4242') and lesson['current']['subject'] == 'Весь день'
+    assert str(app.state.seen[-1].url).endswith('/Group/4242?includeMeta=true')
+    client.get('/web/schedule')
+    assert len([r for r in app.state.seen if r.url.host != 'sessions']) == 1  # cached
+
+def test_site_turnstile_for_unconnected_person(setup):
+    client, app, _, _ = setup
+    web_sign_in(client, app, ('uid-bob', None, None))
+    assert client.get('/web/attendance').status_code == 404
+    assert client.get('/web/schedule').json()['group_id'] is None

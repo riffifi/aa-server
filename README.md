@@ -25,8 +25,9 @@ phone authentication. Plain HTTP is supported.
 ## AA ID (required sign-in)
 
 [AA ID](services/aa-id/README.md) is a separate account service: one account per
-person, bound to their MIREA identity. With `AAID_JWKS_URL` set, every app API call
-needs an AA ID bearer token; tokens are verified offline. Browser pages keep their own
+person, bound to their MIREA identity. Tokens are verified offline with the keys
+from `AAID_JWKS_URL`; with `AAID_ENFORCE=1` every app API call needs one.
+`GET /api/me/attendance` returns the AA ID caller's own turnstile log. Browser pages keep their own
 MIREA sign-in. See the AA ID README for the rollout order.
 
 ## Self-service account picker

@@ -34,7 +34,9 @@ async function load() {
 }
 
 function render(me) {
+  const first = $('account').hidden;
   $('signin').hidden = true; $('account').hidden = false;
+  if (first) { loadSchedule(); loadAttendance(); }
   $('group').textContent = me.group_name || (me.group_id ? 'Группа ' + me.group_id : 'не определена');
   $('created').textContent = when(me.created);
   $('user-id').textContent = me.id;
@@ -55,6 +57,42 @@ function render(me) {
     }
     return row;
   }));
+}
+
+function zoned(seconds) { return new Date(seconds * 1000).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+
+async function loadSchedule() {
+  try {
+    const data = await api('web/schedule');
+    $('schedule-link').href = data.url;
+    const lesson = data.current || data.next;
+    if (!data.group_id) { $('lesson-title').textContent = 'Группа не определена'; $('lesson-meta').textContent = ''; return; }
+    if (!lesson) { $('lesson-title').textContent = 'Сегодня пар больше нет'; $('lesson-meta').textContent = ''; return; }
+    $('lesson-title').textContent = (data.current ? 'Сейчас: ' : 'Далее: ') + lesson.subject;
+    $('lesson-meta').textContent = [lesson.start + '–' + lesson.end, lesson.type, lesson.location].filter(Boolean).join(' · ');
+  } catch (error) { $('lesson-title').textContent = error.message; $('lesson-meta').textContent = ''; }
+}
+
+async function loadAttendance() {
+  $('acs-note').hidden = true;
+  $('acs-refresh').disabled = true;
+  try {
+    const data = await api('web/attendance');
+    $('last-in').textContent = data.last_in ? zoned(data.last_in.time) : '—';
+    $('last-out').textContent = data.last_out ? zoned(data.last_out.time) : '—';
+    // Newest first, as the server sorts them.
+    $('acs-list').replaceChildren(...data.events.map(event => {
+      const row = el('div', null, 'row'), body = el('div', null, 'row-body');
+      body.append(el('strong', event.direction === 'in' ? 'Вход' : 'Выход', event.direction === 'in' ? 'acs-in' : ''));
+      body.append(el('div', zoned(event.time) + (event.zone ? ' · ' + event.zone : ''), 'meta'));
+      row.append(body);
+      return row;
+    }));
+    if (!data.events.length) { $('acs-note').textContent = 'За последнюю неделю проходов нет.'; $('acs-note').hidden = false; }
+  } catch (error) {
+    $('acs-list').replaceChildren();
+    $('acs-note').textContent = error.message; $('acs-note').hidden = false;
+  } finally { $('acs-refresh').disabled = false; }
 }
 
 async function start() {
@@ -103,6 +141,7 @@ async function poll(id) {
 }
 
 $('start').addEventListener('click', start);
+$('acs-refresh').addEventListener('click', loadAttendance);
 $('logout').addEventListener('click', async () => {
   try { await api('web/logout', { method: 'POST' }); } catch (_) { /* signed out locally anyway */ }
   load();
