@@ -71,8 +71,8 @@ class Vault:
         if 'session_version' not in columns:
             self.db.execute('ALTER TABLE accounts ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1')
         if 'pass_allowed' not in columns:
-            # Per-account permission to use the digital pass in the app. Defaults to
-            # on so existing passes keep working; owners can revoke it per account.
+            # Per-account permission to use the digital pass in the app. Existing
+            # accounts keep it on; new accounts are created with it off (see upsert).
             self.db.execute('ALTER TABLE accounts ADD COLUMN pass_allowed INTEGER NOT NULL DEFAULT 1')
         if 'page_seen_at' not in columns:
             # Last time the person signed in to the site (the "has logged in" indicator
@@ -162,7 +162,8 @@ class Vault:
                 if expected not in (None, 0) or session_expected not in (None, 0):
                     raise Conflict('Account does not exist')
                 account_id, version = str(uuid.uuid4()), 1
-                db.execute('INSERT INTO accounts(id,pulse_id,label,group_id,group_name,secret,state,expires_at,checked_at,version,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                # New accounts start without pass permission: the owner turns it on themselves.
+                db.execute('INSERT INTO accounts(id,pulse_id,label,group_id,group_name,secret,state,expires_at,checked_at,version,updated_at,pass_allowed) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)',
                     (account_id, pulse_id, label or 'Account', group_id, group_name, self.seal(credentials), 'valid', credentials.get('expires_at'), time.time(), version, time.time()))
             self._event(db, account_id, version, 'session', row['group_id'] if row else None)
         return self.account(account_id)

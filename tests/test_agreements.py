@@ -22,6 +22,8 @@ def setup(tmp_path):
         service = app.state.service
         owner = service.vault.upsert('owner', 'Owner', {'cookie': 'session=owner', 'pass_number': '12345'})['id']
         other = service.vault.upsert('other', 'Other', {'cookie': 'session=other', 'pass_number': '67890'})['id']
+        for account in (owner, other):  # new accounts start with the pass off
+            service.vault.set_pass_allowed(account, True)
         service.agreements.verify_owner(100, owner)
         service.agreements.verify_owner(200, other)
         bot = TelegramBot('test-token-not-real', service)
@@ -161,6 +163,7 @@ def test_grants_survive_restart_and_unlink_revokes_owner_authority(tmp_path):
     vault = Vault(tmp_path, PASSWORD)
     agreements = Agreements(vault)
     owner = vault.upsert('owner', 'Owner', {'cookie': 'session=owner'})['id']
+    vault.set_pass_allowed(owner, True)
     agreements.verify_owner(100, owner)
     identifier = agreements.create(owner, KEY)
     assert agreements.claim(identifier, 300, 'Requester · 300')

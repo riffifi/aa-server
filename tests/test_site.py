@@ -164,9 +164,9 @@ def test_settings_through_aa_id(setup):
     bearer = {'authorization': 'Bearer ' + token('ann')}
     assert client.get('/api/me/account').status_code == 401
     me = client.get('/api/me/account', headers=bearer).json()
-    assert me == {'connected': True, 'account': True, 'label': 'Анна', 'pass_allowed': True, 'group_name': 'ГР-1'}
-    changed = client.put('/api/me/account', json={'pass_allowed': False}, headers=bearer).json()
-    assert changed['pass_allowed'] is False and changed['label'] == 'Анна'
-    assert app.state.service.vault.account_by_pulse('ann')['pass_allowed'] == 0
+    assert me == {'connected': True, 'account': True, 'label': 'Анна', 'pass_allowed': False, 'group_name': 'ГР-1'}
+    changed = client.put('/api/me/account', json={'pass_allowed': True}, headers=bearer).json()
+    assert changed['pass_allowed'] is True and changed['label'] == 'Анна'
+    assert app.state.service.vault.account_by_pulse('ann')['pass_allowed'] == 1
     assert client.put('/api/me/account', json={'label': 'x'}, headers={'authorization': 'Bearer ' + token('nobody')}).status_code == 404
     assert client.get('/api/me/account', headers={'authorization': 'Bearer ' + token('nobody')}).json()['account'] is False

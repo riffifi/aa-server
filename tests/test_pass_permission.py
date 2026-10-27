@@ -38,12 +38,12 @@ def signin(client, service, account_id):
     client.cookies.set('aa_site', site_session(service.vault, account_id))
 
 
-def test_pass_defaults_on_and_single_account_endpoint(setup):
+def test_pass_defaults_off_and_single_account_endpoint(setup):
     client, service = setup
     row = service.vault.upsert('person', 'Person', {'cookie': 'session=person'})
     signin(client, service, row["id"])
     detail = client.get('/api/accounts/' + row['id'])
-    assert detail.status_code == 200 and detail.json()['pass_allowed'] is True
+    assert detail.status_code == 200 and detail.json()['pass_allowed'] is False
     assert client.get('/api/accounts/missing').status_code == 404
     # The 1.x owner page now leads to the site.
     page = client.get('/u/' + row['id'], follow_redirects=False)
@@ -54,8 +54,10 @@ def test_toggling_permission_blocks_pass_rpcs_only(setup):
     client, service = setup
     row = service.vault.upsert('person', 'Person', {'cookie': 'session=person'})
     signin(client, service, row["id"])
+    assert client.post(f'/api/accounts/{row["id"]}/rpc/pass-token', content=unary(), headers=GRPC).status_code == 403
+    on = client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': True, 'expected_version': row['version']}).json()
     assert client.post(f'/api/accounts/{row["id"]}/rpc/pass-token', content=unary(), headers=GRPC).status_code != 403
-    put = client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': False, 'expected_version': row['version']})
+    put = client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': False, 'expected_version': on['version']})
     assert put.status_code == 200 and put.json()['pass_allowed'] is False
     for method in ('pass-token', 'pass-code', 'pass-issue'):
         assert client.post(f'/api/accounts/{row["id"]}/rpc/{method}', content=unary(), headers=GRPC).status_code == 403
@@ -70,7 +72,7 @@ def test_permission_change_emits_sync_event(setup):
     row = service.vault.upsert('person', 'Person', {'cookie': 'session=person'})
     signin(client, service, row["id"])
     cursor = client.get('/api/events?after=0&wait=0').json()['cursor']
-    client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': False, 'expected_version': row['version']})
+    client.put(f'/api/accounts/{row["id"]}/pass-allowed', json={'allowed': True, 'expected_version': row['version']})
     events = client.get(f'/api/events?after={cursor}&wait=0').json()['events']
     assert any(event['kind'] == 'pass_permission' for event in events)
 

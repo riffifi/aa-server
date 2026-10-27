@@ -83,7 +83,8 @@ from the owner's page (always under a session).
 
 ### Pass permission and Telegram agreements
 
-`pass_allowed` is the owner's account-wide switch. It is **not** a grant to every
+`pass_allowed` is the owner's account-wide switch. New accounts start with it **off**;
+the owner turns it on in the AA ID settings (each change is confirmed in a dialog). It is **not** a grant to every
 phone. Ordinary pass snapshots, uploads, and `pass-token`/`pass-code`/`pass-issue`
 RPCs additionally require an approval for the requesting Telegram person (or the
 person's own site session). Attendance and session renewal are unchanged.

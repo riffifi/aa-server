@@ -186,6 +186,15 @@ async function poll(id) {
   setTimeout(() => poll(id), 2000);
 }
 
+function confirmChanges(lines) {
+  const dialog = $('confirm-dialog');
+  $('confirm-list').replaceChildren(...lines.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
+  if (typeof dialog.showModal !== 'function') return Promise.resolve(confirm('Сохранить изменения?\n\n' + lines.join('\n')));
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true }));
+}
+
 $('start').addEventListener('click', start);
 $('continue').addEventListener('click', continueToSite);
 $('settings').addEventListener('submit', async event => {
@@ -194,6 +203,12 @@ $('settings').addEventListener('submit', async event => {
   if ($('name').value.trim() !== account.label) body.label = $('name').value.trim();
   if ($('pass-allowed').checked !== Boolean(account.pass_allowed)) body.pass_allowed = $('pass-allowed').checked;
   if (!Object.keys(body).length) { $('settings-status').textContent = 'Нет изменений'; return; }
+  // Every change is confirmed separately in a dialog before it is saved.
+  const lines = [];
+  if ('label' in body) lines.push('Имя на паре: «' + body.label + '»');
+  if (body.pass_allowed === true) lines.push('Разрешить использовать ваш пропуск. Его увидят только те, кому вы разрешите в Telegram.');
+  if (body.pass_allowed === false) lines.push('Запретить использовать ваш пропуск. Приложение перестанет его показывать.');
+  if (!await confirmChanges(lines)) { $('settings-status').textContent = 'Не сохранено'; return; }
   try {
     await api('web/account', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     $('settings-status').textContent = 'Сохранено';
