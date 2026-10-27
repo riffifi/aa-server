@@ -7,6 +7,7 @@ whose group has the same class right now (same time and room, or for an online
 class the same subject and teacher)."""
 import asyncio
 import hmac
+import logging
 import os
 import secrets
 import time
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 from . import protocol, schedule
 from .pulse import validate_header
 
+log = logging.getLogger(__name__)
 SESSION_COOKIE = 'aa_site'
 SESSION_TTL = 30 * 86400
 # A mark made this long before the lesson starts still counts for it.
@@ -85,6 +87,7 @@ def install(app, service, aaid, calendars, static):
         if aaid is not None and 20 <= len(code) <= 200 and expected and hmac.compare_digest(state, expected):
             person_data = await aaid.exchange(code)
         if person_data is None:
+            log.warning('AA ID sign-in failed: %s', 'code not accepted' if expected and hmac.compare_digest(state, expected) else 'state cookie missing or different')
             return RedirectResponse('/?signin=failed', status_code=303)
         token = vault.create_site_session(person_data['id'], person_data['mirea'], person_data.get('group_id'),
                                           person_data.get('group_name'), SESSION_TTL)
@@ -107,6 +110,7 @@ def install(app, service, aaid, calendars, static):
         scheme, _, token = request.headers.get('authorization', '').partition(' ')
         claims = await aaid.verify(token, audience='aa-link') if aaid is not None and scheme.lower() == 'bearer' else None
         if claims is None:
+            log.warning('AA ID link rejected: bad signature')
             raise HTTPException(401, 'Invalid AA ID link')
         try:
             cookie = validate_header(body.cookie)
@@ -114,6 +118,7 @@ def install(app, service, aaid, calendars, static):
             raise HTTPException(400, 'Invalid cookie') from None
         state, uid = await service.transport.identity(cookie)
         if state != 'valid' or uid != claims['mirea']:
+            log.warning('AA ID link rejected: Pulse says %s', state if state != 'valid' else 'another person')
             raise HTTPException(422, 'Pulse did not confirm this session')
         credentials = {'cookie': cookie, 'expires_at': body.expires_at, 'renewed_at': body.renewed_at or time.time()}
         if body.storage_state:

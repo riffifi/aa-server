@@ -191,4 +191,5 @@ $('logout').addEventListener('click', async () => { try { await api('/site/logou
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('scanner').hidden) closeScanner(); });
 if (new URLSearchParams(location.search).get('signin') === 'failed') { showError('Не удалось войти через AA ID. Попробуйте ещё раз.'); history.replaceState(null, '', '/'); }
 load();
-setInterval(() => { if (!document.hidden && $('scanner').hidden && state) load(); }, 30000);
+setInterval(() => { if (!document.hidden && $('scanner').hidden) load(); }, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && $('scanner').hidden) load(); });

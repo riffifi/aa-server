@@ -38,6 +38,10 @@ RENEW_BEFORE = _seconds('RENEW_BEFORE_SECONDS', 900)
 RENEW_INTERVAL = _seconds('RENEW_INTERVAL_SECONDS', 900)
 RENEW_BACKOFF = _seconds('RENEW_BACKOFF_SECONDS', 300)
 
+def body_limit(path):
+    # The MIREA browser state that AA ID hands over can be large (site storage).
+    return 4_000_000 if path == '/internal/aaid/link' else 200000
+
 class BodyLimitMiddleware:
     def __init__(self, app):
         self.app = app
@@ -50,7 +54,7 @@ class BodyLimitMiddleware:
             if message['type'] == 'http.disconnect':
                 return
             body.extend(message.get('body', b''))
-            if len(body) > 200000:
+            if len(body) > body_limit(scope.get('path', '')):
                 await JSONResponse({'detail': 'Request too large'}, status_code=413)(scope, receive, send)
                 return
             if not message.get('more_body', False):
@@ -222,7 +226,7 @@ def create_app(directory=None, password=None, transport=None, background=True, a
     @app.middleware('http')
     async def security(request, call_next):
         size = request.headers.get('content-length')
-        if size and (not size.isdigit() or int(size) > 200000):
+        if size and (not size.isdigit() or int(size) > body_limit(request.url.path)):
             return JSONResponse({'detail': 'Request too large'}, status_code=413)
         if request.url.path.startswith(('/api/', '/site/')) and request.method not in ('GET', 'HEAD'):
             origin = request.headers.get('origin')

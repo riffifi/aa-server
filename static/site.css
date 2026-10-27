@@ -106,7 +106,7 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
 .person { cursor: pointer; justify-content: flex-start; }
 .person input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--accent); }
 .person .row-body { flex: 1; }
-.mark { flex: none; font-size: 13px; line-height: 16px; text-align: right; color: var(--secondary); }
+.person > .mark { flex: none; font-size: 13px; line-height: 16px; text-align: right; color: var(--secondary); }
 .mark.ok, .here { color: var(--accent-text); }
 .mark.bad { color: var(--danger); }
 .mark.wait { color: var(--foreground); }
@@ -116,4 +116,16 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
 .scanner-body { max-width: 640px; margin: 0 auto; padding: 24px; }
 .video { display: block; width: 100%; max-height: 60vh; margin-top: 16px; background: #000; object-fit: cover; }
 .status { margin-top: 16px; }
-@media (max-width: 480px) { .person { flex-wrap: wrap; } .mark { width: 100%; text-align: left; padding-left: 36px; } }
+@media (max-width: 480px) { .person { flex-wrap: wrap; } .person > .mark { width: 100%; text-align: left; padding-left: 36px; } }
+
+/* Admin panel */
+.count { font-size: .5em; color: var(--secondary); vertical-align: middle; }
+.block-head.top { margin-top: 32px; }
+.admin-row { flex-wrap: wrap; align-items: flex-start; }
+.admin-row .row-body { flex: 1 1 320px; }
+.row-actions { gap: 0 16px; }
+.admin-row .row-actions button { padding: 4px 0; min-height: 32px; }
+.dialog { width: min(480px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--line-strong); border-radius: 0;
+  background: var(--background); color: var(--foreground); }
+.dialog::backdrop { background: rgb(0 0 0 / .6); }
+.list.compact .mark { font-size: 13px; line-height: 16px; text-align: right; }

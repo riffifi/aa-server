@@ -1,25 +1,53 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171820"><title>AntiAttendance · Sessions</title><link rel="stylesheet" href="/static/panel.css"><script src="/static/panel.js" defer></script></head>
-<body><main class="page-shell admin-shell">
-  <nav class="topbar"><a class="brand" href="/"><span class="brand-mark">aa.</span><span>AntiAttendance<small>CONTROL CENTER</small></span></a><a class="topbar-link" href="/">Open account space <span aria-hidden="true">↗</span></a></nav>
-  <section id="sign-in" class="signin-layout">
-    <div class="signin-copy"><div class="eyebrow">PRIVATE SERVER · ADMIN ACCESS</div><h1>Your sessions,<br><span>under control.</span></h1><p>Manage account connections, group assignments and pass testing from one place.</p><div class="security-note"><span class="security-icon" aria-hidden="true">✳</span><span>Pulse cookies remain encrypted on this server.</span></div></div>
-    <div class="surface signin-card"><div class="access-icon" aria-hidden="true">↗</div><div class="eyebrow">WELCOME BACK</div><h2>Open the control center</h2><p>Sign in with the administrator password configured for this server.</p><form id="login-form"><label>Admin password<input id="password" type="password" autocomplete="current-password" required></label><button>Sign in <span aria-hidden="true">→</span></button></form></div>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#000000"><title>AntiAttendance · Панель</title><link rel="stylesheet" href="/static/site.css"><script src="/static/panel.js" defer></script></head>
+<body><main class="page wide">
+  <header class="masthead"><span class="wordmark">AntiAttendance</span><span class="label">Панель администратора</span><a class="text-button push" href="/">Сайт ↗</a></header>
+
+  <section id="sign-in" hidden>
+    <h1 class="title">Вход в панель</h1>
+    <p class="lead">Пароль администратора задаётся при установке сервера.</p>
+    <form id="login-form" class="field"><input id="password" class="input" type="password" autocomplete="current-password" placeholder="Пароль администратора" required><button class="primary">Войти</button></form>
   </section>
-  <div id="panel" class="admin-layout" hidden>
-    <div class="admin-content">
-      <header class="dashboard-heading"><div><div class="eyebrow">SESSION MANAGEMENT</div><h1>Control center</h1><p>Manage shared accounts, access and device sync.</p></div><div class="dashboard-actions"><button id="copy-server" class="secondary">Copy server URL</button><button id="sign-out" class="quiet">Sign out</button><button id="new-account">Add account <span aria-hidden="true">+</span></button></div></header>
-      <div class="dashboard-grid">
-        <section id="accounts-section" class="surface account-admin"><div class="section-heading section-heading-large"><div><div class="eyebrow">YOUR WORKSPACE</div><h2>Connected accounts</h2></div><div class="count-wrap"><span id="account-count">0</span><span>accounts</span></div></div><div id="accounts" class="rows"></div><p id="empty-accounts" class="empty-copy">Connect an account and share its temporary sign-in link with its owner.</p></section>
-        <div class="side-stack">
-          <section id="testing-section" class="surface"><div class="surface-icon test-icon" aria-hidden="true">⌁</div><div class="eyebrow">DEVELOPER TOOL</div><h2>Pass testing</h2><p>Temporary daily access for checking pass use without changing owner permissions.</p><label>Daily testing password<input id="pass-test-password" readonly autocomplete="off" spellcheck="false"></label><p id="pass-test-expiry" class="meta mono"></p><div class="actions"><button id="copy-pass-test" class="secondary">Copy password</button><button id="toggle-pass-test" class="quiet" aria-pressed="false">Preview passes</button></div><p id="pass-test-status" role="status"></p></section>
-          <section id="sync-section" class="surface"><div class="surface-icon sync-icon" aria-hidden="true">↗</div><div class="eyebrow">DEVICE NETWORK</div><h2>Phone sync</h2><p>Enter this URL in Session server settings on each phone to sync accounts and passes.</p><label>Server URL<input id="server-url" readonly></label><p class="meta">Phones reaching this server share its accounts. Restrict access with your network or Nginx.</p></section>
-        </div>
-      </div>
-    </div>
-  </div>
-  <section id="enroll-card" class="surface enroll-surface" hidden><div class="section-heading"><div><div class="eyebrow">OWNER SIGN-IN</div><h2 id="enroll-title">Connect an account</h2></div><button id="close-enroll" class="quiet">Cancel</button></div><p>Ask the account owner to scan the QR code and approve the usual MIREA sign-in.</p><div class="login-progress"><span class="progress-dot"></span><p id="enroll-status"></p></div><img id="qr" width="280" height="280" alt="MIREA sign-in QR code" hidden><a id="qr-link" target="_blank" rel="noopener" hidden>Open the MIREA confirmation page</a><label>Temporary owner link<input id="owner-link" readonly></label><button id="copy-owner" class="secondary">Copy enrollment link</button></section>
-  <dialog id="account-dialog"><form id="account-form"><div class="eyebrow">NEW ACCOUNT</div><h2>Connect an account</h2><p>The account owner completes the sign-in and any university MFA.</p><label>Display name<input id="account-label" maxlength="60" autocomplete="off" placeholder="Name or group" required></label><div class="actions dialog-actions"><button>Show sign-in QR <span aria-hidden="true">→</span></button><button type="button" class="quiet" data-close>Cancel</button></div></form></dialog>
-  <dialog id="group-dialog"><form id="group-form"><div class="eyebrow">ACCOUNT SETTINGS</div><h2>Assign a schedule group</h2><p id="group-account"></p><label>University schedule group ID<input id="group-id" type="number" min="1" step="1"></label><label>Group name<input id="group-name" maxlength="100" placeholder="ИНБО-10-23"></label><p class="meta">Leave both fields empty to remove this assignment.</p><div class="actions dialog-actions"><button>Save group</button><button type="button" class="quiet" data-close>Cancel</button></div></form></dialog>
-  <p id="notice" role="status" aria-live="polite"></p><footer class="site-footer"><span>Encrypted sessions · Automatic renewal while MIREA allows it</span><span>Protect access to this server and its network.</span></footer>
+
+  <section id="panel" hidden>
+    <div class="block-head top"><h1 class="title tight">Аккаунты <span id="account-count" class="mono count">0</span></h1></div>
+    <div class="actions"><button id="new-account" class="primary">Добавить аккаунт</button><button id="copy-server" class="secondary">Скопировать адрес</button><button id="sign-out" class="text-button">Выйти</button></div>
+
+    <section id="enroll-card" class="block" hidden>
+      <div class="block-head"><h2 id="enroll-title" class="heading">Подключение аккаунта</h2><button id="close-enroll" class="text-button">Отменить</button></div>
+      <p class="note">Владелец аккаунта сканирует QR в приложении МИРЭА и подтверждает вход.</p>
+      <p id="enroll-status" class="status" role="status"></p>
+      <img id="qr" class="qr" width="264" height="264" alt="QR для входа МИРЭА" hidden>
+      <a id="qr-link" class="text-button" target="_blank" rel="noopener" hidden>Открыть подтверждение МИРЭА →</a>
+      <div class="field"><input id="owner-link" class="input" readonly aria-label="Временная ссылка для владельца"><button id="copy-owner" class="secondary">Скопировать ссылку</button></div>
+    </section>
+
+    <section class="block" aria-labelledby="accounts-heading">
+      <div class="block-head"><h2 id="accounts-heading" class="heading">Люди</h2></div>
+      <div class="field"><input id="filter" class="input" type="search" placeholder="Поиск по имени или группе" autocomplete="off"></div>
+      <div id="accounts" class="list"></div>
+      <p id="empty-accounts" class="note">Пока никого. Люди появляются здесь после входа через AA ID или подключения из панели.</p>
+    </section>
+
+    <section class="block" aria-labelledby="testing-heading">
+      <h2 id="testing-heading" class="heading">Проверка пропусков</h2>
+      <p class="note">Временный ежедневный доступ для проверки пропусков без изменения разрешений владельцев.</p>
+      <div class="field"><input id="pass-test-password" class="input mono" readonly autocomplete="off" spellcheck="false" aria-label="Пароль проверки на сегодня"><button id="copy-pass-test" class="secondary">Скопировать</button></div>
+      <p id="pass-test-expiry" class="caption"></p>
+      <div class="actions"><button id="toggle-pass-test" class="text-button" aria-pressed="false">Показать доступные пропуска</button></div>
+      <p id="pass-test-status" class="note" role="status"></p>
+    </section>
+
+    <section class="block" aria-labelledby="sync-heading">
+      <h2 id="sync-heading" class="heading">Адрес для телефонов</h2>
+      <p class="note">Этот адрес вводится в приложении в настройках сервера сессий.</p>
+      <div class="field"><input id="server-url" class="input mono" readonly aria-label="Адрес сервера"></div>
+    </section>
+  </section>
+
+  <dialog id="account-dialog" class="dialog"><form id="account-form"><h2 class="heading">Новый аккаунт</h2><p class="note">Владелец сам подтвердит вход МИРЭА и двухфакторную проверку.</p><div class="field"><input id="account-label" class="input" maxlength="60" autocomplete="off" placeholder="Имя" required></div><div class="actions"><button class="primary">Показать QR</button><button type="button" class="text-button" data-close>Отмена</button></div></form></dialog>
+  <dialog id="group-dialog" class="dialog"><form id="group-form"><h2 class="heading">Группа</h2><p id="group-account" class="note"></p><div class="field"><input id="group-id" class="input" type="number" min="1" step="1" placeholder="ID группы в расписании"></div><div class="field"><input id="group-name" class="input" maxlength="100" placeholder="ИНБО-10-23"></div><p class="caption">Оставьте оба поля пустыми, чтобы убрать группу.</p><div class="actions"><button class="primary">Сохранить</button><button type="button" class="text-button" data-close>Отмена</button></div></form></dialog>
+
+  <p id="notice" class="banner info" role="status" aria-live="polite" hidden></p>
+  <footer class="footer caption">Сессии МИРЭА хранятся на сервере в зашифрованном виде.</footer>
 </main></body></html>

@@ -146,12 +146,12 @@ async function poll(id) {
     if (state.qr_png) { $('qr').src = state.qr_png; $('qr').hidden = false; $('qr-link').href = state.qr; $('qr-link').hidden = false; }
     else { $('qr').hidden = true; $('qr-link').hidden = true; }
     if (state.status === 'complete') {
-      const claimed = await api('web/logins/' + encodeURIComponent(id) + '/claim', { method: 'POST', headers });
+      await api('web/logins/' + encodeURIComponent(id) + '/claim', { method: 'POST', headers });
       job = null; needFresh = false;
       $('status').hidden = true; $('start').disabled = false;
-      // Straight back to the site after signing in for it.
-      if (handoff && claimed.linked !== false) { await continueToSite(); return; }
-      if (handoff) showError('Вход выполнен, но сервер AntiAttendance не принял сессию МИРЭА. Продолжите или попробуйте ещё раз.');
+      // Straight back to the site after signing in for it; the site itself says
+      // when the server has no working MIREA session for the person.
+      if (handoff) { await continueToSite(); return; }
       await load();
       return;
     }

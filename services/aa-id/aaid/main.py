@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -18,6 +19,8 @@ from .pulse import PulseIdentity
 from . import schedule
 from .store import Store, Blocked, digest
 from .tokens import Signer, verify
+
+log = logging.getLogger('aaid')
 
 def _number(name, default, minimum=1):
     try:
@@ -136,8 +139,11 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         try:
             response = await http.post(sessions_url + '/internal/aaid/link', headers={'authorization': 'Bearer ' + token},
                                        json={**credentials, 'group_id': user['group_id'], 'group_name': user['group_name']})
-        except httpx.HTTPError:
+        except httpx.HTTPError as error:
+            log.warning('hand-off to the session server failed: %s', type(error).__name__)
             return False
+        if response.status_code != 200:
+            log.warning('session server refused the MIREA session: HTTP %s', response.status_code)
         return response.status_code == 200
 
     def grant(user, session, refresh):

@@ -151,3 +151,10 @@ def test_app_marks_count_on_the_site(setup):
     assert client.post(f'/api/accounts/{bob}/rpc/attendance', content=frame).status_code == 200
     people = {p['label']: p for p in client.get('/site/state').json()['people']}
     assert people['Борис']['mark']['state'] == 'approved'
+
+def test_large_browser_state_is_accepted_only_for_the_link(setup):
+    client, app, _ = setup
+    big = {'cookie': 'session=big', 'storage_state': {'origins': [{'origin': 'https://pulse.mirea.ru', 'localStorage': [{'name': 'x', 'value': 'y' * 600000}]}]}}
+    response = client.post('/internal/aaid/link', json=big, headers={'authorization': 'Bearer ' + token('big', aud='aa-link')})
+    assert response.status_code == 200
+    assert client.post('/api/accounts/import', json={'cookie': 'session=x', 'label': 'y' * 300000}).status_code == 413
