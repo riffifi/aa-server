@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#000000"><title>AntiAttendance · Панель</title><link rel="stylesheet" href="/static/site.css"><script src="/static/panel.js" defer></script></head>
-<body><main class="page wide">
+<body><main class="page console">
   <header class="masthead"><span class="wordmark">AntiAttendance</span><span class="label">Панель администратора</span><a class="text-button push" href="/">Сайт ↗</a></header>
 
   <section id="sign-in" hidden>
@@ -10,8 +10,19 @@
   </section>
 
   <section id="panel" hidden>
+    <nav class="tabs" role="tablist" aria-label="Разделы панели">
+      <button role="tab" data-tab="people">Люди</button>
+      <button role="tab" data-tab="audit">Аудит</button>
+      <button role="tab" data-tab="logs">Логи</button>
+      <button role="tab" data-tab="requests">Запросы</button>
+      <button role="tab" data-tab="tables">Таблицы</button>
+      <button role="tab" data-tab="system">Система</button>
+      <button id="sign-out" class="text-button push">Выйти</button>
+    </nav>
+
+    <section id="tab-people" class="tab" role="tabpanel" hidden>
     <div class="block-head top"><h1 class="title tight">Аккаунты <span id="account-count" class="mono count">0</span></h1></div>
-    <div class="actions"><button id="new-account" class="primary">Добавить аккаунт</button><button id="copy-server" class="secondary">Скопировать адрес</button><button id="sign-out" class="text-button">Выйти</button></div>
+    <div class="actions"><button id="new-account" class="primary">Добавить аккаунт</button><button id="copy-server" class="secondary">Скопировать адрес</button></div>
 
     <section id="enroll-card" class="block" hidden>
       <div class="block-head"><h2 id="enroll-title" class="heading">Подключение аккаунта</h2><button id="close-enroll" class="text-button">Отменить</button></div>
@@ -29,6 +40,50 @@
       <p id="empty-accounts" class="note">Пока никого. Люди появляются здесь после входа через AA ID или подключения из панели.</p>
     </section>
 
+    </section>
+
+    <section id="tab-audit" class="tab" role="tabpanel" hidden>
+      <div class="block-head top"><h1 class="title tight">Аудит</h1></div>
+      <p class="note">Действия с аккаунтами и пропусками: кто, что и когда. Хранится 30 дней.</p>
+      <div class="field"><input id="audit-filter" class="input" type="search" placeholder="Действие, кто сделал или ID аккаунта" autocomplete="off"><button id="audit-reload" class="secondary">Обновить</button></div>
+      <div class="table-wrap"><table id="audit-table" class="grid"></table></div>
+    </section>
+
+    <section id="tab-logs" class="tab" role="tabpanel" hidden>
+      <div class="block-head top"><h1 class="title tight">Логи сервера</h1></div>
+      <p class="note">Последние 3000 записей с момента запуска: ошибки входа, Pulse, расписания, Telegram, необработанные исключения.</p>
+      <div class="field"><select id="log-level" class="input select"><option value="">Все уровни</option><option value="warning">Предупреждения и ошибки</option><option value="error">Только ошибки</option></select><input id="log-filter" class="input" type="search" placeholder="Поиск по тексту" autocomplete="off"><label class="check"><input id="log-follow" type="checkbox" checked> обновлять</label></div>
+      <div id="logs" class="log"></div>
+      <p id="logs-empty" class="note" hidden>Записей нет.</p>
+    </section>
+
+    <section id="tab-requests" class="tab" role="tabpanel" hidden>
+      <div class="block-head top"><h1 class="title tight">Запросы</h1></div>
+      <p id="requests-since" class="note"></p>
+      <h2 class="heading block-gap">По маршрутам</h2>
+      <div class="table-wrap"><table id="routes-table" class="grid"></table></div>
+      <h2 class="heading block-gap">Последние</h2>
+      <div class="field"><input id="requests-filter" class="input" type="search" placeholder="Путь" autocomplete="off"><input id="requests-slow" class="input narrow" type="number" min="0" step="50" placeholder="от, мс"><label class="check"><input id="requests-errors" type="checkbox"> только ошибки</label></div>
+      <div class="table-wrap"><table id="requests-table" class="grid"></table></div>
+    </section>
+
+    <section id="tab-tables" class="tab" role="tabpanel" hidden>
+      <div class="block-head top"><h1 class="title tight">Таблицы</h1></div>
+      <p class="note">База сервера сессий только для чтения. Секреты, ключи и cookie скрыты.</p>
+      <div id="table-list" class="chips"></div>
+      <div class="field"><input id="table-filter" class="input" type="search" placeholder="Поиск по строкам" autocomplete="off"></div>
+      <p id="table-info" class="caption"></p>
+      <div class="table-wrap"><table id="table-rows" class="grid"></table></div>
+      <div class="actions"><button id="table-prev" class="secondary">← Назад</button><button id="table-next" class="secondary">Дальше →</button></div>
+    </section>
+
+    <section id="tab-system" class="tab" role="tabpanel" hidden>
+      <div class="block-head top"><h1 class="title tight">Система</h1></div>
+      <div id="system-facts" class="facts"></div>
+      <h2 class="heading block-gap">Расписания групп</h2>
+      <div class="table-wrap"><table id="calendars-table" class="grid"></table></div>
+      <h2 class="heading block-gap">Входы через браузер</h2>
+      <div class="table-wrap"><table id="jobs-table" class="grid"></table></div>
     <section class="block" aria-labelledby="testing-heading">
       <h2 id="testing-heading" class="heading">Проверка пропусков</h2>
       <p class="note">Временный ежедневный доступ для проверки пропусков без изменения разрешений владельцев.</p>
@@ -42,6 +97,7 @@
       <h2 id="sync-heading" class="heading">Адрес для телефонов</h2>
       <p class="note">Этот адрес вводится в приложении в настройках сервера сессий.</p>
       <div class="field"><input id="server-url" class="input mono" readonly aria-label="Адрес сервера"></div>
+    </section>
     </section>
   </section>
 

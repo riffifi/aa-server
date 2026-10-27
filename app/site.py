@@ -61,6 +61,7 @@ def install(app, service, aaid, calendars, static):
     inside_cache = {}
     inside_checks = {}
     pulse_slots = asyncio.Semaphore(4)
+    app.state.presence = {'cache': inside_cache, 'checks': inside_checks, 'ttl': INSIDE_TTL}
 
     def limit(key, count, window):
         queue, now = attempts[key], time.time()

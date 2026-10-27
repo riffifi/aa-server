@@ -44,6 +44,7 @@ function renderAccount(account) {
     const lines = (data.events || []).map(e => (e.direction === 'in' ? 'вход ' : 'выход ') + time(e.time)).join(', ');
     notice(`${account.label}: ${data.inside ? 'в вузе' : 'не в вузе'} · ${lines || 'сегодня проходов нет'}`);
   }));
+  actions.append(action('Журнал', async () => { $('audit-filter').value = account.id; showTab('audit'); }));
   actions.append(action('Перевойти', () => startLogin(account.label, account.id)));
   actions.append(action('Завершить сессию', async () => { if (confirm('Завершить сессию МИРЭА для «' + account.label + '»? Аккаунт останется, но понадобится новый вход.')) { await api('accounts/' + account.id + '/end-session', 'POST'); await refresh(); } }, 'danger'));
   actions.append(action('Удалить', async () => { if (confirm('Удалить «' + account.label + '» и сохранённый пропуск с сервера?')) { await api('accounts/' + account.id, 'DELETE'); await refresh(); } }, 'danger'));
@@ -64,7 +65,7 @@ async function refresh() {
   syncing = true;
   try {
     const data = await api('state'); csrf = data.csrf; accounts = data.accounts;
-    $('sign-in').hidden = true; $('panel').hidden = false;
+    if ($('panel').hidden) { $('sign-in').hidden = true; $('panel').hidden = false; showTab(currentTab()); }
     // Don't rebuild the list under an open dialog or a pressed button.
     if (!document.querySelector('dialog[open]')) renderList();
     $('server-url').value = location.origin;
@@ -135,5 +136,135 @@ $('toggle-pass-test').onclick = async () => {
   try { await previewTestPasses(); } catch (error) { notice(error.message); }
 };
 document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => button.closest('dialog').close(); });
+
+// ---- Debug tabs -----------------------------------------------------------
+const TABS = ['people', 'audit', 'logs', 'requests', 'tables', 'system'];
+let tab = 'people', logs = [], lastLog = 0, tableName = 'accounts', tableOffset = 0;
+const TABLE_PAGE = 100;
+function currentTab() { const wanted = location.hash.slice(1); if (TABS.includes(wanted)) return wanted; try { return localStorage.getItem('panel-tab') || 'people'; } catch (_) { return 'people'; } }
+function showTab(name) {
+  tab = TABS.includes(name) ? name : 'people';
+  document.querySelectorAll('[data-tab]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.tab === tab)));
+  TABS.forEach(id => { $('tab-' + id).hidden = id !== tab; });
+  history.replaceState(null, '', '#' + tab);
+  try { localStorage.setItem('panel-tab', tab); } catch (_) { /* private mode */ }
+  loadTab().catch(error => notice(error.message));
+}
+async function loadTab() {
+  if (tab === 'audit') await loadAudit();
+  else if (tab === 'logs') await loadLogs();
+  else if (tab === 'requests') await loadRequests();
+  else if (tab === 'tables') await loadTables();
+  else if (tab === 'system') await loadSystem();
+}
+function stamp(value) { return value ? new Date(value * 1000).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'; }
+function ago(value) {
+  if (!value) return '—';
+  const s = Math.max(0, Math.round(Date.now() / 1000 - value));
+  return s < 60 ? s + ' с назад' : s < 3600 ? Math.round(s / 60) + ' мин назад' : s < 86400 ? Math.round(s / 3600) + ' ч назад' : Math.round(s / 86400) + ' дн назад';
+}
+function bytes(value) { return value == null ? '—' : value < 1024 ? value + ' Б' : value < 1048576 ? (value / 1024).toFixed(1) + ' КБ' : (value / 1048576).toFixed(1) + ' МБ'; }
+// Fills a <table> from column titles and rows of cell values; `mark` can tag a row.
+function grid(table, columns, rows, mark) {
+  const head = el('tr'); columns.forEach(c => head.append(el('th', c)));
+  const body = rows.map((cells, index) => {
+    const tr = el('tr', null, mark ? mark(index) || '' : '');
+    cells.forEach(value => { const text = value === null || value === undefined || value === '' ? '—' : String(value), td = el('td', text); if (value === null || value === undefined) td.className = 'null'; else if (text.length > 40) td.className = 'long'; tr.append(td); });
+    return tr;
+  });
+  table.replaceChildren(el('thead'), el('tbody'));
+  table.tHead.append(head); table.tBodies[0].append(...body);
+  if (!rows.length) { const tr = el('tr'), td = el('td', 'Пусто', 'null'); td.colSpan = columns.length; tr.append(td); table.tBodies[0].append(tr); }
+}
+async function loadAudit() {
+  const data = await api('debug/audit?q=' + encodeURIComponent($('audit-filter').value.trim()));
+  grid($('audit-table'), ['Время', 'Действие', 'Кто', 'Аккаунт', 'ID аккаунта'],
+    data.events.map(e => [stamp(e.created), e.action, e.actor, e.label, e.account_id]));
+}
+function logLine(r) {
+  const line = el('div', null, 'log-line ' + r.level);
+  line.append(el('span', stamp(r.time)), el('span', r.level.toUpperCase(), 'lvl'), el('span', r.logger + ': ' + r.message, 'msg'));
+  if (r.detail) { const details = el('details'); details.append(el('summary', 'Трассировка', 'caption'), el('pre', r.detail)); line.append(details); }
+  return line;
+}
+async function loadLogs(more = false) {
+  if (!more) lastLog = 0;
+  const query = 'debug/logs?level=' + $('log-level').value + '&q=' + encodeURIComponent($('log-filter').value.trim()) + (more ? '&after=' + lastLog : '');
+  const data = await api(query);
+  logs = more ? data.logs.concat(logs).slice(0, 1000) : data.logs;
+  if (logs.length) lastLog = Math.max(lastLog, logs[0].id);
+  $('logs').replaceChildren(...logs.map(logLine));
+  $('logs-empty').hidden = logs.length > 0;
+}
+async function loadRequests() {
+  const slow = Number($('requests-slow').value) || 0;
+  const data = await api('debug/requests?q=' + encodeURIComponent($('requests-filter').value.trim()) + '&errors=' + $('requests-errors').checked + '&slow=' + slow);
+  $('requests-since').textContent = 'С запуска ' + stamp(data.since) + '. Самые затратные маршруты сверху.';
+  grid($('routes-table'), ['Маршрут', 'Запросов', 'Ошибок 5xx', 'Среднее, мс', 'Максимум, мс', 'Всего, мс', 'Последний'],
+    data.routes.map(r => [r.route, r.count, r.errors, r.avg_ms, r.max_ms, r.total_ms, ago(r.last)]),
+    i => data.routes[i].errors ? 'bad' : '');
+  grid($('requests-table'), ['Время', 'Метод', 'Путь', 'Код', 'мс'],
+    data.recent.map(r => [stamp(r.time), r.method, r.path, r.status, r.ms]),
+    i => data.recent[i].status >= 500 ? 'bad' : data.recent[i].ms >= 1000 ? 'slow' : '');
+}
+async function loadTables() {
+  const list = await api('debug/tables');
+  $('table-list').replaceChildren(...list.tables.map(t => {
+    const button = el('button', t.name + ' · ' + t.rows); button.setAttribute('aria-pressed', String(t.name === tableName));
+    button.onclick = () => { tableName = t.name; tableOffset = 0; loadTables().catch(error => notice(error.message)); };
+    return button;
+  }));
+  const data = await api('debug/tables/' + encodeURIComponent(tableName) + '?offset=' + tableOffset + '&limit=' + TABLE_PAGE + '&q=' + encodeURIComponent($('table-filter').value.trim()));
+  const times = new Set(['created', 'expires', 'expires_at', 'checked_at', 'updated_at', 'page_seen_at']);
+  grid($('table-rows'), data.columns, data.rows.map(row => row.map((v, i) => times.has(data.columns[i]) && typeof v === 'number' ? stamp(v) : v)));
+  $('table-info').textContent = `${data.name}: строки ${data.total ? tableOffset + 1 : 0}–${tableOffset + data.rows.length} из ${data.total}, новые сверху`;
+  $('table-prev').disabled = tableOffset === 0;
+  $('table-next').disabled = tableOffset + data.rows.length >= data.total;
+}
+function fact(label, value) { const box = el('div'); box.append(el('span', label), el('span', value === null || value === undefined ? '—' : String(value))); return box; }
+async function loadSystem() {
+  const s = await api('debug/system');
+  const p = s.process, up = Math.round(s.now - s.started);
+  $('system-facts').replaceChildren(
+    fact('Работает', `${Math.floor(up / 86400)} дн ${Math.floor(up % 86400 / 3600)} ч ${Math.floor(up % 3600 / 60)} мин`),
+    fact('Запущен', stamp(s.started)),
+    fact('Память процесса', p.memory_kb ? (p.memory_kb / 1024).toFixed(0) + ' МБ' : '—'),
+    fact('Нагрузка (1/5/15 мин)', p.load ? p.load.map(v => v.toFixed(2)).join(' / ') : '—'),
+    fact('Python / PID', p.python + ' / ' + p.pid),
+    fact('База', bytes(s.files['sessions.sqlite3']) + ' + WAL ' + bytes(s.files['sessions.sqlite3-wal'])),
+    fact('Проверка сессий', { running: 'работает', stopped: 'остановлена', off: 'выключена' }[s.background.refresh_loop]),
+    fact('Браузер входа', s.browser.running ? 'запущен' : 'не запущен'),
+    fact('Свободно слотов входа / продления', s.browser.login_slots_free + ' / ' + s.browser.renew_slots_free),
+    fact('Статус «внутри»', `${s.presence.cached} в кэше, ${s.presence.checking} проверяются, хранится ${s.presence.ttl} с`),
+    fact('AA ID', s.aaid ? `${s.aaid.enforce ? 'обязателен' : 'необязателен'}, ключи: ${s.aaid.keys.join(', ') || 'нет'}` : 'не настроен'),
+    fact('Ключи AA ID обновлены', s.aaid ? ago(s.aaid.keys_fetched) : '—'),
+    fact('Telegram', s.telegram ? `@${s.telegram.username || '…'}, ${s.telegram.task === 'running' ? 'работает' : 'остановлен'}` : 'не настроен'),
+  );
+  grid($('calendars-table'), ['Группа', 'ID', 'Скачано', 'Последняя ошибка', 'Размер'],
+    s.calendars.map(c => [c.name, c.group_id, ago(c.fetched), c.failed ? ago(c.failed) : null, bytes(c.size)]),
+    i => s.calendars[i].failed ? 'bad' : '');
+  grid($('jobs-table'), ['ID', 'Имя', 'Статус', 'Возраст', 'Ошибка', 'Диагностика'],
+    s.browser.jobs.map(j => [j.id, j.label, j.status, ago(Date.now() / 1000 - j.age), j.error, j.diag]),
+    i => s.browser.jobs[i].status === 'failed' ? 'bad' : '');
+}
+document.querySelectorAll('[data-tab]').forEach(button => { button.onclick = () => showTab(button.dataset.tab); });
+let typing = null;
+function later(run) { clearTimeout(typing); typing = setTimeout(() => run().catch(error => notice(error.message)), 300); }
+$('audit-filter').addEventListener('input', () => later(loadAudit));
+$('audit-reload').onclick = () => loadAudit().catch(error => notice(error.message));
+$('log-level').onchange = () => loadLogs().catch(error => notice(error.message));
+$('log-filter').addEventListener('input', () => later(loadLogs));
+['requests-filter', 'requests-slow'].forEach(id => $(id).addEventListener('input', () => later(loadRequests)));
+$('requests-errors').onchange = () => loadRequests().catch(error => notice(error.message));
+$('table-filter').addEventListener('input', () => { tableOffset = 0; later(loadTables); });
+$('table-prev').onclick = () => { tableOffset = Math.max(0, tableOffset - TABLE_PAGE); loadTables().catch(error => notice(error.message)); };
+$('table-next').onclick = () => { tableOffset += TABLE_PAGE; loadTables().catch(error => notice(error.message)); };
+
 refresh();
-setInterval(() => { if (!$('panel').hidden && !document.hidden) refresh(); }, 5000);
+setInterval(() => { if (!$('panel').hidden && !document.hidden && tab === 'people') refresh(); }, 5000);
+// Live tabs: logs follow new records, requests and system refresh themselves.
+setInterval(() => {
+  if ($('panel').hidden || document.hidden || document.querySelector('dialog[open]')) return;
+  if (tab === 'logs' && $('log-follow').checked) loadLogs(true).catch(() => {});
+  else if (tab === 'requests' || tab === 'system') loadTab().catch(() => {});
+}, 5000);

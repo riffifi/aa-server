@@ -1,5 +1,6 @@
 """Group lessons from the public MIREA schedule (schedule-of.mirea.ru)."""
 import asyncio
+import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -7,6 +8,7 @@ from dateutil.rrule import rrulestr
 
 HOST = 'https://schedule-of.mirea.ru'
 MOSCOW = timezone(timedelta(hours=3))
+log = logging.getLogger(__name__)
 # Online lessons share no room, so they are matched by subject and teacher instead.
 DISTANT = re.compile(r'дистанц|онлайн|сдо|online|remote', re.I)
 
@@ -133,10 +135,12 @@ class Calendars:
                 return fresh
             try:
                 text = await self.fetch(ical_url(group_id))
-            except Exception:
+            except Exception as error:
+                log.warning('Schedule for group %s failed: %s: %s', group_id, type(error).__name__, error)
                 text = None
             if text is None or 'BEGIN:VCALENDAR' not in text or len(text) > 2 * 1024 * 1024:
                 # Keep serving a stale calendar while MIREA is unavailable.
+                log.warning('Schedule for group %s is unavailable, %s', group_id, 'serving the saved copy' if group_id in self.cache else 'nothing saved')
                 self.failed[group_id] = time.time()
                 return self.cache.get(group_id) or (0, None)
             self.failed.pop(group_id, None)

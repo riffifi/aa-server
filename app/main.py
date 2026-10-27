@@ -20,7 +20,7 @@ from .telegram import TelegramBot
 from .agreements import Agreements
 from . import protocol
 from . import aaid as aa_id
-from . import schedule, site
+from . import schedule, site, debug
 from .pass_testing import daily_access, matches as matches_test_password
 
 logger = logging.getLogger(__name__)
@@ -169,9 +169,9 @@ class Service:
                     await self.refresh_account(row['id'])
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except Exception as error:
                     # Leave last-known credentials intact after transient failures.
-                    pass
+                    logger.warning('Checking account %s failed: %s: %s', row['id'], type(error).__name__, error)
             await asyncio.sleep(max(60, int(os.environ.get('REFRESH_SECONDS', '180'))))
 
     async def close(self):
@@ -225,6 +225,8 @@ def create_app(directory=None, password=None, transport=None, background=True, a
     static = Path(__file__).resolve().parents[1] / 'static'
     app.mount('/static', StaticFiles(directory=static), name='static')
     attempts = defaultdict(deque)
+    debug.install_logging(debug.BUFFER)
+    requests_log = debug.RequestLog()
 
     @app.middleware('http')
     async def security(request, call_next):
@@ -249,6 +251,24 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
         return response
+
+    # Added last, so it is the outermost layer and also times rejected requests.
+    @app.middleware('http')
+    async def timing(request, call_next):
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        except Exception:
+            logger.exception('%s %s failed', request.method, request.url.path)
+            raise
+        finally:
+            if not request.url.path.startswith(('/static/', '/panel/api/debug/')):
+                route = request.scope.get('route')
+                requests_log.add(request.method, getattr(route, 'path', None) or request.url.path,
+                                 request.url.path, status, time.perf_counter() - started)
 
     def browser_allowed(request):
         path = request.url.path
@@ -330,7 +350,8 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         calendar_http = calendar_http or httpx.AsyncClient(timeout=20, follow_redirects=False)
         response = await calendar_http.get(url)
         return response.text if response.status_code == 200 else None
-    site.install(app, service, aaid, schedule.Calendars(calendar_fetch or fetch_calendar), static)
+    calendars = schedule.Calendars(calendar_fetch or fetch_calendar)
+    site.install(app, service, aaid, calendars, static)
 
     @app.get('/panel')
     async def panel_page():
@@ -377,6 +398,71 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             accounts.append(metadata)
         return {'csrf': session['csrf'], 'accounts': accounts, 'cursor': vault.cursor(),
                 'pass_testing': daily_access(vault.pass_testing_key)}
+
+    @app.get('/panel/api/debug/logs')
+    async def debug_logs(request: Request, level: str = '', q: str = '', after: int = 0):
+        panel(request)
+        return {'logs': debug.BUFFER.query(level, q[:200], after)}
+
+    @app.get('/panel/api/debug/requests')
+    async def debug_requests(request: Request, q: str = '', errors: bool = False, slow: float = 0):
+        panel(request)
+        return requests_log.summary(q[:200], errors, slow)
+
+    @app.get('/panel/api/debug/audit')
+    async def debug_audit(request: Request, q: str = '', limit: int = 500):
+        panel(request)
+        labels = {row['id']: row['label'] for row in vault.accounts()}
+        with vault.transaction() as db:
+            rows = db.execute('SELECT * FROM audit_events WHERE action LIKE ? OR actor LIKE ? OR IFNULL(account_id, "") LIKE ? '
+                              'ORDER BY id DESC LIMIT ?', ('%' + q + '%',) * 3 + (max(1, min(limit, 2000)),)).fetchall()
+        return {'events': [dict(row) | {'label': labels.get(row['account_id'])} for row in rows]}
+
+    @app.get('/panel/api/debug/tables')
+    async def debug_tables(request: Request):
+        panel(request)
+        with vault.transaction() as db:
+            return {'tables': debug.tables(db)}
+
+    @app.get('/panel/api/debug/tables/{name}')
+    async def debug_table(name: str, request: Request, offset: int = 0, limit: int = 100, q: str = ''):
+        panel(request)
+        with vault.transaction() as db:
+            result = debug.table(db, name, max(0, offset), max(1, min(limit, 500)), q[:200])
+        if result is None:
+            raise HTTPException(404, 'No such table')
+        return result
+
+    @app.get('/panel/api/debug/system')
+    async def debug_system(request: Request):
+        panel(request)
+        now = time.time()
+        with vault.transaction() as db:
+            directory = os.path.dirname(db.execute('PRAGMA database_list').fetchone()[2])
+        names = {row['id']: row['name'] for row in vault.groups()}
+        presence = getattr(app.state, 'presence', {'cache': {}, 'checks': {}, 'ttl': 0})
+        browser = service.browser
+        jobs = [{'id': job.id[:8], 'label': job.label, 'status': job.status, 'error': job.error,
+                 'age': round(now - job.created), 'account_id': job.result_id or job.account_id, 'diag': job.diag[-500:]}
+                for job in sorted(browser.jobs.values(), key=lambda job: -job.created)][:50]
+        telegram = service.telegram
+        return {
+            'now': now, 'started': service.started, 'process': debug.process(), 'files': debug.files(directory),
+            'background': {'refresh_loop': 'off' if service.refresh_task is None else 'stopped' if service.refresh_task.done() else 'running',
+                           'renewal_attempts': len(service.renewal_attempts)},
+            'browser': {'running': browser.browser is not None and browser.browser.is_connected(),
+                        'login_slots_free': browser.login_slots._value, 'renew_slots_free': browser.renew_slots._value,
+                        'max_active': browser.max_active, 'jobs': jobs},
+            'calendars': [{'group_id': gid, 'name': names.get(gid), 'fetched': calendars.cache.get(gid, (None,))[0],
+                           'failed': calendars.failed.get(gid), 'size': len(calendars.cache[gid][1]) if gid in calendars.cache else 0}
+                          for gid in sorted(set(calendars.cache) | set(calendars.failed) | set(names))],
+            'presence': {'cached': len(presence['cache']), 'checking': len(presence['checks']), 'ttl': presence['ttl']},
+            'aaid': None if aaid is None else {'enforce': aaid.enforce, 'url': aaid.public_url, 'keys': sorted(aaid.keys),
+                                               'keys_fetched': aaid.fetched_at or None},
+            'telegram': None if telegram is None else {'username': telegram.username, 'running': telegram.running,
+                                                       'task': 'running' if not telegram.task.done() else 'stopped'},
+            'clients': len(service.issued_tokens),
+        }
 
     @app.post('/api/debug/pass-testing')
     async def unlock_pass_testing(body: LoginBody, request: Request):
