@@ -37,7 +37,10 @@ def setup(tmp_path):
         yield client, app.state.service, pulse, tmp_path
 
 def account(service, uid='person-one'):
-    return service.vault.upsert(uid, 'Student', {'cookie': 'session=' + uid})
+    # New accounts start with the pass off; these tests exercise the pass.
+    row = service.vault.upsert(uid, 'Student', {'cookie': 'session=' + uid})
+    service.vault.set_pass_allowed(row['id'], True)
+    return service.vault.account(row['id'])
 
 def test_url_only_api_and_panel_password_csrf(setup):
     client, service, _, _ = setup
@@ -202,6 +205,8 @@ def test_group_filtered_accounts_passes_and_group_discovery(setup):
     client, service, _, _ = setup
     first = service.vault.upsert('a', 'Alice', {'cookie': 'session=a'}, group_id=42, group_name='Group A')
     second = service.vault.upsert('b', 'Bob', {'cookie': 'session=b'}, group_id=43, group_name='Group B')
+    for row in (first, second):
+        service.vault.set_pass_allowed(row['id'], True)
     service.vault.save_pass(first['id'], '111')
     service.vault.save_pass(second['id'], '222')
     result = client.get('/api/accounts?group_id=42').json()

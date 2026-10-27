@@ -198,6 +198,9 @@ def test_username_search_and_pass_list(setup):
     assert bob_sees() is None  # the pass is still off for everyone
     client.put('/api/me/account', json={'pass_allowed': True}, headers=ann_token)
     assert bob_sees() == '777'
+    own = client.get('/api/accounts', headers=ann_token).json()
+    assert next(p['number'] for p in own['passes'] if p['account_id'] == ann) == '777'  # the owner, by AA ID
+    assert next(a['pass_access'] for a in own['accounts'] if a['id'] == ann) == 'approved'
     cat_token = {'authorization': 'Bearer ' + token('cat', sub='user-3')}
     assert next(p['number'] for p in client.get('/api/accounts', headers=cat_token).json()['passes'] if p['account_id'] == ann) is None
     # One switch blocks everyone on the list; the list stays.
@@ -264,3 +267,39 @@ def test_people_shown_shortly_before_the_lesson(setup, monkeypatch):
     state = client.get('/site/state').json()
     assert state['lesson'] is None and state['active'] == 'soon'
     assert {p['label'] for p in state['people']} == {'Анна', 'Борис'}
+
+def test_calendars_parse_once_and_back_off_after_a_failure(monkeypatch):
+    import asyncio
+    calls, parses = [], []
+    answers = [None, calendar('Физика', 'А-101')]
+    async def fetch(url):
+        calls.append(url)
+        return answers.pop(0) if answers else calendar('Физика', 'А-101')
+    real = schedule.lessons_on
+    monkeypatch.setattr(schedule, 'lessons_on', lambda text, day: parses.append(day) or real(text, day))
+    calendars = schedule.Calendars(fetch)
+    day = NOW.date()
+    async def run():
+        assert await calendars.lessons(1, day) is None
+        assert await calendars.lessons(1, day) is None       # no retry within a minute
+        calendars.failed[1] -= 61
+        first = await calendars.lessons(1, day)
+        first[0]['subject'] = 'changed'
+        again = await calendars.lessons(1, day)
+        return first, again
+    first, again = asyncio.run(run())
+    assert len(calls) == 2 and len(parses) == 1 and again[0]['subject'] == 'Физика'
+
+def test_slow_pulse_does_not_hold_the_lesson_page(setup, monkeypatch):
+    import asyncio
+    from app import site
+    client, app, pulse = setup
+    monkeypatch.setattr(site, 'INSIDE_WAIT', 0.2)
+    async def slow(cookie, uid, start, end):
+        await asyncio.sleep(3)
+        return [], True
+    pulse.acs_timeline = slow
+    sign_in(client)
+    started = time.time()
+    people = client.get('/site/state').json()['people']
+    assert time.time() - started < 2 and all(p['inside'] is None for p in people)

@@ -25,6 +25,7 @@ SESSION_TTL = 30 * 86400
 # A mark made this long before the lesson starts still counts for it.
 MARK_LEAD = 15 * 60
 INSIDE_TTL = 120
+INSIDE_WAIT = 2
 
 class LinkBody(BaseModel):
     cookie: str = Field(min_length=1, max_length=65536)
@@ -58,6 +59,7 @@ def install(app, service, aaid, calendars, static):
     secure = os.environ.get('PUBLIC_URL', '').startswith('https://')
     attempts = defaultdict(deque)
     inside_cache = {}
+    inside_checks = {}
     pulse_slots = asyncio.Semaphore(4)
 
     def limit(key, count, window):
@@ -147,24 +149,35 @@ def install(app, service, aaid, calendars, static):
         await service.changed()
         return {'account_id': account['id']}
 
-    async def inside(row):
-        # Whether the person is in the university now: the direction of today's last
-        # turnstile pass. None when unknown (no session, Pulse unavailable).
-        cached = inside_cache.get(row['id'])
-        if cached and time.time() - cached[0] < INSIDE_TTL:
-            return cached[1]
-        cookie = vault.secret(row).get('cookie')
-        if not cookie or row['state'] != 'valid':
-            return None
+    async def check_inside(row, cookie):
         start = (int((time.time() + 3 * 3600) // 86400)) * 86400 - 3 * 3600
         async with pulse_slots:
             try:
                 result = await service.transport.acs_timeline(cookie, row['pulse_id'], start, start + 86400 - 1)
             except Exception:
                 result = None
-        value = None if result is None else result[1]
-        inside_cache[row['id']] = (time.time(), value)
-        return value
+        inside_cache[row['id']] = (time.time(), None if result is None else result[1])
+        inside_checks.pop(row['id'], None)
+
+    async def inside(row):
+        # Whether the person is in the university now: the direction of today's last
+        # turnstile pass. None when unknown (no session, Pulse unavailable). A slow
+        # Pulse never holds the page: past INSIDE_WAIT the last known answer is shown and
+        # the check finishes in the background.
+        cached = inside_cache.get(row['id'])
+        if cached and time.time() - cached[0] < INSIDE_TTL:
+            return cached[1]
+        cookie = vault.secret(row).get('cookie')
+        if not cookie or row['state'] != 'valid':
+            return None
+        check = inside_checks.get(row['id'])
+        if check is None:
+            check = inside_checks[row['id']] = asyncio.ensure_future(check_inside(row, cookie))
+        try:
+            await asyncio.wait_for(asyncio.shield(check), INSIDE_WAIT)
+        except asyncio.TimeoutError:
+            return cached[1] if cached else None
+        return inside_cache[row['id']][1]
 
     async def lesson_context(session):
         """The person's current lesson, the groups at it and the accounts in them."""

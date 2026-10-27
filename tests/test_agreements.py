@@ -143,7 +143,7 @@ async def test_selecting_account_does_not_prove_ownership_or_allow_global_toggle
     assert service.agreements.grants(999, owner) == []
 
 
-def test_global_disable_overrides_person_grant_and_testing_is_separate(setup):
+def test_global_disable_overrides_person_grants_and_testing(setup):
     client, service, _, owner, _ = setup
     from app.pass_testing import daily_access
     identifier = request(service, owner)
@@ -153,8 +153,11 @@ def test_global_disable_overrides_person_grant_and_testing_is_separate(setup):
     path = f'/api/accounts/{owner}/rpc/pass-token'
     assert client.post(path, headers={'x-pass-client': KEY}, content=protocol.frame(b'')).status_code == 403
     password = daily_access(service.vault.pass_testing_key)['password']
+    # The owner's switch is absolute: the testing password does not bypass it.
+    assert client.post(path, headers={'x-pass-test-key': password}, content=protocol.frame(b'')).status_code == 403
+    service.vault.set_pass_allowed(owner, True)
     assert client.post(path, headers={'x-pass-test-key': password}, content=protocol.frame(b'')).status_code == 200
-    assert service.agreements.status(owner, OTHER) == 'disabled'
+    assert service.agreements.status(owner, OTHER) != 'approved'
 
 
 def test_grants_survive_restart_and_unlink_revokes_owner_authority(tmp_path):

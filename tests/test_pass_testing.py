@@ -51,6 +51,10 @@ def test_admin_only_code_unlocks_pass_permission_exception_without_changing_agre
         assert access['timezone'] == 'Europe/Moscow'
         assert client.post('/api/debug/pass-testing', json={'password': access['password']}).json()['expires_at'] == access['expires_at']
         headers = {**GRPC, 'X-Pass-Test-Key': access['password']}
+        # The owner's switch wins over the testing password: no pass at all.
+        assert client.post(path, content=body, headers=headers).status_code == 403
+        assert client.get('/api/accounts', headers=headers).json()['passes'][0]['number'] is None
+        vault.set_pass_allowed(account['id'], True)
         assert client.post(path, content=body, headers=headers).status_code == 200
         publish = f'/api/accounts/{account["id"]}/pass'
         payload = {'number': '12345', 'expected_version': vault.account(account['id'])['pass_version']}
@@ -58,11 +62,11 @@ def test_admin_only_code_unlocks_pass_permission_exception_without_changing_agre
         assert client.put(publish, json=payload, headers={'X-Pass-Test-Key': access['password']}).status_code == 200
         snapshot = client.get('/api/accounts', headers=headers).json()
         assert snapshot['passes'][0]['number'] == '12345'
-        assert snapshot['accounts'][0]['pass_allowed'] is False
-        assert vault.account(account['id'])['pass_allowed'] == 0
         assert client.get('/api/accounts').json()['passes'][0]['number'] is None
         assert client.post(path, content=body, headers=GRPC).status_code == 403
-        for method in ('pass-code', 'pass-issue'):
+        vault.set_pass_allowed(account['id'], False)
+        assert client.get('/api/accounts', headers=headers).json()['passes'][0]['number'] is None
+        for method in ('pass-token', 'pass-code', 'pass-issue'):
             assert client.post(f'/api/accounts/{account["id"]}/rpc/{method}', content=body, headers=headers).status_code == 403
         events = [dict(row) for row in vault.db.execute('SELECT * FROM audit_events')]
         assert {event['action'] for event in events} >= {'pass_testing_unlocked', 'pass_testing_pass-token'}

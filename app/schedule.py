@@ -109,29 +109,48 @@ def same_lesson(a, b):
     return a['subject'].casefold() == b['subject'].casefold() and a['teacher'].casefold() == b['teacher'].casefold()
 
 class Calendars:
-    """Group calendars, fetched at most every 15 minutes per group."""
-    def __init__(self, fetch, ttl=900):
-        self.fetch, self.ttl = fetch, ttl
-        self.cache, self.locks = {}, {}
+    """Group calendars, fetched at most every 15 minutes per group. A failed fetch is
+    not retried for a minute, and each day's lessons are parsed once per download."""
+    def __init__(self, fetch, ttl=900, retry=60):
+        self.fetch, self.ttl, self.retry = fetch, ttl, retry
+        self.cache, self.locks, self.failed, self.parsed = {}, {}, {}, {}
 
-    async def source(self, group_id):
+    def _fresh(self, group_id):
         cached = self.cache.get(group_id)
         if cached is not None and time.time() - cached[0] < self.ttl:
-            return cached[1]
+            return cached
+        if time.time() - self.failed.get(group_id, 0) < self.retry:
+            return cached or (0, None)
+        return None
+
+    async def _download(self, group_id):
+        fresh = self._fresh(group_id)
+        if fresh is not None:
+            return fresh
         async with self.locks.setdefault(group_id, asyncio.Lock()):
-            cached = self.cache.get(group_id)
-            if cached is not None and time.time() - cached[0] < self.ttl:
-                return cached[1]
+            fresh = self._fresh(group_id)
+            if fresh is not None:
+                return fresh
             try:
                 text = await self.fetch(ical_url(group_id))
             except Exception:
                 text = None
             if text is None or 'BEGIN:VCALENDAR' not in text or len(text) > 2 * 1024 * 1024:
                 # Keep serving a stale calendar while MIREA is unavailable.
-                return cached[1] if cached else None
+                self.failed[group_id] = time.time()
+                return self.cache.get(group_id) or (0, None)
+            self.failed.pop(group_id, None)
             self.cache[group_id] = (time.time(), text)
-            return text
+            return self.cache[group_id]
+
+    async def source(self, group_id):
+        return (await self._download(group_id))[1]
 
     async def lessons(self, group_id, day):
-        text = await self.source(group_id)
-        return None if text is None else lessons_on(text, day)
+        fetched, text = await self._download(group_id)
+        if text is None:
+            return None
+        parsed = self.parsed.get(group_id)
+        if parsed is None or parsed[:2] != (fetched, day):
+            parsed = self.parsed[group_id] = (fetched, day, lessons_on(text, day))
+        return [dict(lesson) for lesson in parsed[2]]

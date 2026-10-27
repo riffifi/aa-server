@@ -25,6 +25,9 @@ from .pass_testing import daily_access, matches as matches_test_password
 
 logger = logging.getLogger(__name__)
 
+# How long the app may keep showing a pass without hearing from the server again.
+PASS_LEASE = 300
+
 def _seconds(name, default):
     try:
         return max(60, int(os.environ.get(name, str(default))))
@@ -277,10 +280,11 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         return access if matches_test_password(password, access) else None
 
     def shared_with_caller(request, identifier):
-        # The owner added the signed-in AA ID person to their pass list on the AA ID site.
+        # The signed-in AA ID person owns the account, or the owner added them to the
+        # pass list on the AA ID site.
         caller = getattr(request.state, 'aaid', None)
         grantee = vault.account_by_pulse(caller['mirea']) if caller else None
-        return grantee is not None and vault.pass_shared(identifier, grantee['id'])
+        return grantee is not None and (grantee['id'] == identifier or vault.pass_shared(identifier, grantee['id']))
 
     def pass_access(request, identifier):
         return (page_authed(request, identifier) or shared_with_caller(request, identifier)
@@ -291,7 +295,11 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         return 'approved' if status not in ('disabled', 'unavailable') and shared_with_caller(request, row['id']) else status
 
     def require_pass(request, row, operation):
-        if row['pass_allowed'] and pass_access(request, row['id']):
+        # The owner's switch is absolute: with it off nobody gets the pass, the
+        # daily testing password included.
+        if not row['pass_allowed']:
+            raise HTTPException(403, 'The owner has turned the pass off')
+        if pass_access(request, row['id']):
             return
         if test_access(request) is not None:
             vault.audit('pass_testing_' + operation, 'daily-admin', row['id'])
@@ -490,9 +498,9 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         # `own` marks the account of the signed-in AA ID person (same MIREA identity).
         metadata = [{**vault.public(row), 'pass_access': pass_status(request, row),
                      'own': caller is not None and row['pulse_id'] == caller['mirea']} for row in rows]
-        passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if testing or (row['pass_allowed'] and pass_access(request, row['id'])) else None, 'version': row['pass_version']} for row in rows]
+        passes = [{'account_id': row['id'], 'number': vault.secret(row).get('pass_number') if row['pass_allowed'] and (testing or pass_access(request, row['id'])) else None, 'version': row['pass_version']} for row in rows]
         return {'accounts': metadata, 'passes': passes, 'cursor': vault.cursor(), 'protocol': 2, 'sync': 'automatic', 'group_filter': group_id,
-                'pass_agreements_required': True, 'pass_access_expires_at': time.time() + 300,
+                'pass_agreements_required': True, 'pass_access_expires_at': time.time() + PASS_LEASE,
                 'pass_testing_expires_at': testing['expires_at'] if testing else None}
 
     @app.post('/api/accounts/{identifier}/pass-request')
