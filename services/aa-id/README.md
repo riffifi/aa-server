@@ -58,6 +58,10 @@ not count towards the phone limit. Site endpoints: `POST /web/logins`,
 `X-Login-Token` the start call returned), `GET /web/me`, `DELETE /web/sessions/{id}`,
 `GET /web/attendance`, `GET /web/schedule`, `POST /web/logout`.
 
+The page follows the Brockmann design language (riffifi/brockmann-flutter): Geist
+typography, black or white surfaces, one accent, square edges and hairline divisions.
+The Geist fonts are bundled under their OFL licence (`aaid/static/fonts/OFL.txt`).
+
 ### Own domain
 
 `compose.yaml` publishes AA ID on `127.0.0.1:${AAID_PORT:-8091}` (besides `/id/` on

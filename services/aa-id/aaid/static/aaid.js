@@ -43,11 +43,13 @@ function render(me) {
   $('device-note').textContent = `В приложении можно войти не больше чем на ${me.max_sessions} устройствах; вход на новом выводит самое давнее. На сайте одновременно открыт один браузер.`;
   $('devices').replaceChildren(...me.sessions.map(device => {
     const row = el('div', null, 'row'), body = el('div', null, 'row-body');
-    body.append(el('strong', device.device + (device.current ? ' · это окно' : '')));
+    const name = el('strong', device.device);
+    if (device.current) name.append(el('span', 'это окно', 'badge'));
+    body.append(name);
     body.append(el('div', (device.kind === 'web' ? 'Сайт' : 'Приложение') + ' · активность ' + when(device.last_used), 'meta'));
     row.append(body);
     if (!device.current) {
-      const button = el('button', 'Отключить', 'quiet danger');
+      const button = el('button', 'Отключить', 'danger');
       button.addEventListener('click', async () => {
         button.disabled = true;
         try { await api('web/sessions/' + encodeURIComponent(device.id), { method: 'DELETE' }); await load(); }
@@ -84,8 +86,8 @@ async function loadAttendance() {
     $('acs-list').replaceChildren(...data.events.map(event => {
       const row = el('div', null, 'row'), body = el('div', null, 'row-body');
       body.append(el('strong', event.direction === 'in' ? 'Вход' : 'Выход', event.direction === 'in' ? 'acs-in' : ''));
-      body.append(el('div', zoned(event.time) + (event.zone ? ' · ' + event.zone : ''), 'meta'));
-      row.append(body);
+      if (event.zone) body.append(el('div', event.zone, 'meta'));
+      row.append(body, el('span', zoned(event.time), 'mono'));
       return row;
     }));
     if (!data.events.length) { $('acs-note').textContent = 'За последнюю неделю проходов нет.'; $('acs-note').hidden = false; }
@@ -98,7 +100,7 @@ async function loadAttendance() {
 async function start() {
   showError('');
   $('start').disabled = true;
-  $('login-progress').hidden = false;
+  $('status').hidden = false;
   $('status').textContent = STATUS.waiting;
   try {
     const result = await api('web/logins', { method: 'POST' });
@@ -112,7 +114,7 @@ function stop(message) {
   $('qr').hidden = true; $('qr-link').hidden = true;
   $('status').textContent = message;
   $('start').disabled = false;
-  $('start').firstChild.textContent = 'Начать заново ';
+  $('start').textContent = 'Начать заново';
 }
 
 async function poll(id) {
@@ -127,7 +129,7 @@ async function poll(id) {
     if (state.status === 'complete') {
       await api('web/logins/' + encodeURIComponent(id) + '/claim', { method: 'POST', headers });
       job = null;
-      $('login-progress').hidden = true; $('start').disabled = false;
+      $('status').hidden = true; $('start').disabled = false;
       await load();
       return;
     }
