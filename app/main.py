@@ -228,8 +228,14 @@ def create_app(directory=None, password=None, transport=None, background=True, a
     debug.install_logging(debug.BUFFER)
     requests_log = debug.RequestLog()
 
+    panel_local_only = os.environ.get('PANEL_LOCAL_ONLY', '0') == '1'
+
     @app.middleware('http')
     async def security(request, call_next):
+        # Behind Nginx the panel is only reachable on its loopback-only listener,
+        # which alone sets X-AA-Panel (the public listener clears it).
+        if panel_local_only and request.url.path.startswith('/panel') and request.headers.get('x-aa-panel') != '1':
+            return JSONResponse({'detail': 'Not Found'}, status_code=404)
         size = request.headers.get('content-length')
         if size and (not size.isdigit() or int(size) > body_limit(request.url.path)):
             return JSONResponse({'detail': 'Request too large'}, status_code=413)
@@ -381,7 +387,8 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             raise HTTPException(401, 'Wrong panel password')
         token, csrf = result
         response = JSONResponse({'csrf': csrf})
-        secure = os.environ.get('PUBLIC_URL', '').startswith('https://')
+        # The panel is opened over http://127.0.0.1 (on the server or an SSH tunnel).
+        secure = request.url.scheme == 'https'
         response.set_cookie('panel_session', token, max_age=43200, httponly=True, secure=secure, samesite='strict', path='/panel')
         return response
 

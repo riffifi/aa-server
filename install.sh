@@ -160,5 +160,7 @@ if $host_nginx; then
 fi
 printf 'Server started. Open the PUBLIC_URL from %s/.env.\n' "$server_dir"
 echo 'Use ADMIN_PASSWORD from that file to open the panel. Phones only need PUBLIC_URL; synchronization is automatic.'
-echo 'The home page is the AntiAttendance site (sign-in with AA ID at AAID_PUBLIC_URL); the admin panel is at PUBLIC_URL/panel.'
+echo 'The home page is the AntiAttendance site (sign-in with AA ID at AAID_PUBLIC_URL).'
+echo 'The admin panel is only on this server: http://127.0.0.1:8092/panel (PANEL_PORT in .env).'
+echo 'From your computer: ssh -L 8092:127.0.0.1:8092 <this server>, then open http://localhost:8092/panel.'
 echo 'To enable the Telegram bot, put its token in TELEGRAM_TOKEN in .env and rerun ./install.sh.'

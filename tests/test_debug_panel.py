@@ -47,3 +47,20 @@ def test_pulse_recording_needs_a_saved_browser_session(setup):
     response = client.post('/panel/api/debug/pulse-record', json={'account_id': row['id']}, headers={'x-csrf-token': csrf})
     assert response.status_code == 409
     assert client.post('/panel/api/debug/pulse-record', json={'account_id': 'nope'}, headers={'x-csrf-token': csrf}).status_code == 404
+
+def test_panel_answers_only_through_the_local_listener(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    from test_server import FakePulse
+    monkeypatch.setenv('PANEL_LOCAL_ONLY', '1')
+    app = create_app(tmp_path, PASSWORD, FakePulse(), background=False)
+    with TestClient(app) as client:
+        assert client.get('/panel').status_code == 404
+        assert client.post('/panel/api/login', json={'password': PASSWORD}).status_code == 404
+        local = {'x-aa-panel': '1'}
+        assert client.get('/panel', headers=local).status_code == 200
+        login = client.post('/panel/api/login', json={'password': PASSWORD}, headers=local)
+        assert login.status_code == 200 and 'secure' not in login.headers['set-cookie'].lower()
+        assert client.get('/panel/api/state', headers=local).status_code == 200
+        assert client.get('/panel/api/state').status_code == 404
+        assert client.get('/health').status_code == 200

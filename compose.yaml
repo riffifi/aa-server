@@ -31,6 +31,8 @@ services:
       AAID_JWKS_URL: ${AAID_JWKS_URL:-http://aaid:8090/.well-known/jwks.json}
       AAID_ENFORCE: ${AAID_ENFORCE:-0}
       AAID_PUBLIC_URL: ${AAID_PUBLIC_URL:-${PUBLIC_URL:-http://127.0.0.1:8080}/id}
+      # The panel answers only requests from Nginx's local-only panel listener.
+      PANEL_LOCAL_ONLY: ${PANEL_LOCAL_ONLY:-1}
     volumes:
       - session_data:/data
   # AA ID: separate account service (own process, database and signing key).
@@ -66,6 +68,8 @@ services:
     restart: unless-stopped
     ports:
       - ${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:80
+      # Admin panel: always the server's own loopback, whatever BIND_ADDRESS is.
+      - 127.0.0.1:${PANEL_PORT:-8092}:8081
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
