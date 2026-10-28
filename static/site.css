@@ -28,6 +28,8 @@ a { color: inherit; }
 @media (min-width: 720px) { .page { padding: 48px 48px 64px; } }
 
 /* Type roles */
+.logo { display: block; flex: none; align-self: center; line-height: 0; }
+.logo img { display: block; width: 64px; height: 28px; }
 .wordmark { font: 400 32px/36px "Geist Pixel Square", "Geist Mono", monospace; letter-spacing: 0; }
 .title { margin: 40px 0 16px; font-size: clamp(32px, 9vw, 40px); line-height: 1.1; font-weight: 300; letter-spacing: -.01em; }
 .heading { margin: 0; font-size: 24px; line-height: 28px; font-weight: 400; }
