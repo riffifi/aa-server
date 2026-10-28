@@ -366,7 +366,18 @@ def install(app, service, aaid, calendars, static):
     async def today(request: Request):
         """Today's lessons of the person's group with everyone's marks. Another group
         joins a lesson's column only when it was at that same class."""
-        session = person(request)
+        return await today_for(person(request))
+
+    @app.get('/api/me/today')
+    async def my_today(request: Request):
+        """The same day view for the app, signed in with an AA ID token."""
+        caller = request.state.aaid
+        if caller is None:
+            raise HTTPException(401, 'AA ID sign-in required')
+        limit(('today', caller['sub']), 30, 60)
+        return await today_for({'mirea': caller['mirea'], 'group_id': caller.get('grp'), 'group_name': None})
+
+    async def today_for(session):
         own = vault.account_by_pulse(session['mirea'])
         group_id = session['group_id'] or (own['group_id'] if own else None)
         group_name = session['group_name'] or (own['group_name'] if own else None)
@@ -516,7 +527,9 @@ def install(app, service, aaid, calendars, static):
         people = [{**card(row), 'kind': 'aaid', 'id': row['id']} for row in vault.pass_shares(own['id'])]
         people += [{'kind': 'telegram', 'id': grant['id'], 'account_id': None, 'username': None,
                     'label': grant['label'], 'group_name': None} for grant in service.agreements.granted(own['id'])]
-        return {'pass_allowed': bool(own['pass_allowed']), 'people': people}
+        requests = [{**card(row), 'id': row['request_id'], 'requested_at': row['requested_at']}
+                    for row in vault.share_requests(account_id=own['id'])]
+        return {'pass_allowed': bool(own['pass_allowed']), 'people': people, 'requests': requests}
 
     @app.get('/api/me/people')
     async def find_people(request: Request, q: str = ''):
@@ -554,6 +567,46 @@ def install(app, service, aaid, calendars, static):
         if kind == 'aaid':
             vault.audit('pass_unshared', actor, own['id'])
         await service.changed()
+        return pass_list(vault.account(own['id']))
+
+    def my_passes(own):
+        return {'passes': [{**card(row), 'pass_allowed': bool(row['pass_allowed'])} for row in vault.shared_with(own['id'])],
+                'requests': [{**card(row), 'id': row['request_id'], 'requested_at': row['requested_at']}
+                             for row in vault.share_requests(requester_id=own['id'])]}
+
+    @app.get('/api/me/passes')
+    async def passes_for_me(request: Request):
+        """Passes other people let this person use, and the requests still waiting."""
+        return my_passes(require_own(request))
+
+    @app.post('/api/me/pass/requests')
+    async def ask_for_pass(body: ShareBody, request: Request):
+        own = require_own(request)
+        limit(('pass-request', request.state.aaid['sub']), 20, 3600)
+        owner = vault.account(body.account_id)
+        if owner is None or owner['id'] == own['id']:
+            raise HTTPException(404, 'Человек не найден')
+        try:
+            vault.request_share(owner['id'], own['id'])
+        except ValueError as error:
+            reason = str(error)
+            raise HTTPException(409, 'Этот человек уже разрешил вам пропуск' if reason == 'shared'
+                                else 'Этот человек отклонил запрос; повторить можно через сутки' if reason == 'denied'
+                                else 'Слишком много запросов ждут ответа') from None
+        vault.audit('pass_requested', 'aaid:' + request.state.aaid['sub'], owner['id'])
+        return my_passes(own)
+
+    @app.post('/api/me/pass/requests/{request_id}/{decision}')
+    async def answer_pass_request(request_id: str, decision: str, request: Request):
+        own = require_own(request)
+        if decision not in ('allow', 'deny'):
+            raise HTTPException(404, 'Такого запроса нет')
+        requester = vault.decide_share_request(own['id'], request_id, decision == 'allow')
+        if requester is None:
+            raise HTTPException(404, 'Такого запроса нет')
+        vault.audit('pass_shared' if decision == 'allow' else 'pass_request_denied', 'aaid:' + request.state.aaid['sub'], own['id'])
+        if decision == 'allow':
+            await service.changed()
         return pass_list(vault.account(own['id']))
 
     @app.get('/api/me/account')

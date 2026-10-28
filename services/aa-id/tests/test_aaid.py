@@ -61,8 +61,13 @@ def setup(tmp_path, monkeypatch):
                 return httpx.Response(200, json={'people': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X', 'secret': 1}]})
             if request.url.path.endswith('/missing'):
                 return httpx.Response(404, json={'detail': 'Такого разрешения нет'})
+            if '/requests/' in request.url.path:
+                allowed = request.url.path.endswith('/allow')
+                people = [{'kind': 'aaid', 'id': 'c1', 'account_id': 'c1', 'username': 'cat', 'label': 'Кот', 'group_name': 'X'}] if allowed else []
+                return httpx.Response(200, json={'pass_allowed': True, 'people': people, 'requests': []})
             people = [] if request.method == 'DELETE' else [{'kind': 'aaid', 'id': 'b1', 'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}]
-            return httpx.Response(200, json={'pass_allowed': True, 'people': people, 'usr': claims['usr']})
+            requests = [{'id': 'r1', 'account_id': 'c1', 'username': 'cat', 'label': 'Кот', 'group_name': 'X', 'requested_at': 1}]
+            return httpx.Response(200, json={'pass_allowed': True, 'people': people, 'requests': requests, 'usr': claims['usr']})
         if request.url.host == 'sessions':
             claims = verify(request.headers['authorization'][7:], {app.state.signer.kid: app.state.signer.public}, 'aa-id', 'aa')
             if claims['mirea'] != 'uid-alice':
@@ -323,7 +328,12 @@ def test_pass_list_goes_through_aa_id(setup):
     web_sign_in(client, app)
     assert client.get('/web/people?q=bo').json() == {'people': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}]}
     shared = client.post('/web/pass/people', json={'account_id': 'b1'}).json()
-    assert shared == {'pass_allowed': True, 'people': [{'kind': 'aaid', 'id': 'b1', 'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}]}
+    assert shared == {'pass_allowed': True, 'people': [{'kind': 'aaid', 'id': 'b1', 'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X'}],
+                      'requests': [{'id': 'r1', 'account_id': 'c1', 'username': 'cat', 'label': 'Кот', 'group_name': 'X'}]}
+    assert client.post('/web/pass/requests/r1/allow').json()['people'][0]['label'] == 'Кот'
+    assert client.post('/web/pass/requests/r1/deny').json()['people'] == []
+    assert client.post('/web/pass/requests/r1/maybe').status_code == 404
+    assert client.post('/web/pass/requests/r%2F1/allow').status_code == 404
     assert client.delete('/web/pass/people/aaid/b1').json()['people'] == []
     assert client.delete('/web/pass/people/aaid/missing').json()['detail'] == 'Такого разрешения нет'
     assert client.delete('/web/pass/people/other/b1').status_code == 404

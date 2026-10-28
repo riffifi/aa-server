@@ -326,7 +326,8 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         return {key: person.get(key) for key in ('kind', 'id', 'account_id', 'username', 'label', 'group_name') if key in person}
 
     def pass_view(data):
-        return {'pass_allowed': bool(data.get('pass_allowed')), 'people': [person_view(p) for p in data.get('people', [])]}
+        return {'pass_allowed': bool(data.get('pass_allowed')), 'people': [person_view(p) for p in data.get('people', [])],
+                'requests': [person_view(p) for p in data.get('requests', [])]}
 
     @app.get('/web/account')
     async def site_account(request: Request):
@@ -379,6 +380,13 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         if kind not in ('aaid', 'telegram') or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', identifier):
             raise HTTPException(404, 'Такого разрешения нет')
         return pass_view(await sessions_call(user, session, 'DELETE', f'/api/me/pass/people/{kind}/{identifier}'))
+
+    @app.post('/web/pass/requests/{request_id}/{decision}')
+    async def site_pass_answer(request_id: str, decision: str, request: Request):
+        session, user = site_session(request)
+        if decision not in ('allow', 'deny') or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', request_id):
+            raise HTTPException(404, 'Такого запроса нет')
+        return pass_view(await sessions_call(user, session, 'POST', f'/api/me/pass/requests/{request_id}/{decision}'))
 
     @app.get('/web/attendance')
     async def site_attendance(request: Request):

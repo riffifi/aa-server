@@ -97,6 +97,22 @@ function renderPass(data) {
     : 'Пропуск запрещён всем, даже людям из списка.';
   $('pass-toggle').textContent = data.pass_allowed ? 'Запретить пропуск всем' : 'Разрешить людям из списка';
   $('pass-toggle').className = data.pass_allowed ? 'secondary danger' : 'primary';
+  const requests = data.requests || [];
+  $('requests-block').hidden = requests.length === 0;
+  $('pass-requests').replaceChildren(...requests.map(person => {
+    const actions = el('div', null, 'actions');
+    const allow = el('button', 'Разрешить', 'primary'), deny = el('button', 'Запретить', 'secondary danger');
+    allow.type = deny.type = 'button';
+    allow.addEventListener('click', () => {
+      const lines = ['Разрешить «' + who(person) + '» использовать ваш пропуск.'];
+      if (!data.pass_allowed) lines.push('Сейчас пропуск запрещён всем: разрешение заработает, когда вы снова разрешите пропуск.');
+      passChange(lines, () => api('web/pass/requests/' + encodeURIComponent(person.id) + '/allow', { method: 'POST' }), allow);
+    });
+    deny.addEventListener('click', () => passChange(['Отклонить запрос «' + who(person) + '». Повторить его можно будет через сутки.'],
+      () => api('web/pass/requests/' + encodeURIComponent(person.id) + '/deny', { method: 'POST' }), deny));
+    actions.append(allow, deny);
+    return personLine(person, actions);
+  }));
   $('pass-empty').hidden = data.people.length > 0;
   $('pass-people').replaceChildren(...data.people.map(person => {
     const button = el('button', 'Убрать', 'text-button danger');

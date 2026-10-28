@@ -613,6 +613,13 @@ def create_app(directory=None, password=None, transport=None, background=True, a
         rows = vault.accounts(group_id)
         testing = test_access(request)
         caller = request.state.aaid
+        if group_id is not None and caller is not None:
+            # A group filter still keeps the person's own pass and the passes
+            # people of other groups allowed them.
+            own = vault.account_by_pulse(caller['mirea'])
+            extra = ([own] if own else []) + (vault.shared_with(own['id']) if own else [])
+            known = {row['id'] for row in rows}
+            rows = rows + [row for row in extra if row['id'] not in known and not known.add(row['id'])]
         # `own` marks the account of the signed-in AA ID person (same MIREA identity).
         metadata = [{**vault.public(row), 'pass_access': pass_status(request, row),
                      'own': caller is not None and row['pulse_id'] == caller['mirea']} for row in rows]

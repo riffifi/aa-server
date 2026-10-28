@@ -72,6 +72,9 @@ class Vault:
             aaid_id TEXT, account_id TEXT, linked REAL, alerts INTEGER NOT NULL DEFAULT 1);
           CREATE TABLE IF NOT EXISTS telegram_codes(code_hash TEXT PRIMARY KEY, aaid_id TEXT NOT NULL,
             account_id TEXT NOT NULL, expires REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS share_requests(id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+            requester_id TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL, decided REAL);
+          CREATE INDEX IF NOT EXISTS share_requests_owner ON share_requests(account_id, state);
         ''')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
@@ -290,6 +293,53 @@ class Vault:
             return [dict(row) for row in db.execute('''SELECT accounts.*, pass_shares.created AS shared_at FROM pass_shares
                 JOIN accounts ON accounts.id = pass_shares.grantee_id WHERE pass_shares.account_id=? ORDER BY accounts.label''', (account_id,))]
 
+    def shared_with(self, grantee_id):
+        """The accounts whose owners let this person use their pass."""
+        with self.transaction() as db:
+            return [dict(row) for row in db.execute('''SELECT accounts.*, pass_shares.created AS shared_at FROM pass_shares
+                JOIN accounts ON accounts.id = pass_shares.account_id WHERE pass_shares.grantee_id=? ORDER BY accounts.label''', (grantee_id,))]
+
+    def request_share(self, account_id, requester_id):
+        """Ask the owner of `account_id` to let `requester_id` use the pass. One open
+        request per pair; a refusal can be asked again only after a day."""
+        now = time.time()
+        with self.transaction() as db:
+            if db.execute('SELECT 1 FROM pass_shares WHERE account_id=? AND grantee_id=?', (account_id, requester_id)).fetchone():
+                raise ValueError('shared')
+            last = db.execute('SELECT * FROM share_requests WHERE account_id=? AND requester_id=? ORDER BY created DESC LIMIT 1',
+                              (account_id, requester_id)).fetchone()
+            if last and last['state'] == 'pending':
+                return dict(last)
+            if last and last['state'] == 'denied' and last['decided'] > now - 86400:
+                raise ValueError('denied')
+            if db.execute("SELECT COUNT(*) FROM share_requests WHERE requester_id=? AND state='pending'", (requester_id,)).fetchone()[0] >= 20:
+                raise ValueError('too many')
+            identifier = secrets.token_urlsafe(12)
+            db.execute("INSERT INTO share_requests VALUES(?,?,?,'pending',?,NULL)", (identifier, account_id, requester_id, now))
+            return dict(db.execute('SELECT * FROM share_requests WHERE id=?', (identifier,)).fetchone())
+
+    def share_requests(self, account_id=None, requester_id=None):
+        """Open requests to an owner (with the requester's account) or from a person
+        (with the owner's account)."""
+        column, other = ('account_id', 'requester_id') if account_id else ('requester_id', 'account_id')
+        with self.transaction() as db:
+            return [dict(row) for row in db.execute(f'''SELECT share_requests.id AS request_id, share_requests.created AS requested_at,
+                accounts.* FROM share_requests JOIN accounts ON accounts.id = share_requests.{other}
+                WHERE share_requests.{column}=? AND share_requests.state='pending' ORDER BY share_requests.created''',
+                (account_id or requester_id,))]
+
+    def decide_share_request(self, account_id, request_id, allow):
+        """The owner's answer; returns the requester's account id, or None."""
+        with self.transaction() as db:
+            row = db.execute("SELECT * FROM share_requests WHERE id=? AND account_id=? AND state='pending'", (request_id, account_id)).fetchone()
+            if row is None:
+                return None
+            db.execute('UPDATE share_requests SET state=?, decided=? WHERE id=?', ('allowed' if allow else 'denied', time.time(), request_id))
+            if allow:
+                db.execute('INSERT OR IGNORE INTO pass_shares VALUES(?,?,?)', (account_id, row['requester_id'], time.time()))
+                self._bump(db, account_id)
+            return row['requester_id']
+
     def _bump(self, db, account_id):
         db.execute('UPDATE accounts SET version=version+1,updated_at=? WHERE id=?', (time.time(), account_id))
         row = db.execute('SELECT version FROM accounts WHERE id=?', (account_id,)).fetchone()
@@ -339,6 +389,7 @@ class Vault:
             db.execute('UPDATE telegram_users SET aaid_id=NULL, account_id=NULL, linked=NULL WHERE account_id=?', (account_id,))
             db.execute('DELETE FROM telegram_codes WHERE account_id=?', (account_id,))
             db.execute('DELETE FROM pass_shares WHERE account_id=? OR grantee_id=?', (account_id, account_id))
+            db.execute('DELETE FROM share_requests WHERE account_id=? OR requester_id=?', (account_id, account_id))
             for table in ('pass_requests', 'pass_grants'):
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     db.execute(f'DELETE FROM {table} WHERE account_id=?', (account_id,))

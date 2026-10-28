@@ -197,7 +197,7 @@ def test_username_search_and_pass_list(setup):
     found = client.get('/api/me/people?q=@bor', headers=ann_token).json()['people']
     assert found == [{'account_id': bob, 'username': 'boris', 'label': 'Борис', 'group_name': 'ГР-2'}]
     assert client.get('/api/me/people?q=Анна', headers=ann_token).json()['people'] == []  # not yourself
-    assert client.get('/api/me/pass', headers=ann_token).json() == {'pass_allowed': False, 'people': []}
+    assert client.get('/api/me/pass', headers=ann_token).json() == {'pass_allowed': False, 'people': [], 'requests': []}
 
     def bob_sees():
         passes = client.get('/api/accounts', headers=bob_token).json()['passes']
@@ -332,6 +332,49 @@ def test_today_shows_every_lesson_with_marks_of_the_groups_that_were_there(setup
     assert lesson['marks'][bob['id']]['state'] == 'approved'
     assert [p['label'] for p in data['people']] == ['Анна', 'Борис']
     assert client.get('/today').status_code == 200
+
+def test_app_reads_today_with_an_aa_id_token(setup):
+    client, app, pulse = setup
+    assert client.get('/api/me/today').status_code == 401
+    bearer = {'authorization': 'Bearer ' + token('ann', grp=1)}
+    day = client.get('/api/me/today', headers=bearer).json()
+    assert day['group_id'] == 1 and day['group_name'] == 'ГР-1'
+    assert [lesson['subject'] for lesson in day['lessons']] == ['Физика']
+    assert {p['label'] for p in day['people']} == {'Анна', 'Борис'}
+    assert client.get('/site/today').status_code == 401      # the token is no site cookie
+
+def cat_token():
+    return {'authorization': 'Bearer ' + token('cat')}
+
+def test_pass_requests_from_search_to_an_answer(setup):
+    client, app, pulse = setup
+    ann, bob = ({'authorization': 'Bearer ' + token(uid)} for uid in ('ann', 'bob'))
+    vault = app.state.service.vault
+    bob_id = vault.account_by_pulse('bob')['id']
+    asked = client.post('/api/me/pass/requests', json={'account_id': bob_id}, headers=ann).json()
+    assert [r['label'] for r in asked['requests']] == ['Борис'] and asked['passes'] == []
+    again = client.post('/api/me/pass/requests', json={'account_id': bob_id}, headers=ann).json()
+    assert len(again['requests']) == 1                       # one open request per pair
+    incoming = client.get('/api/me/pass', headers=bob).json()['requests']
+    assert [r['label'] for r in incoming] == ['Анна']
+    assert client.post(f"/api/me/pass/requests/{incoming[0]['id']}/allow", headers=ann).status_code == 404   # only the owner answers
+    answered = client.post(f"/api/me/pass/requests/{incoming[0]['id']}/allow", headers=bob).json()
+    assert answered['requests'] == [] and [p['label'] for p in answered['people']] == ['Анна']
+    mine = client.get('/api/me/passes', headers=ann).json()
+    assert [p['label'] for p in mine['passes']] == ['Борис'] and mine['requests'] == []
+    assert client.post('/api/me/pass/requests', json={'account_id': bob_id}, headers=ann).status_code == 409
+    # Борис is in another group, yet his pass reaches Анна's group-filtered list.
+    listed = {row['id'] for row in client.get('/api/accounts?group_id=1', headers=ann).json()['accounts']}
+    assert bob_id in listed and vault.account_by_pulse('ann')['id'] in listed
+    assert bob_id not in {row['id'] for row in client.get('/api/accounts?group_id=1', headers=cat_token()).json()['accounts']}
+    # A refusal: Катя asks Анна, Анна says no, and Катя cannot ask again today.
+    cat = {'authorization': 'Bearer ' + token('cat')}
+    ann_id = vault.account_by_pulse('ann')['id']
+    client.post('/api/me/pass/requests', json={'account_id': ann_id}, headers=cat)
+    request_id = client.get('/api/me/pass', headers=ann).json()['requests'][0]['id']
+    assert client.post(f'/api/me/pass/requests/{request_id}/deny', headers=ann).json()['people'] == []
+    assert client.get('/api/me/passes', headers=cat).json() == {'passes': [], 'requests': []}
+    assert client.post('/api/me/pass/requests', json={'account_id': ann_id}, headers=cat).status_code == 409
 
 def test_today_needs_sign_in(setup):
     assert setup[0].get('/site/today').status_code == 401
