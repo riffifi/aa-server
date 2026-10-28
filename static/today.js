@@ -67,7 +67,7 @@ function render(data) {
 async function load() {
   try {
     const response = await fetch('/site/today', { cache: 'no-store', credentials: 'same-origin' });
-    if (response.status === 401) { location.assign('/auth/aaid'); return; }
+    if (response.status === 401) { location.assign('/auth/aaid?next=/today'); return; }
     const data = await response.json();
     if (!response.ok) throw Error(typeof data.detail === 'string' ? data.detail : 'Сервер недоступен.');
     render(data); showError('');

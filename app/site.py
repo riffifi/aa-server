@@ -89,14 +89,38 @@ def install(app, service, aaid, calendars, static):
     async def today_page():
         return FileResponse(static / 'today.html')
 
+    @app.get('/tg/connect')
+    async def telegram_page():
+        return FileResponse(static / 'telegram.html')
+
+    @app.post('/site/telegram-link')
+    async def telegram_link(request: Request):
+        """A one-time Telegram deep link that binds the chat opening it to this AA ID.
+        The code is made here, by the signed-in person, so nobody can bind their
+        own chat to someone else's account by sending them a link."""
+        session = person(request)
+        limit(('telegram-link', session['aaid_id']), 10, 600)
+        bot = service.telegram
+        if bot is None or not bot.username:
+            raise HTTPException(503, 'Бот Telegram сейчас недоступен')
+        own = vault.account_by_pulse(session['mirea'])
+        if own is None:
+            raise HTTPException(409, 'Ваш аккаунт МИРЭА не подключён к серверу. Войдите через AA ID заново по QR-коду.')
+        code = vault.telegram_link_code(session['aaid_id'], own['id'])
+        return {'url': f'https://t.me/{bot.username}?start=aaid_{code}', 'expires_in': 600}
+
+    RETURN_PAGES = ('/today', '/tg/connect')
+
     @app.get('/auth/aaid')
-    async def sign_in(fresh: int = 0):
+    async def sign_in(fresh: int = 0, next: str = ''):
         if aaid is None or not aaid.public_url:
             raise HTTPException(503, 'AA ID не настроен на сервере')
         state = secrets.token_urlsafe(24)
         query = {'continue': 'aa', 'state': state, **({'fresh': '1'} if fresh else {})}
         response = RedirectResponse(aaid.public_url.rstrip('/') + '/?' + urlencode(query), status_code=303)
         response.set_cookie('aa_state', state, max_age=900, httponly=True, secure=secure, samesite='lax', path='/auth')
+        if next in RETURN_PAGES:
+            response.set_cookie('aa_next', next, max_age=900, httponly=True, secure=secure, samesite='lax', path='/auth')
         return response
 
     @app.get('/auth/callback')
@@ -115,8 +139,10 @@ def install(app, service, aaid, calendars, static):
             # Without a group the person is not shown at any lesson; AA ID knows it.
             vault.update_group(own['id'], person_data['group_id'], person_data.get('group_name'), own['version'])
             await service.changed()
-        response = RedirectResponse('/', status_code=303)
+        back = request.cookies.get('aa_next', '')
+        response = RedirectResponse(back if back in RETURN_PAGES else '/', status_code=303)
         response.delete_cookie('aa_state', path='/auth')
+        response.delete_cookie('aa_next', path='/auth')
         response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True, secure=secure, samesite='strict', path='/')
         return response
 

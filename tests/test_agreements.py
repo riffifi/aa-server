@@ -197,7 +197,7 @@ async def test_login_does_not_block_other_bot_updates(setup):
     await bot.queue_login(100, None, 'Owner')
     await started.wait()
     await bot.handle_update({'message': message(300, '/menu')})
-    assert any('keep your MIREA session connected' in text for text in bot.recorder.texts())
+    assert any('Войдите через AA ID' in text for text in bot.recorder.texts())
     assert len(bot.login_tasks) == 1
     release.set()
     await asyncio.gather(*list(bot.login_tasks))

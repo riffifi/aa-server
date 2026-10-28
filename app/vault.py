@@ -68,6 +68,10 @@ class Vault:
           DROP TABLE IF EXISTS page_sessions;
           CREATE TABLE IF NOT EXISTS pass_shares(account_id TEXT NOT NULL, grantee_id TEXT NOT NULL,
             created REAL NOT NULL, PRIMARY KEY(account_id, grantee_id));
+          CREATE TABLE IF NOT EXISTS telegram_users(chat_id INTEGER PRIMARY KEY, lang TEXT NOT NULL DEFAULT 'ru',
+            aaid_id TEXT, account_id TEXT, linked REAL, alerts INTEGER NOT NULL DEFAULT 1);
+          CREATE TABLE IF NOT EXISTS telegram_codes(code_hash TEXT PRIMARY KEY, aaid_id TEXT NOT NULL,
+            account_id TEXT NOT NULL, expires REAL NOT NULL);
         ''')
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(accounts)')}
         if 'session_version' not in columns:
@@ -332,6 +336,8 @@ class Vault:
             row = db.execute('SELECT group_id FROM accounts WHERE id=?', (account_id,)).fetchone()
             db.execute('DELETE FROM accounts WHERE id=?', (account_id,))
             db.execute('DELETE FROM telegram_links WHERE account_id=?', (account_id,))
+            db.execute('UPDATE telegram_users SET aaid_id=NULL, account_id=NULL, linked=NULL WHERE account_id=?', (account_id,))
+            db.execute('DELETE FROM telegram_codes WHERE account_id=?', (account_id,))
             db.execute('DELETE FROM pass_shares WHERE account_id=? OR grantee_id=?', (account_id, account_id))
             for table in ('pass_requests', 'pass_grants'):
                 if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
@@ -409,6 +415,34 @@ class Vault:
     def telegram_chats(self, account_id):
         with self.transaction() as db:
             return [row[0] for row in db.execute('SELECT chat_id FROM telegram_links WHERE account_id=?', (account_id,))]
+
+    def telegram_user(self, chat_id):
+        """The chat's settings and its AA ID link: {'lang', 'aaid_id', 'account_id', 'alerts'}."""
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM telegram_users WHERE chat_id=?', (chat_id,)).fetchone()
+        return dict(row) if row else {'chat_id': chat_id, 'lang': 'ru', 'aaid_id': None, 'account_id': None, 'linked': None, 'alerts': 1}
+
+    def update_telegram_user(self, chat_id, **values):
+        allowed = {'lang', 'aaid_id', 'account_id', 'linked', 'alerts'}
+        assert set(values) <= allowed
+        with self.transaction() as db:
+            db.execute('INSERT OR IGNORE INTO telegram_users(chat_id) VALUES(?)', (chat_id,))
+            for key, value in values.items():
+                db.execute(f'UPDATE telegram_users SET {key}=? WHERE chat_id=?', (value, chat_id))
+
+    def telegram_link_code(self, aaid_id, account_id, ttl=600):
+        """A one-time code that links whichever Telegram chat presents it to this AA ID."""
+        code = secrets.token_urlsafe(24)
+        with self.transaction() as db:
+            db.execute('DELETE FROM telegram_codes WHERE expires<?', (time.time(),))
+            db.execute('INSERT INTO telegram_codes VALUES(?,?,?,?)', (digest(code), aaid_id, account_id, time.time() + ttl))
+        return code
+
+    def claim_telegram_code(self, code):
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM telegram_codes WHERE code_hash=? AND expires>=?', (digest(code), time.time())).fetchone()
+            db.execute('DELETE FROM telegram_codes WHERE code_hash=?', (digest(code),))
+        return dict(row) if row else None
 
     def events(self, after, group_id=None):
         with self.transaction() as db:

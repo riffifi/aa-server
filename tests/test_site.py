@@ -366,3 +366,28 @@ def test_pulse_journal_parsers():
     assert visiting_logs(frame(b''), {**headers, 'grpc-status': '16'}) is None
     from datetime import date
     assert day_lessons_request(date(2026, 10, 27)) == bytes.fromhex('0000000009120708ea0f100a181b')
+
+def test_telegram_link_is_made_by_the_signed_in_person(setup):
+    from types import SimpleNamespace
+    client, app, pulse = setup
+    assert client.post('/site/telegram-link').status_code == 401
+    sign_in(client)
+    service = app.state.service
+    service.telegram = None
+    assert client.post('/site/telegram-link').status_code == 503
+    service.telegram = SimpleNamespace(username='aa_test_bot')
+    url = client.post('/site/telegram-link').json()['url']
+    assert url.startswith('https://t.me/aa_test_bot?start=aaid_')
+    claimed = service.vault.claim_telegram_code(url.split('aaid_')[1])
+    assert claimed['account_id'] == service.vault.account_by_pulse('ann')['id']
+    assert client.get('/tg/connect').status_code == 200
+
+def test_sign_in_returns_to_the_page_it_was_asked_from(setup):
+    client = setup[0]
+    start = client.get('/auth/aaid?next=/tg/connect', follow_redirects=False)
+    state = start.headers['location'].split('state=')[1]
+    done = client.get(f'/auth/callback?code=ann{"x" * 17}&state={state}', follow_redirects=False)
+    assert done.headers['location'] == '/tg/connect'
+    start = client.get('/auth/aaid?next=https://evil.example', follow_redirects=False)
+    state = start.headers['location'].split('state=')[1]
+    assert client.get(f'/auth/callback?code=ann{"x" * 17}&state={state}', follow_redirects=False).headers['location'] == '/'
