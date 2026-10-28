@@ -40,8 +40,12 @@ def _unescape(text):
 def lessons_on(source, day):
     """Lessons on `day` (a date), in Moscow civil time, sorted by start.
     Mirrors the app's parser: DTSTART/DTEND plus RRULE, RDATE and EXDATE."""
-    start_of_day = datetime(day.year, day.month, day.day)
-    end_of_day = start_of_day + timedelta(days=1)
+    return lessons_between(source, day, 1)[day]
+
+def lessons_between(source, first, days):
+    """Lessons on each of `days` days from `first`: {date: [lesson, ...]}, one parse."""
+    start_of_day = datetime(first.year, first.month, first.day)
+    end_of_day = start_of_day + timedelta(days=days)
     result = {}
     event = None
     for line in re.sub(r'\r?\n[ \t]', '', source).splitlines():
@@ -58,7 +62,10 @@ def lessons_on(source, day):
             continue
         key, value = line.split(':', 1)
         event.setdefault(key.split(';')[0].upper(), []).append(_unescape(value))
-    return sorted(result.values(), key=lambda lesson: lesson['start'])
+    by_day = {first + timedelta(days=offset): [] for offset in range(days)}
+    for lesson in sorted(result.values(), key=lambda lesson: lesson['start']):
+        by_day[lesson['start'].date()].append(lesson)
+    return by_day
 
 def _expand(event, start_of_day, end_of_day):
     field = lambda key: (event.get(key) or [None])[0]
@@ -115,7 +122,7 @@ class Calendars:
     not retried for a minute, and each day's lessons are parsed once per download."""
     def __init__(self, fetch, ttl=900, retry=60):
         self.fetch, self.ttl, self.retry = fetch, ttl, retry
-        self.cache, self.locks, self.failed, self.parsed = {}, {}, {}, {}
+        self.cache, self.locks, self.failed, self.parsed, self.weeks = {}, {}, {}, {}, {}
 
     def _fresh(self, group_id):
         cached = self.cache.get(group_id)
@@ -158,3 +165,16 @@ class Calendars:
         if parsed is None or parsed[:2] != (fetched, day):
             parsed = self.parsed[group_id] = (fetched, day, lessons_on(text, day))
         return [dict(lesson) for lesson in parsed[2]]
+
+    async def week(self, group_id, monday):
+        """Lessons Monday to Sunday of the week starting `monday`, parsed once per download."""
+        fetched, text = await self._download(group_id)
+        if text is None:
+            return None
+        key = (group_id, monday)
+        parsed = self.weeks.get(key)
+        if parsed is None or parsed[0] != fetched:
+            if len(self.weeks) > 500:
+                self.weeks.clear()
+            parsed = self.weeks[key] = (fetched, lessons_between(text, monday, 7))
+        return {day: [dict(lesson) for lesson in lessons] for day, lessons in parsed[1].items()}

@@ -188,3 +188,18 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
 .legend { margin-top: 8px; }
 .legend .null { color: var(--disabled); }
 .report { max-height: 480px; margin: 16px 0 0; padding: 12px; overflow: auto; border: 1px solid var(--line); font: 11px/15px "Geist Mono", ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Schedule: a week of a group's lessons */
+.week-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 16px; }
+.week-nav .secondary { min-width: 48px; justify-content: center; }
+.week-nav .push { margin-left: auto; }
+.week { margin-top: 8px; }
+.day { margin-top: 32px; scroll-margin-top: 16px; }
+.day.today .heading { color: var(--accent-text); }
+.slot { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.slot-time { display: grid; align-content: start; font-size: 14px; line-height: 20px; }
+.slot-body { display: grid; gap: 4px; min-width: 0; }
+.slot-body strong { font-size: 16px; line-height: 20px; font-weight: 500; }
+.slot-body .meta { font-size: 12px; line-height: 16px; color: var(--secondary); overflow-wrap: anywhere; }
+.slot.past { opacity: .55; }
+.slot.now { box-shadow: inset 3px 0 0 var(--accent); padding-left: 12px; }

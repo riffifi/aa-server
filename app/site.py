@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import time
+from datetime import timedelta
 from collections import defaultdict, deque
 from urllib.parse import urlencode
 from fastapi import HTTPException, Request
@@ -88,6 +89,47 @@ def install(app, service, aaid, calendars, static):
     @app.get('/today')
     async def today_page():
         return FileResponse(static / 'today.html')
+
+    @app.get('/schedule')
+    async def schedule_page():
+        return FileResponse(static / 'schedule.html')
+
+    @app.get('/site/schedule')
+    async def week_schedule(request: Request, group: int = 0, week: int = 0, name: str = ''):
+        """A group's lessons for one week (Monday to Sunday), `week` weeks from this one."""
+        session = person(request)
+        own = vault.account_by_pulse(session['mirea'])
+        own_id = session['group_id'] or (own['group_id'] if own else None)
+        own_name = session['group_name'] or (own['group_name'] if own else None)
+        group_id = group if group > 0 else own_id
+        known = {row['id']: row['name'] for row in vault.groups()}
+        if own_id:
+            known.setdefault(own_id, own_name)
+        now = schedule.moscow_now()
+        monday = now.date() - timedelta(days=now.weekday()) + timedelta(weeks=max(-30, min(30, week)))
+        result = {'group_id': group_id, 'group_name': known.get(group_id) or name.strip()[:40] or None,
+                  'own': group_id == own_id, 'own_group_id': own_id, 'own_group_name': own_name,
+                  'monday': monday.isoformat(), 'week': week, 'days': [], 'schedule_error': None}
+        if not group_id:
+            return result
+        days = await calendars.week(group_id, monday)
+        if days is None:
+            result['schedule_error'] = 'Расписание МИРЭА недоступно'
+            return result
+        for day, lessons in sorted(days.items()):
+            result['days'].append({'date': day.isoformat(), 'weekday': day.weekday(), 'today': day == now.date(),
+                                   'lessons': [shown(lesson) | {'state': 'past' if lesson['end'] <= now else 'now' if lesson['start'] <= now else 'future'}
+                                               for lesson in lessons]})
+        return result
+
+    @app.get('/site/schedule/search')
+    async def schedule_search(request: Request, q: str = ''):
+        person(request)
+        query = q.strip()
+        if len(query) < 2:
+            return {'groups': []}
+        limit(('schedule-search', request.client.host if request.client else ''), 60, 60)
+        return {'groups': await service.transport.search_groups(query[:50])}
 
     @app.get('/tg/connect')
     async def telegram_page():
@@ -395,7 +437,7 @@ def install(app, service, aaid, calendars, static):
                 'active': None if current is None else 'now' if context['current'] else 'soon',
                 'had_lessons': context['had_lessons'],
                 'own_group_size': sum(1 for row in vault.accounts(context['group_id']) if row['state'] == 'valid') if context['group_id'] else 0,
-                'schedule_url': schedule.page_url(context['group_id']) if context['group_id'] else schedule.HOST,
+                'schedule_url': '/schedule',
                 'schedule_error': context['schedule_error'],
                 'groups': context['groups'], 'people': people, 'aaid_url': aaid.public_url if aaid else None}
 

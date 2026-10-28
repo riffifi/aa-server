@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#000000"><title>AntiAttendance · Расписание</title><link rel="stylesheet" href="/static/site.css"><script src="/static/schedule.js" defer></script></head>
+<body><main class="page wide">
+  <header class="masthead"><span class="wordmark">AntiAttendance</span><a class="text-button push" href="/">← Текущая пара</a></header>
+
+  <span id="week-label" class="label">Расписание</span>
+  <h1 id="group-title" class="title tight">Загружаем…</h1>
+  <div class="week-nav">
+    <button id="prev" class="secondary" aria-label="Предыдущая неделя">←</button>
+    <button id="current" class="text-button">Эта неделя</button>
+    <button id="next" class="secondary" aria-label="Следующая неделя">→</button>
+    <button id="mine" class="text-button push" hidden>Моя группа</button>
+  </div>
+
+  <form id="search-form" class="field" role="search"><input id="search" class="input" type="search" placeholder="Другая группа, например ИКБО-01-24" autocomplete="off" minlength="2"></form>
+  <div id="results" class="chips"></div>
+
+  <section id="week" class="week"></section>
+  <p id="empty" class="note" hidden></p>
+  <p id="error" class="banner" role="alert" hidden></p>
+</main></body></html>

@@ -391,3 +391,18 @@ def test_sign_in_returns_to_the_page_it_was_asked_from(setup):
     start = client.get('/auth/aaid?next=https://evil.example', follow_redirects=False)
     state = start.headers['location'].split('state=')[1]
     assert client.get(f'/auth/callback?code=ann{"x" * 17}&state={state}', follow_redirects=False).headers['location'] == '/'
+
+def test_week_schedule_page_for_own_and_other_groups(setup):
+    client, app, pulse = setup
+    assert client.get('/site/schedule').status_code == 401
+    sign_in(client)
+    data = client.get('/site/schedule').json()
+    assert data['group_id'] == 1 and data['own'] and len(data['days']) == 7
+    today = next(day for day in data['days'] if day['today'])
+    assert [l['subject'] for l in today['lessons']] == ['Физика'] and today['lessons'][0]['state'] == 'now'
+    other = client.get('/site/schedule?group=3').json()
+    assert not other['own'] and other['group_name'] == 'ГР-3'
+    later = client.get('/site/schedule?week=1').json()
+    assert later['monday'] > data['monday'] and not any(day['lessons'] for day in later['days'])
+    assert client.get('/site/state').json()['schedule_url'] == '/schedule'
+    assert client.get('/schedule').status_code == 200
