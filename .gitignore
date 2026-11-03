@@ -6,3 +6,4 @@ __pycache__/
 master.key
 data/
 *.patch
+.test-deps/

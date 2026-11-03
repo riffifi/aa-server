@@ -123,6 +123,27 @@ class Calendars:
     def __init__(self, fetch, ttl=900, retry=60):
         self.fetch, self.ttl, self.retry = fetch, ttl, retry
         self.cache, self.locks, self.failed, self.parsed, self.weeks = {}, {}, {}, {}, {}
+        self.tasks = {}
+
+    async def close(self):
+        tasks = list(self.tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.tasks.clear()
+
+    async def _available(self, group_id):
+        fresh = self._fresh(group_id)
+        if fresh is not None:
+            return fresh
+        task = self.tasks.get(group_id)
+        if task is None:
+            task = self.tasks[group_id] = asyncio.create_task(self._download(group_id))
+            task.add_done_callback(lambda done: self.tasks.pop(group_id, None))
+        # Serve saved calendars immediately while one shared fetch refreshes them.
+        if group_id in self.cache:
+            return self.cache[group_id]
+        return await asyncio.shield(task)
 
     def _fresh(self, group_id):
         cached = self.cache.get(group_id)
@@ -155,10 +176,10 @@ class Calendars:
             return self.cache[group_id]
 
     async def source(self, group_id):
-        return (await self._download(group_id))[1]
+        return (await self._available(group_id))[1]
 
     async def lessons(self, group_id, day):
-        fetched, text = await self._download(group_id)
+        fetched, text = await self._available(group_id)
         if text is None:
             return None
         parsed = self.parsed.get(group_id)
@@ -168,7 +189,7 @@ class Calendars:
 
     async def week(self, group_id, monday):
         """Lessons Monday to Sunday of the week starting `monday`, parsed once per download."""
-        fetched, text = await self._download(group_id)
+        fetched, text = await self._available(group_id)
         if text is None:
             return None
         key = (group_id, monday)

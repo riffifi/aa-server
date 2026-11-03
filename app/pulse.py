@@ -13,6 +13,7 @@ import httpx
 import qrcode
 from pathlib import Path
 from . import protocol
+from .browser_assets import BrowserAssets
 from .vault import Conflict, digest
 
 MAX_RESPONSE = 1024 * 1024
@@ -170,6 +171,7 @@ class BrowserLogins:
         self.playwright = None
         self.browser = None
         self.start_lock = asyncio.Lock()
+        self.assets = BrowserAssets()
         # Interactive logins and background renewals use SEPARATE browser budgets.
         # An interactive login holds its slot for the whole human QR wait, so with a
         # single shared pool a few people enrolling (or renewals firing as accounts
@@ -211,7 +213,7 @@ class BrowserLogins:
             allowed = parsed.scheme == 'https' and (parsed.hostname in {'pulse.mirea.ru', 'sso.mirea.ru', *hosts} or
               (parsed.hostname or '').endswith('.ddos-guard.net') or parsed.hostname == 'ddos-guard.net')
             if allowed:
-                await route.continue_()
+                await self.assets.route(route)
             else:
                 await route.abort()
         await context.route('**/*', guard)

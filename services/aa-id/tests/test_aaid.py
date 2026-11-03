@@ -61,6 +61,11 @@ def setup(tmp_path, monkeypatch):
                 return httpx.Response(200, json={'people': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X', 'secret': 1}]})
             if request.url.path.endswith('/missing'):
                 return httpx.Response(404, json={'detail': 'Такого разрешения нет'})
+            if request.url.path == '/api/me/passes' or (request.url.path == '/api/me/pass/requests' and request.method == 'POST'):
+                if request.method == 'POST' and json.loads(request.content)['account_id'] == 'b1':
+                    return httpx.Response(409, json={'detail': 'Этот человек уже разрешил вам пропуск'})
+                asked = [{'account_id': 'd1', 'username': None, 'label': 'Дима', 'group_name': 'Y', 'secret': 1}] if request.method == 'POST' else []
+                return httpx.Response(200, json={'passes': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X', 'pass_allowed': True, 'secret': 1}], 'requests': asked})
             if '/requests/' in request.url.path:
                 allowed = request.url.path.endswith('/allow')
                 people = [{'kind': 'aaid', 'id': 'c1', 'account_id': 'c1', 'username': 'cat', 'label': 'Кот', 'group_name': 'X'}] if allowed else []
@@ -333,6 +338,11 @@ def test_pass_list_goes_through_aa_id(setup):
     assert client.post('/web/pass/requests/r1/allow').json()['people'][0]['label'] == 'Кот'
     assert client.post('/web/pass/requests/r1/deny').json()['people'] == []
     assert client.post('/web/pass/requests/r1/maybe').status_code == 404
+    assert client.get('/web/passes').json() == {'passes': [{'account_id': 'b1', 'username': 'bob', 'label': 'Боб', 'group_name': 'X', 'pass_allowed': True}], 'requests': []}
+    asked = client.post('/web/pass/requests', json={'account_id': 'd1'}).json()
+    assert asked['requests'] == [{'account_id': 'd1', 'username': None, 'label': 'Дима', 'group_name': 'Y'}]
+    refused = client.post('/web/pass/requests', json={'account_id': 'b1'})
+    assert refused.status_code == 409 and refused.json()['detail'] == 'Этот человек уже разрешил вам пропуск'
     assert client.post('/web/pass/requests/r%2F1/allow').status_code == 404
     assert client.delete('/web/pass/people/aaid/b1').json()['people'] == []
     assert client.delete('/web/pass/people/aaid/missing').json()['detail'] == 'Такого разрешения нет'

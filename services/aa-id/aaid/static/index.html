@@ -52,6 +52,15 @@
       <div id="people-results" class="list"></div>
       <p id="pass-status" class="caption" role="status"></p>
     </section>
+    <section id="theirs" class="block" aria-labelledby="theirs-heading" hidden>
+      <h2 id="theirs-heading" class="heading">Мне разрешили пропуск</h2>
+      <p class="lead small-lead">Пропуска этих людей можно использовать в приложении. Чтобы получить ещё, найдите человека и отправьте запрос.</p>
+      <div id="theirs-list" class="list"></div>
+      <p id="theirs-empty" class="note" hidden>Пока никто.</p>
+      <form id="ask-form" class="field search-field"><input id="ask-q" class="input" maxlength="60" autocomplete="off" autocapitalize="none" placeholder="Найти по username или имени"><button class="secondary">Найти</button></form>
+      <div id="ask-results" class="list"></div>
+      <p id="theirs-status" class="caption" role="status"></p>
+    </section>
     <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-heading"><form method="dialog"><h2 id="confirm-heading" class="heading">Сохранить изменения?</h2><ul id="confirm-list" class="confirm-list"></ul><div class="actions"><button value="ok" class="primary">Подтвердить</button><button value="cancel" class="text-button">Отмена</button></div></form></dialog>
 
     <section class="block" aria-labelledby="schedule-heading">

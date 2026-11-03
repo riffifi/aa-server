@@ -119,7 +119,8 @@ def create_app(directory=None, identity=None, logins=None, http=None):
             if origin and urlparse(origin).netloc != request.headers.get('host'):
                 return JSONResponse({'detail': 'Invalid origin'}, status_code=403)
         response = await call_next(request)
-        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Cache-Control'] = ('public, max-age=0, must-revalidate'
+                                             if request.url.path.startswith('/static/') else 'no-store')
         response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -315,6 +316,9 @@ def create_app(directory=None, identity=None, logins=None, http=None):
             # Russian details are meant for the person (e.g. «Человек не найден»).
             detail = response.json().get('detail') if 'json' in response.headers.get('content-type', '') else None
             raise HTTPException(404, detail if isinstance(detail, str) and not detail.isascii() else 'Ваш аккаунт МИРЭА не подключён к серверу AntiAttendance')
+        if response.status_code == 409:
+            detail = response.json().get('detail') if 'json' in response.headers.get('content-type', '') else None
+            raise HTTPException(409, detail if isinstance(detail, str) and not detail.isascii() else 'Сейчас это сделать нельзя')
         if response.status_code != 200:
             raise HTTPException(503, 'Сервер AntiAttendance не ответил')
         return response.json()
@@ -363,6 +367,20 @@ def create_app(directory=None, identity=None, logins=None, http=None):
         session, user = site_session(request)
         data = await sessions_call(user, session, 'GET', '/api/me/people', params={'q': q[:60]})
         return {'people': [person_view(p) for p in data.get('people', [])]}
+
+    def passes_view(data):
+        return {'passes': [{**person_view(p), 'pass_allowed': bool(p.get('pass_allowed'))} for p in data.get('passes', [])],
+                'requests': [person_view(p) for p in data.get('requests', [])]}
+
+    @app.get('/web/passes')
+    async def site_passes(request: Request):
+        session, user = site_session(request)
+        return passes_view(await sessions_call(user, session, 'GET', '/api/me/passes'))
+
+    @app.post('/web/pass/requests')
+    async def site_pass_request(body: ShareBody, request: Request):
+        session, user = site_session(request)
+        return passes_view(await sessions_call(user, session, 'POST', '/api/me/pass/requests', body=body.model_dump()))
 
     @app.get('/web/pass')
     async def site_pass(request: Request):

@@ -61,10 +61,10 @@ async function loadSettings() {
     $('name').value = account.label === 'Без имени' ? '' : account.label;
     $('username').value = (lastMe && lastMe.username) || '';
     showWho();
-    if (account.account) await loadPass();
+    if (account.account) await Promise.all([loadPass(), loadTheirs()]);
     if (location.hash === '#settings') $('settings').scrollIntoView({ block: 'start' });
   } catch (error) {
-    $('settings').hidden = true; $('pass').hidden = true; $('settings-note').textContent = error.message; $('settings-note').hidden = false;
+    $('settings').hidden = true; $('pass').hidden = true; $('theirs').hidden = true; $('settings-note').textContent = error.message; $('settings-note').hidden = false;
   }
 }
 
@@ -131,6 +131,44 @@ async function passChange(lines, run, button) {
   try { renderPass(await run()); $('pass-status').textContent = 'Сохранено'; return true; }
   catch (error) { $('pass-status').textContent = error.message; return false; }
   finally { if (button) button.disabled = false; }
+}
+
+// Passes other people let this person use, the requests still waiting, and a search to ask.
+let theirs = null;
+async function loadTheirs() {
+  try { renderTheirs(await api('web/passes')); } catch (error) { $('theirs').hidden = true; }
+}
+
+function renderTheirs(data) {
+  theirs = data;
+  $('theirs').hidden = false;
+  const rows = data.passes.map(person => personLine(person, el('span', person.pass_allowed ? 'можно использовать' : 'владелец запретил пропуск всем', 'meta')))
+    .concat(data.requests.map(person => personLine(person, el('span', 'ждёт ответа', 'meta'))));
+  $('theirs-list').replaceChildren(...rows);
+  $('theirs-empty').hidden = rows.length > 0;
+}
+
+async function askPeople(event) {
+  event.preventDefault();
+  const query = $('ask-q').value.trim();
+  if (query.replace(/^@/, '').length < 2) { $('theirs-status').textContent = 'Введите хотя бы 2 символа'; return; }
+  try {
+    const data = await api('web/people?q=' + encodeURIComponent(query));
+    $('theirs-status').textContent = data.people.length ? '' : 'Никого не нашли';
+    const asked = new Set(theirs ? theirs.passes.concat(theirs.requests).map(p => p.account_id) : []);
+    $('ask-results').replaceChildren(...data.people.map(person => {
+      const button = el('button', asked.has(person.account_id) ? 'Уже запрошено' : 'Запросить', 'text-button');
+      button.type = 'button'; button.disabled = asked.has(person.account_id);
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          renderTheirs(await api('web/pass/requests', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ account_id: person.account_id }) }));
+          button.textContent = 'Уже запрошено'; $('theirs-status').textContent = 'Запрос отправлен';
+        } catch (error) { $('theirs-status').textContent = error.message; button.disabled = false; }
+      });
+      return personLine(person, button);
+    }));
+  } catch (error) { $('theirs-status').textContent = error.message; }
 }
 
 async function searchPeople(event) {
@@ -324,6 +362,7 @@ $('pass-toggle').addEventListener('click', () => {
   }, $('pass-toggle'));
 });
 $('people-form').addEventListener('submit', searchPeople);
+$('ask-form').addEventListener('submit', askPeople);
 $('acs-refresh').addEventListener('click', loadAttendance);
 $('logout').addEventListener('click', async () => {
   try { await api('web/logout', { method: 'POST' }); } catch (_) { /* signed out locally anyway */ }

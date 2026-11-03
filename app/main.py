@@ -216,6 +216,9 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             with contextlib.suppress(asyncio.CancelledError):
                 await bot.task
             await bot.close()
+        await calendars.close()
+        if calendar_http is not None:
+            await calendar_http.aclose()
         await service.close()
         if aaid is not None:
             await aaid.close()
@@ -252,7 +255,8 @@ def create_app(directory=None, password=None, transport=None, background=True, a
                                     status_code=401, headers={'WWW-Authenticate': 'Bearer', 'X-AAID-Required': '1', 'Cache-Control': 'no-store'})
             request.state.aaid = claims
         response = await call_next(request)
-        response.headers['Cache-Control'] = 'no-store'
+        response.headers['Cache-Control'] = ('public, max-age=0, must-revalidate'
+                                             if request.url.path.startswith('/static/') else 'no-store')
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
@@ -482,6 +486,7 @@ def create_app(directory=None, password=None, transport=None, background=True, a
             'background': {'refresh_loop': 'off' if service.refresh_task is None else 'stopped' if service.refresh_task.done() else 'running',
                            'renewal_attempts': len(service.renewal_attempts)},
             'browser': {'running': browser.browser is not None and browser.browser.is_connected(),
+                        'assets': browser.assets.stats(),
                         'login_slots_free': browser.login_slots._value, 'renew_slots_free': browser.renew_slots._value,
                         'max_active': browser.max_active, 'jobs': jobs},
             'calendars': [{'group_id': gid, 'name': names.get(gid), 'fetched': calendars.cache.get(gid, (None,))[0],
