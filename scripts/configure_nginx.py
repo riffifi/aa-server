@@ -56,7 +56,7 @@ def configure(domain, port, config=None):
     shutil.copy2(main, backup)
     site.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
     template = (pathlib.Path(__file__).resolve().parents[1] / 'nginx/host.conf.example').read_text()
-    rendered = template.replace('aa.yellowteacrew.ru', domain).replace('127.0.0.1:8080', f'127.0.0.1:{port}')
+    rendered = template.replace('aa.ytc-srv.org', domain).replace('127.0.0.1:8080', f'127.0.0.1:{port}')
     try:
         site.write_text(rendered)
         site.chmod(0o644)

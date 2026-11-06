@@ -1,5 +1,46 @@
 # Pulse session server — URL-only automatic sync
 
+## Native Go / PostgreSQL server
+
+The native implementation uses PostgreSQL, requires AA ID authentication for
+application APIs and disables Telegram. It includes account synchronization,
+QR login/renewal, sharing, site attendance, schedules and the administration panel.
+The Python deployment described below is retained for rollback.
+
+Fresh installation (Docker Compose and OpenSSL required):
+
+```sh
+sudo bash install.sh
+```
+
+The installer asks for domains, local ports, nginx and TLS settings.
+Updates use `sudo bash install.sh update`; checks use `sudo bash install.sh check`.
+It installs missing dependencies on Ubuntu/Debian and preserves keys/passwords.
+[Installer arguments, progress and logging](docs/installer.md) describes all
+options, including `--log-level error|warn|info|debug`.
+
+For existing data, use the separate export/import procedure in
+[Go deployment and migration](docs/go-postgres-migration.md). Preserve both keys
+and back up the databases before switching services. Default Go ports are
+localhost 18080 (site), 18091 (AA ID) and 18092 (private panel).
+The public defaults are `aa.ytc-srv.org` and `aaid.ytc-srv.org`.
+The Go executables accept project subdomains under `*.ytc-srv.org` and local
+loopback origins; removed public aliases are rejected. Host TLS proxy example:
+[nginx/go-hosts.conf.example](nginx/go-hosts.conf.example).
+
+[Browser memory and download fixes](docs/browser-memory-fix.md) describe the
+bounded caches, response disposal and traffic counters. Historical traffic can
+be sampled without restarting containers using `python3 scripts/traffic_probe.py`.
+
+[Detailed Go API reference (Russian)](docs/API.md) covers AA ID, authorization,
+sync, sharing, Pulse RPC, the site, enrollment, the panel, diagnostics and client
+examples. Check route coverage with `python3 scripts/check_api_docs.py`.
+
+## Legacy Python deployment
+
+The access policy and Telegram instructions below apply to the legacy deployment.
+The Go API always requires sign-in and does not accept Telegram grants.
+
 Enter the same server URL in **Settings → Session server** on each phone. There
 are no general device keys, publisher switches, or manual upload steps.
 Pass access additionally requires per-person owner approval in Telegram; the app
@@ -99,7 +140,7 @@ password remains the explicit testing exception and does not create agreements.
 ## Telegram bot
 
 Set a **fresh** `TELEGRAM_TOKEN` in the deployment's untracked `.env` and rerun
-`sudo ./install.sh`. Never put the token in source, screenshots, logs or chat.
+`sudo ./install-python.sh`. Never put the token in source, screenshots, logs or chat.
 If a token has been shared, revoke it through BotFather before deployment.
 The bot discovers its username through `getMe` and uses long polling. Do not run
 another poller with the same token. No webhook setup is needed.
@@ -220,7 +261,7 @@ groups. `PUT /api/accounts/{id}/group` accepts `group_id`, `group_name` and
 preference, not an API access restriction.
 
 Deploy the updated server before using group-only fetches in the updated app.
-Rerun `sudo ./install.sh` after copying/pulling these changes; existing encrypted
+Rerun `sudo ./install-python.sh` after copying/pulling these changes; existing encrypted
 accounts are preserved, and event columns migrate automatically at startup.
 
 ## Docker + Nginx installation
@@ -228,10 +269,10 @@ accounts are preserved, and event columns migrate automatically at startup.
 Clone or copy this separate server repository, then run inside its directory:
 
 ```sh
-sudo ./install.sh
+sudo ./install-python.sh
 ```
 
-The default public URL is **http://aa.yellowteacrew.ru**. Point its DNS record at
+The default public URL is **https://aa.ytc-srv.org**. Point its DNS record at
 94.29.36.13 and allow incoming port 80. The installer installs Docker, Compose,
 Nginx and Python 3 when needed on Ubuntu/Debian. Docker's proxy listens only on
 127.0.0.1:8080; the host Nginx serves the domain on port 80.
@@ -257,7 +298,7 @@ and the encrypted Docker data volume are preserved on reruns. Phone setup only
 needs the URL. Check arguments without making changes:
 
 ```sh
-./install.sh --check
+./install-python.sh --check
 ```
 
 ## Existing host Nginx / HTTPS
@@ -269,7 +310,7 @@ append duplicate includes. Global configuration backups are saved next to the
 original file. Both configuration validation and reload must succeed; otherwise
 the previous configuration and managed site are restored.
 
-For a custom global config use `sudo ./install.sh --nginx-conf /path/nginx.conf`.
+For a custom global config use `sudo ./install-python.sh --nginx-conf /path/nginx.conf`.
 An existing unmanaged server block for the same domain is reported as a conflict
 rather than overwritten. Host mode updates only PUBLIC_URL, BIND_ADDRESS, PORT
 and DOMAIN in `.env`; panel credentials and stored accounts remain intact.
@@ -277,7 +318,7 @@ and DOMAIN in `.env`; panel credentials and stored accounts remain intact.
 For direct Docker access without host Nginx:
 
 ```sh
-sudo ./install.sh --no-host-nginx --url http://94.29.36.13:8080 --bind 0.0.0.0
+sudo ./install-python.sh --no-host-nginx --url http://94.29.36.13:8080 --bind 0.0.0.0
 ```
 
 HTTP is configured by default; no certificate is issued. If you add HTTPS to the
@@ -297,7 +338,7 @@ not reuse another server’s revisions.
 
 ```sh
 # From this server repository; keep the existing .env and Docker data volume.
-sudo ./install.sh
+sudo ./install-python.sh
 ```
 
 The script preserves `.env` and removes the obsolete Caddy container with
@@ -358,7 +399,7 @@ docker compose stop
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-test.txt
 .venv/bin/python -m pytest -q tests
-bash -n install.sh
+bash -n install-python.sh
 ```
 
 Tests use simulated Pulse replies; a real owner-approved sign-in must still be

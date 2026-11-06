@@ -69,12 +69,12 @@ The Geist fonts are bundled under their OFL licence (`aaid/static/fonts/OFL.txt`
 ### Own domain
 
 `compose.yaml` publishes AA ID on `127.0.0.1:${AAID_PORT:-8091}` (besides `/id/` on
-the main server). For a third-level domain such as `id.yellowteacrew.ru`:
+the main server). For a third-level domain such as `aaid.ytc-srv.org`:
 
 1. Point the domain's DNS at the server (or add it in Cloudflare).
 2. Copy `nginx/aaid-host.conf.example` into the host Nginx, adjust `server_name`,
-   add a certificate (`certbot --nginx -d id.yellowteacrew.ru`) and reload Nginx.
-3. Put `AAID_PUBLIC_URL=https://id.yellowteacrew.ru` in `.env` (secure cookies, and
+   add a certificate (`certbot --nginx -d aaid.ytc-srv.org`) and reload Nginx.
+3. Put `AAID_PUBLIC_URL=https://aaid.ytc-srv.org` in `.env` (secure cookies, and
    the session server advertises this address to the app), then
    `docker compose up -d --build`.
 

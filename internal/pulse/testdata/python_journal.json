@@ -1,0 +1,48 @@
+[
+  {
+    "kind": "acs",
+    "body": "AAAAAFQKGhIGCJCTptcGGg4SDNCa0LDQvNC/0YPRgSgBChoSBgj4mqbXBhoOEgzQmtCw0LzQv9GD0YEoAwoaEgYI4KKm1wYaDhIM0JrQsNC80L/Rg9GBKAKAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": [
+      [],
+      false
+    ]
+  },
+  {
+    "kind": "logs",
+    "body": "AAAAAC0SKxIpCgdqb3VybmFsEgzQk9GA0YPQv9C/0LAyEBoGCIDiz6oGIgYIgOb+iQeAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": null
+  },
+  {
+    "kind": "lessons",
+    "body": "AAAAACwSKhooCgZsZXNzb24SBgiQk6bXBhoGCKi9ptcGIg4SDNCk0LjQt9C40LrQsIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+    "expected": null
+  },
+  {
+    "kind": "status",
+    "body": "AAAAAEsKFToOCgxlbnVtfFByZXNlbnRKA2FubgoUOg0KC2VudW18QWJzZW50SgNib2IKHDoVChNlbnVtfEV4Y3VzZWRBYnNlbmNlSgNjYXSAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": null
+  },
+  {
+    "kind": "acs",
+    "body": "AAAAAACAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": [
+      [],
+      false
+    ]
+  },
+  {
+    "kind": "logs",
+    "body": "AAAAAACAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": null
+  },
+  {
+    "kind": "lessons",
+    "body": "AAAAAACAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": null
+  },
+  {
+    "kind": "status",
+    "body": "AAAAAACAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
+    "expected": null
+  }
+]

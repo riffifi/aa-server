@@ -1,0 +1,39 @@
+# Native Go deployment: install into the HOST nginx, not into the Docker proxy.
+# Point both DNS records at the host. Add TLS certificates with Certbot, e.g.:
+#   certbot --nginx -d aa.ytc-srv.org -d aaid.ytc-srv.org
+# The panel on 127.0.0.1:18092 must remain private.
+server {
+    listen 80;
+    server_name aa.ytc-srv.org;
+    access_log off;
+    client_max_body_size 200000;
+    location / {
+        proxy_pass http://127.0.0.1:18080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header X-AA-Panel "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 90s;
+        proxy_redirect off;
+    }
+}
+
+server {
+    listen 80;
+    server_name aaid.ytc-srv.org;
+    access_log off;
+    client_max_body_size 100000;
+    location / {
+        proxy_pass http://127.0.0.1:18091;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 30s;
+        proxy_redirect off;
+    }
+}

@@ -1,10 +1,10 @@
 # AA ID site on its own third-level domain, for an existing host Nginx.
 # compose.yaml publishes AA ID on 127.0.0.1:${AAID_PORT:-8091}. Point the domain's
-# DNS at this host, add a certificate (e.g. certbot --nginx -d id.yellowteacrew.ru),
-# and set AAID_PUBLIC_URL=https://id.yellowteacrew.ru in .env so cookies are Secure.
+# DNS at this host, add a certificate (e.g. certbot --nginx -d aaid.ytc-srv.org),
+# and set AAID_PUBLIC_URL=https://aaid.ytc-srv.org in .env so cookies are Secure.
 server {
     listen 80;
-    server_name id.yellowteacrew.ru;
+    server_name aaid.ytc-srv.org;
     access_log off;
     client_max_body_size 100000;
     location / {

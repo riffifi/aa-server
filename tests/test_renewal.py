@@ -63,7 +63,7 @@ def qr_fixture():
     data = {'pageId': 'qr-login.ftl', 'qr': 'https://sso.mirea.ru/realms/mirea/qr-code-auth/scan?qrToken=dummy',
         'sessionId': 'session', 'tabId': 'tab', 'action': 'https://sso.mirea.ru/realms/mirea/login-actions/authenticate?execution=dummy', 'execution': 'dummy'}
     page = SimpleNamespace(evaluate=AsyncMock(return_value=data))
-    response = SimpleNamespace(status=200, body=AsyncMock(return_value=json.dumps({'authenticated': True}).encode()))
+    response = SimpleNamespace(status=200, body=AsyncMock(return_value=json.dumps({'authenticated': True}).encode()), dispose=AsyncMock())
     context = SimpleNamespace(request=SimpleNamespace(get=AsyncMock(return_value=response)))
     job = LoginJob('job', 'hash', 'Owner', None, time.time())
     browser = BrowserLogins(None, AsyncMock())

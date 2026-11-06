@@ -6,6 +6,29 @@ import pytest
 from app.browser_assets import BrowserAssets
 
 
+@pytest.mark.asyncio
+async def test_public_asset_outlives_fifteen_minute_renewal(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr('app.browser_assets.time.monotonic', lambda: now[0])
+    cache = BrowserAssets()
+    await cache.route(route_for(headers={'cache-control': 'public, max-age=3600'}))
+    now[0] += 901
+    hit = route_for()
+    await cache.route(hit)
+    hit.fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_large_public_framework_asset_is_shared():
+    cache = BrowserAssets()
+    url = 'https://pulse.mirea.ru/_framework/dotnet.native.wasm'
+    await cache.route(route_for(url=url, kind='fetch', body=b'x' * (12 * 1024 * 1024)))
+    hit = route_for(url=url, kind='fetch')
+    await cache.route(hit)
+    hit.fetch.assert_not_awaited()
+    assert cache.size == 12 * 1024 * 1024
+
+
 def route_for(url='https://pulse.mirea.ru/assets/app.js', kind='script', headers=None, body=b'javascript'):
     response = SimpleNamespace(status=200, headers=headers or {'cache-control': 'public, max-age=600'},
                                body=AsyncMock(return_value=body), dispose=AsyncMock())

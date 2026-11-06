@@ -168,6 +168,8 @@ class BrowserLogins:
     def __init__(self, vault, changed):
         self.vault, self.changed = vault, changed
         self.jobs = {}
+        self._cleanup_handle = None
+        self._retired_tasks = set()
         self.playwright = None
         self.browser = None
         self.start_lock = asyncio.Lock()
@@ -204,8 +206,6 @@ class BrowserLogins:
         # Playwright's default is 30s per action. advance() touches up to 25
         # controls, and during a redirect they detach, so each lookup waited the
         # full 30s and the login sat in "finishing" for many minutes.
-        context.set_default_timeout(5000)
-        context.set_default_navigation_timeout(30000)
         async def guard(route):
             parsed = urlparse(route.request.url)
             # No caller-controlled URL is ever navigated or proxied. Prevent
@@ -216,14 +216,23 @@ class BrowserLogins:
                 await self.assets.route(route)
             else:
                 await route.abort()
-        await context.route('**/*', guard)
+        try:
+            context.set_default_timeout(5000)
+            context.set_default_navigation_timeout(30000)
+            await context.route('**/*', guard)
+        except BaseException:
+            await context.close()
+            raise
         return context
 
     async def capture(self, context, job=None):
         response = await context.request.post(protocol.HOST + protocol.PROFILE_PATH,
             data=protocol.profile_request(), headers={'content-type': 'application/grpc-web+proto', 'x-grpc-web': '1',
               'x-requested-with': 'XMLHttpRequest', 'origin': protocol.HOST}, timeout=15000, max_redirects=0)
-        body = await response.body()
+        try:
+            body = await response.body()
+        finally:
+            await response.dispose()
         if len(body) > MAX_RESPONSE:
             return None
         state, uid = protocol.authentication_state(response.status, response.headers, body)
@@ -344,9 +353,12 @@ class BrowserLogins:
         endpoint = 'https://sso.mirea.ru/realms/mirea/qr-code-auth/check-status?' + urlencode(
             {'sessionId': data['sessionId'], 'tabId': data['tabId']})
         response = await context.request.get(endpoint, timeout=15000, max_redirects=0)
-        if response.status != 200:
-            return
-        body = await response.body()
+        try:
+            if response.status != 200:
+                return
+            body = await response.body()
+        finally:
+            await response.dispose()
         if len(body) > MAX_RESPONSE:
             return
         try:
@@ -377,13 +389,23 @@ class BrowserLogins:
           HTMLFormElement.prototype.submit.call(form);
         }''', {'action': data['action'], 'execution': data['execution']})
 
-    def start(self, label, account_id=None):
+    def _cleanup_jobs(self):
+        self._cleanup_handle = None
         retain = max(900, self.login_ttl + 300)
         for job_id, job in list(self.jobs.items()):
             if time.time() - job.created > retain:
                 if job.task and not job.task.done():
                     job.task.cancel()
+                    self._retired_tasks.add(job.task)
+                    job.task.add_done_callback(self._retired_tasks.discard)
                 del self.jobs[job_id]
+        if self.jobs:
+            self._cleanup_handle = asyncio.get_running_loop().call_later(60, self._cleanup_jobs)
+
+    def start(self, label, account_id=None):
+        if self._cleanup_handle is not None:
+            self._cleanup_handle.cancel()
+        self._cleanup_jobs()
         if sum(j.status in ('waiting', 'login', 'finishing') for j in self.jobs.values()) >= self.max_active:
             raise ValueError('The server is busy with other logins right now; try again in a minute')
         capability = secrets.token_urlsafe(32)
@@ -391,6 +413,8 @@ class BrowserLogins:
         job = LoginJob(secrets.token_urlsafe(18), digest(capability), label, account_id, time.time(), expected_version=existing['session_version'] if existing else None)
         self.jobs[job.id] = job
         job.task = asyncio.create_task(self._login(job))
+        if self._cleanup_handle is None:
+            self._cleanup_handle = asyncio.get_running_loop().call_later(60, self._cleanup_jobs)
         return job, capability
 
     async def _login(self, job):
@@ -506,7 +530,7 @@ class BrowserLogins:
         secret = self.vault.secret(account)
         if not secret.get('storage_state'):
             raise ValueError('У аккаунта нет сохранённого входа браузера')
-        calls, methods, visited, pending = [], set(), [], []
+        calls, methods, visited, pending = [], set(), [], set()
         method_pattern = re.compile(r'/(?:rtu[_a-z]*|rtu_tc)\.[A-Za-z0-9_.]+/[A-Z][A-Za-z0-9]+')
         async def on_response(response):
             try:
@@ -538,11 +562,16 @@ class BrowserLogins:
             except Exception as error:
                 calls.append({'method': response.url, 'error': type(error).__name__})
         context = None
+        page = None
+        def collect(response):
+            task = asyncio.create_task(on_response(response))
+            pending.add(task)
+            task.add_done_callback(pending.discard)
         async with self.renew_slots:
             try:
                 context = await self._context(secret['storage_state'], hosts=('attendance-app.mirea.ru',))
                 page = await context.new_page()
-                page.on('response', lambda response: pending.append(asyncio.ensure_future(on_response(response))))
+                page.on('response', collect)
                 queue = [protocol.HOST + '/services', 'https://attendance-app.mirea.ru/']
                 while queue and len(visited) < 8:
                     url = queue.pop(0)
@@ -561,8 +590,15 @@ class BrowserLogins:
                         if host in ('pulse.mirea.ru', 'attendance-app.mirea.ru') and href not in visited and \
                                 re.search(r'посещ|attend|журнал|visit|lesson|занят|отмет', href + ' ' + text, re.I):
                             queue.append(href)
-                await asyncio.gather(*pending, return_exceptions=True)
+                page.remove_listener('response', collect)
+                await asyncio.gather(*tuple(pending), return_exceptions=True)
             finally:
+                if page is not None:
+                    page.remove_listener('response', collect)
+                tasks = tuple(pending)
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
                 if context:
                     await context.close()
         return {'visited': visited, 'calls': calls, 'methods': sorted(methods)}
@@ -576,10 +612,15 @@ class BrowserLogins:
         return output.getvalue()
 
     async def close(self):
-        tasks = [job.task for job in self.jobs.values() if job.task and not job.task.done()]
+        if self._cleanup_handle is not None:
+            self._cleanup_handle.cancel()
+            self._cleanup_handle = None
+        tasks = list(self._retired_tasks | {job.task for job in self.jobs.values() if job.task and not job.task.done()})
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        self._retired_tasks.clear()
+        self.jobs.clear()
         if self.browser:
             await self.browser.close()
         if self.playwright:

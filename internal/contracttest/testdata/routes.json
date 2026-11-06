@@ -1,0 +1,802 @@
+[
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/.well-known/jwks.json",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "jwks",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/health",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "health",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "PUT",
+    "path": "/v1/admin/users/{user_id}/status",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "set_status",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/v1/auth/logout",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "logout",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/v1/auth/mirea",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "sign_in",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/v1/auth/refresh",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "refresh",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/v1/me",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "me",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/v1/me/sessions",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "sessions",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "DELETE",
+    "path": "/v1/me/sessions/{session_id}",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "revoke",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/v1/site/exchange",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_exchange",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/account",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_account",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "PUT",
+    "path": "/web/account",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_account_change",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/attendance",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_attendance",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/authorize",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_authorize",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/logins",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_login",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/logins/{identifier}",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_login_state",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/logins/{identifier}/claim",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_login_claim",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/logout",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_logout",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/me",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_me",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/pass",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_pass",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/pass/people",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_pass_share",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "DELETE",
+    "path": "/web/pass/people/{kind}/{identifier}",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_pass_unshare",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/pass/requests",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_pass_request",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "POST",
+    "path": "/web/pass/requests/{request_id}/{decision}",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_pass_answer",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/passes",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_passes",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/people",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_people",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "GET",
+    "path": "/web/schedule",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_schedule",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "DELETE",
+    "path": "/web/sessions/{session_id}",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_revoke",
+    "native_go": false
+  },
+  {
+    "service": "aaid",
+    "method": "PUT",
+    "path": "/web/username",
+    "source": "services/aa-id/aaid/main.py",
+    "handler": "site_username",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/",
+    "source": "app/site.py",
+    "handler": "index",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/accounts",
+    "source": "app/main.py",
+    "handler": "accounts",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/accounts/import",
+    "source": "app/main.py",
+    "handler": "import_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/accounts/{identifier}",
+    "source": "app/main.py",
+    "handler": "account_detail",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/accounts/{identifier}/attendance",
+    "source": "app/main.py",
+    "handler": "account_attendance",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/accounts/{identifier}/end-session",
+    "source": "app/main.py",
+    "handler": "end_session",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/api/accounts/{identifier}/group",
+    "source": "app/main.py",
+    "handler": "assign_group",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/api/accounts/{identifier}/label",
+    "source": "app/main.py",
+    "handler": "rename_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/api/accounts/{identifier}/pass",
+    "source": "app/main.py",
+    "handler": "publish_pass",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/api/accounts/{identifier}/pass-allowed",
+    "source": "app/main.py",
+    "handler": "set_pass_permission",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/accounts/{identifier}/pass-request",
+    "source": "app/main.py",
+    "handler": "request_pass",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/accounts/{identifier}/rpc/{method}",
+    "source": "app/main.py",
+    "handler": "rpc",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/debug/pass-testing",
+    "source": "app/main.py",
+    "handler": "unlock_pass_testing",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/events",
+    "source": "app/main.py",
+    "handler": "events",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/groups",
+    "source": "app/main.py",
+    "handler": "groups",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/groups/search",
+    "source": "app/main.py",
+    "handler": "groups_search",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/me/account",
+    "source": "app/site.py",
+    "handler": "my_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/api/me/account",
+    "source": "app/site.py",
+    "handler": "change_my_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/me/attendance",
+    "source": "app/main.py",
+    "handler": "my_attendance",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/me/pass",
+    "source": "app/site.py",
+    "handler": "my_pass",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/me/pass/people",
+    "source": "app/site.py",
+    "handler": "share",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "DELETE",
+    "path": "/api/me/pass/people/{kind}/{identifier}",
+    "source": "app/site.py",
+    "handler": "unshare",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/me/pass/requests",
+    "source": "app/site.py",
+    "handler": "ask_for_pass",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/api/me/pass/requests/{request_id}/{decision}",
+    "source": "app/site.py",
+    "handler": "answer_pass_request",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/me/passes",
+    "source": "app/site.py",
+    "handler": "passes_for_me",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/me/people",
+    "source": "app/site.py",
+    "handler": "find_people",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/api/me/today",
+    "source": "app/site.py",
+    "handler": "my_today",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/auth/aaid",
+    "source": "app/site.py",
+    "handler": "sign_in",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/auth/callback",
+    "source": "app/site.py",
+    "handler": "callback",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/enroll/{identifier}/{token}",
+    "source": "app/main.py",
+    "handler": "owner_login",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/enroll/{identifier}/{token}/claim",
+    "source": "app/main.py",
+    "handler": "owner_claim",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/enroll/{identifier}/{token}/qr",
+    "source": "app/main.py",
+    "handler": "owner_qr",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/enroll/{identifier}/{token}/state",
+    "source": "app/main.py",
+    "handler": "owner_state",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/health",
+    "source": "app/main.py",
+    "handler": "health",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/internal/aaid/link",
+    "source": "app/site.py",
+    "handler": "link",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/login",
+    "source": "app/main.py",
+    "handler": "old_pages",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel",
+    "source": "app/main.py",
+    "handler": "panel_page",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "DELETE",
+    "path": "/panel/api/accounts/{identifier}",
+    "source": "app/main.py",
+    "handler": "delete_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/accounts/{identifier}/attendance",
+    "source": "app/main.py",
+    "handler": "account_attendance",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/panel/api/accounts/{identifier}/end-session",
+    "source": "app/main.py",
+    "handler": "end_session",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/panel/api/accounts/{identifier}/group",
+    "source": "app/main.py",
+    "handler": "assign_group",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/panel/api/accounts/{identifier}/label",
+    "source": "app/main.py",
+    "handler": "rename_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "PUT",
+    "path": "/panel/api/accounts/{identifier}/pass-allowed",
+    "source": "app/main.py",
+    "handler": "set_pass_permission",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/accounts/{identifier}/profile-fields",
+    "source": "app/main.py",
+    "handler": "profile_fields",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/panel/api/accounts/{identifier}/refresh",
+    "source": "app/main.py",
+    "handler": "refresh_account",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/debug/audit",
+    "source": "app/main.py",
+    "handler": "debug_audit",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/debug/logs",
+    "source": "app/main.py",
+    "handler": "debug_logs",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/panel/api/debug/pulse-record",
+    "source": "app/main.py",
+    "handler": "debug_pulse_record",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/debug/requests",
+    "source": "app/main.py",
+    "handler": "debug_requests",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/debug/system",
+    "source": "app/main.py",
+    "handler": "debug_system",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/debug/tables",
+    "source": "app/main.py",
+    "handler": "debug_tables",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/debug/tables/{name}",
+    "source": "app/main.py",
+    "handler": "debug_table",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/panel/api/login",
+    "source": "app/main.py",
+    "handler": "login",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/panel/api/logins",
+    "source": "app/main.py",
+    "handler": "start_login",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "DELETE",
+    "path": "/panel/api/logins/{identifier}",
+    "source": "app/main.py",
+    "handler": "cancel_login",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/logins/{identifier}",
+    "source": "app/main.py",
+    "handler": "login_state",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/logins/{identifier}/qr",
+    "source": "app/main.py",
+    "handler": "login_qr",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/panel/api/logout",
+    "source": "app/main.py",
+    "handler": "logout",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/panel/api/state",
+    "source": "app/main.py",
+    "handler": "panel_state",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/schedule",
+    "source": "app/site.py",
+    "handler": "schedule_page",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/site/logout",
+    "source": "app/site.py",
+    "handler": "sign_out",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/site/mark",
+    "source": "app/site.py",
+    "handler": "mark",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/site/schedule",
+    "source": "app/site.py",
+    "handler": "week_schedule",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/site/schedule/search",
+    "source": "app/site.py",
+    "handler": "schedule_search",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/site/state",
+    "source": "app/site.py",
+    "handler": "state",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "POST",
+    "path": "/site/telegram-link",
+    "source": "app/site.py",
+    "handler": "telegram_link",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/site/today",
+    "source": "app/site.py",
+    "handler": "today",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/tg/connect",
+    "source": "app/site.py",
+    "handler": "telegram_page",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/today",
+    "source": "app/site.py",
+    "handler": "today_page",
+    "native_go": false
+  },
+  {
+    "service": "sessions",
+    "method": "GET",
+    "path": "/u/{identifier}",
+    "source": "app/main.py",
+    "handler": "old_pages",
+    "native_go": false
+  }
+]

@@ -43,24 +43,38 @@ class MireaLogins:
 
     def __init__(self, slots=4, max_active=16, ttl=600):
         self.jobs = {}
+        self._cleanup_handle = None
+        self._retired_tasks = set()
         self.playwright = self.browser = None
         self.start_lock = asyncio.Lock()
         self.slots = asyncio.Semaphore(slots)
         self.max_active, self.ttl = max_active, ttl
         self.script = Path(__file__).with_name('mirea_qr.js').read_text()
 
-    def start(self, digest):
+    def _cleanup_jobs(self):
+        self._cleanup_handle = None
         for job_id, job in list(self.jobs.items()):
             if time.time() - job.created > self.ttl + 300:
                 if job.task and not job.task.done():
                     job.task.cancel()
+                    self._retired_tasks.add(job.task)
+                    job.task.add_done_callback(self._retired_tasks.discard)
                 del self.jobs[job_id]
+        if self.jobs:
+            self._cleanup_handle = asyncio.get_running_loop().call_later(60, self._cleanup_jobs)
+
+    def start(self, digest):
+        if self._cleanup_handle is not None:
+            self._cleanup_handle.cancel()
+        self._cleanup_jobs()
         if sum(j.status in ('waiting', 'login', 'finishing') for j in self.jobs.values()) >= self.max_active:
             raise ValueError('Сейчас много входов одновременно, попробуйте через минуту.')
         token = secrets.token_urlsafe(32)
         job = LoginJob(secrets.token_urlsafe(18), digest(token), time.time())
         self.jobs[job.id] = job
         job.task = asyncio.create_task(self._login(job))
+        if self._cleanup_handle is None:
+            self._cleanup_handle = asyncio.get_running_loop().call_later(60, self._cleanup_jobs)
         return job, token
 
     def qr_png(self, job):
@@ -81,8 +95,6 @@ class MireaLogins:
 
     async def _context(self):
         context = await (await self._browser()).new_context(viewport={'width': 900, 'height': 900})
-        context.set_default_timeout(5000)
-        context.set_default_navigation_timeout(30000)
         async def guard(route):
             host = urlparse(route.request.url).hostname or ''
             # The browser may only talk to MIREA and its DDoS protection.
@@ -90,13 +102,22 @@ class MireaLogins:
                 await route.continue_()
             else:
                 await route.abort()
-        await context.route('**/*', guard)
+        try:
+            context.set_default_timeout(5000)
+            context.set_default_navigation_timeout(30000)
+            await context.route('**/*', guard)
+        except BaseException:
+            await context.close()
+            raise
         return context
 
     async def _call(self, context, path, body):
         response = await context.request.post(pulse.HOST + path, data=body, timeout=15000, max_redirects=0,
             headers={'content-type': 'application/grpc-web+proto', 'x-grpc-web': '1', 'x-requested-with': 'XMLHttpRequest', 'origin': pulse.HOST})
-        data = await response.body()
+        try:
+            data = await response.body()
+        finally:
+            await response.dispose()
         if len(data) > pulse.MAX_RESPONSE:
             raise ValueError('Upstream response exceeds limit')
         return response.status, response.headers, data
@@ -181,10 +202,14 @@ class MireaLogins:
             return
         response = await context.request.get('https://sso.mirea.ru/realms/mirea/qr-code-auth/check-status?' + urlencode(
             {'sessionId': data['sessionId'], 'tabId': data['tabId']}), timeout=15000, max_redirects=0)
-        if response.status != 200:
-            return
         try:
-            result = json.loads(await response.body())
+            if response.status != 200:
+                return
+            body = await response.body()
+        finally:
+            await response.dispose()
+        try:
+            result = json.loads(body)
         except (ValueError, UnicodeError):
             return
         if not isinstance(result, dict):
@@ -261,10 +286,15 @@ class MireaLogins:
                 await context.close()
 
     async def close(self):
-        tasks = [job.task for job in self.jobs.values() if job.task and not job.task.done()]
+        if self._cleanup_handle is not None:
+            self._cleanup_handle.cancel()
+            self._cleanup_handle = None
+        tasks = list(self._retired_tasks | {job.task for job in self.jobs.values() if job.task and not job.task.done()})
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        self._retired_tasks.clear()
+        self.jobs.clear()
         if self.browser:
             await self.browser.close()
         if self.playwright:

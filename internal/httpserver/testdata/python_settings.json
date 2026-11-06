@@ -1,0 +1,261 @@
+{
+  "now": 1793692800,
+  "calls": [
+    {
+      "as": "owner",
+      "method": "GET",
+      "path": "/api/me/account",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "connected": true,
+        "account": true,
+        "label": "Owner",
+        "pass_allowed": false,
+        "group_name": null
+      }
+    },
+    {
+      "as": "guest",
+      "method": "GET",
+      "path": "/api/me/account",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "connected": true,
+        "account": true,
+        "label": "Guest",
+        "pass_allowed": false,
+        "group_name": null
+      }
+    },
+    {
+      "as": "owner",
+      "method": "PUT",
+      "path": "/api/me/account",
+      "body": {
+        "label": "Owner changed",
+        "pass_allowed": true
+      },
+      "status": 200,
+      "expected": {
+        "connected": true,
+        "account": true,
+        "label": "Owner changed",
+        "pass_allowed": true,
+        "group_name": null
+      }
+    },
+    {
+      "as": "owner",
+      "method": "GET",
+      "path": "/api/me/people?q=@guest",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "people": [
+          {
+            "account_id": "$guest",
+            "username": "guest",
+            "label": "Guest",
+            "group_name": null
+          }
+        ]
+      }
+    },
+    {
+      "as": "guest",
+      "method": "POST",
+      "path": "/api/me/pass/requests",
+      "body": {
+        "account_id": "$owner"
+      },
+      "status": 200,
+      "expected": {
+        "passes": [],
+        "requests": [
+          {
+            "account_id": "$owner",
+            "username": "owner",
+            "label": "Owner changed",
+            "group_name": null,
+            "id": "$request1",
+            "requested_at": 1793692800.0
+          }
+        ]
+      }
+    },
+    {
+      "as": "guest",
+      "method": "POST",
+      "path": "/api/me/pass/requests",
+      "body": {
+        "account_id": "$owner"
+      },
+      "status": 200,
+      "expected": {
+        "passes": [],
+        "requests": [
+          {
+            "account_id": "$owner",
+            "username": "owner",
+            "label": "Owner changed",
+            "group_name": null,
+            "id": "$request1",
+            "requested_at": 1793692800.0
+          }
+        ]
+      }
+    },
+    {
+      "as": "owner",
+      "method": "GET",
+      "path": "/api/me/pass",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "pass_allowed": true,
+        "people": [],
+        "requests": [
+          {
+            "account_id": "$guest",
+            "username": "guest",
+            "label": "Guest",
+            "group_name": null,
+            "id": "$request1",
+            "requested_at": 1793692800.0
+          }
+        ]
+      }
+    },
+    {
+      "as": "other",
+      "method": "POST",
+      "path": "/api/me/pass/requests/$request1/allow",
+      "body": null,
+      "status": 404,
+      "expected": {
+        "detail": "Такого запроса нет"
+      }
+    },
+    {
+      "as": "owner",
+      "method": "POST",
+      "path": "/api/me/pass/requests/$request1/allow",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "pass_allowed": true,
+        "people": [
+          {
+            "account_id": "$guest",
+            "username": "guest",
+            "label": "Guest",
+            "group_name": null,
+            "kind": "aaid",
+            "id": "$guest"
+          }
+        ],
+        "requests": []
+      }
+    },
+    {
+      "as": "guest",
+      "method": "GET",
+      "path": "/api/me/passes",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "passes": [
+          {
+            "account_id": "$owner",
+            "username": "owner",
+            "label": "Owner changed",
+            "group_name": null,
+            "pass_allowed": true
+          }
+        ],
+        "requests": []
+      }
+    },
+    {
+      "as": "owner",
+      "method": "DELETE",
+      "path": "/api/me/pass/people/aaid/$guest",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "pass_allowed": true,
+        "people": [],
+        "requests": []
+      }
+    },
+    {
+      "as": "guest",
+      "method": "GET",
+      "path": "/api/me/passes",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "passes": [],
+        "requests": []
+      }
+    },
+    {
+      "as": "guest",
+      "method": "POST",
+      "path": "/api/me/pass/requests",
+      "body": {
+        "account_id": "$owner"
+      },
+      "status": 200,
+      "expected": {
+        "passes": [],
+        "requests": [
+          {
+            "account_id": "$owner",
+            "username": "owner",
+            "label": "Owner changed",
+            "group_name": null,
+            "id": "$request2",
+            "requested_at": 1793692800.0
+          }
+        ]
+      }
+    },
+    {
+      "as": "owner",
+      "method": "POST",
+      "path": "/api/me/pass/requests/$request2/deny",
+      "body": null,
+      "status": 200,
+      "expected": {
+        "pass_allowed": true,
+        "people": [],
+        "requests": []
+      }
+    },
+    {
+      "as": "guest",
+      "method": "POST",
+      "path": "/api/me/pass/requests",
+      "body": {
+        "account_id": "$owner"
+      },
+      "status": 200,
+      "expected": {
+        "passes": [],
+        "requests": [
+          {
+            "account_id": "$owner",
+            "username": "owner",
+            "label": "Owner changed",
+            "group_name": null,
+            "id": "$request3",
+            "requested_at": 1793692800.0
+          }
+        ]
+      }
+    }
+  ]
+}

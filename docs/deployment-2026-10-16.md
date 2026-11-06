@@ -10,7 +10,7 @@
   `install.sh` differed before synchronization; that difference is in the backup.
 - Updated sessions container built and deployed. Sessions and Nginx health checks
   pass. Existing network settings and admin credentials are unchanged.
-- Public HTTPS checks at `https://aa.yellowteacrew.ru`: health OK, all 12 accounts
+- Public HTTPS checks at the deployment's then-configured host: health OK, all 12 accounts
   preserved, anonymous pass numbers omitted, unauthorized pass-token RPC rejected
   with HTTP 403. The separate daily-admin testing capability was also verified
   without printing its password or pass numbers.

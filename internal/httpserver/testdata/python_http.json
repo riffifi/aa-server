@@ -1,0 +1,492 @@
+[
+  {
+    "method": "GET",
+    "path": "/health",
+    "body": "",
+    "status": 200,
+    "expected": {
+      "ok": true,
+      "protocol": 2,
+      "sync": "automatic",
+      "aaid": {
+        "required": false
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/groups",
+    "body": "",
+    "status": 200,
+    "expected": {
+      "groups": []
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts",
+    "body": "",
+    "status": 200,
+    "expected": {
+      "accounts": [],
+      "passes": [],
+      "cursor": 0,
+      "protocol": 2,
+      "sync": "automatic",
+      "group_filter": null,
+      "pass_agreements_required": true,
+      "pass_access_expires_at": 1793693100,
+      "pass_testing_expires_at": null
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/events?wait=0",
+    "body": "",
+    "status": 200,
+    "expected": {
+      "events": [],
+      "cursor": 0
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts/missing",
+    "body": "",
+    "status": 404,
+    "expected": {
+      "detail": "Account not found"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts?group_id=0",
+    "body": "",
+    "status": 400,
+    "expected": {
+      "detail": "Invalid group"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts?group_id=-1",
+    "body": "",
+    "status": 400,
+    "expected": {
+      "detail": "Invalid group"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts?group_id=abc",
+    "body": "",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "int_parsing",
+          "loc": [
+            "query",
+            "group_id"
+          ],
+          "msg": "Input should be a valid integer, unable to parse string as an integer",
+          "input": "abc"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts?group_id=1.0",
+    "body": "",
+    "status": 200,
+    "expected": {
+      "accounts": [],
+      "passes": [],
+      "cursor": 0,
+      "protocol": 2,
+      "sync": "automatic",
+      "group_filter": 1,
+      "pass_agreements_required": true,
+      "pass_access_expires_at": 1793693100,
+      "pass_testing_expires_at": null
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts?group_id=9223372036854775808",
+    "body": "",
+    "status": 400,
+    "expected": {
+      "detail": "Invalid group"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/events?after=-1&wait=0",
+    "body": "",
+    "status": 400,
+    "expected": {
+      "detail": "Invalid event cursor"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/events?after=abc&wait=0",
+    "body": "",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "int_parsing",
+          "loc": [
+            "query",
+            "after"
+          ],
+          "msg": "Input should be a valid integer, unable to parse string as an integer",
+          "input": "abc"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/events?wait=26",
+    "body": "",
+    "status": 400,
+    "expected": {
+      "detail": "Invalid event cursor"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/events?wait=-1",
+    "body": "",
+    "status": 400,
+    "expected": {
+      "detail": "Invalid event cursor"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/events?wait=abc",
+    "body": "",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "int_parsing",
+          "loc": [
+            "query",
+            "wait"
+          ],
+          "msg": "Input should be a valid integer, unable to parse string as an integer",
+          "input": "abc"
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/panel/api/login",
+    "body": "",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": [
+            "body"
+          ],
+          "msg": "Field required",
+          "input": null
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/panel/api/login",
+    "body": "{bad",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "json_invalid",
+          "loc": [
+            "body",
+            1
+          ],
+          "msg": "JSON decode error",
+          "input": {},
+          "ctx": {
+            "error": "Expecting property name enclosed in double quotes"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/panel/api/login",
+    "body": "null",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": [
+            "body"
+          ],
+          "msg": "Field required",
+          "input": null
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/panel/api/login",
+    "body": "{}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": [
+            "body",
+            "password"
+          ],
+          "msg": "Field required",
+          "input": {}
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/panel/api/login",
+    "body": "{\"password\":1}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "string_type",
+          "loc": [
+            "body",
+            "password"
+          ],
+          "msg": "Input should be a valid string",
+          "input": 1
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/panel/api/login",
+    "body": "{\"password\":\"\"}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "string_too_short",
+          "loc": [
+            "body",
+            "password"
+          ],
+          "msg": "String should have at least 1 character",
+          "input": "",
+          "ctx": {
+            "min_length": 1
+          }
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/label",
+    "body": "{}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": [
+            "body",
+            "label"
+          ],
+          "msg": "Field required",
+          "input": {}
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/label",
+    "body": "{\"label\":1}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "string_type",
+          "loc": [
+            "body",
+            "label"
+          ],
+          "msg": "Input should be a valid string",
+          "input": 1
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/label",
+    "body": "{\"label\":\"\"}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "string_too_short",
+          "loc": [
+            "body",
+            "label"
+          ],
+          "msg": "String should have at least 1 character",
+          "input": "",
+          "ctx": {
+            "min_length": 1
+          }
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/label",
+    "body": "{\"label\":\"New\"}",
+    "status": 401,
+    "expected": {
+      "detail": "Sign in to this account first"
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/label",
+    "body": "{\"label\":\"New\",\"expected_version\":-1}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "greater_than_equal",
+          "loc": [
+            "body",
+            "expected_version"
+          ],
+          "msg": "Input should be greater than or equal to 0",
+          "input": -1,
+          "ctx": {
+            "ge": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/label",
+    "body": "{\"label\":\"New\",\"expected_version\":\"bad\"}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "int_parsing",
+          "loc": [
+            "body",
+            "expected_version"
+          ],
+          "msg": "Input should be a valid integer, unable to parse string as an integer",
+          "input": "bad"
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/pass-allowed",
+    "body": "{}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": [
+            "body",
+            "allowed"
+          ],
+          "msg": "Field required",
+          "input": {}
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/pass-allowed",
+    "body": "{\"allowed\":null}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "bool_type",
+          "loc": [
+            "body",
+            "allowed"
+          ],
+          "msg": "Input should be a valid boolean",
+          "input": null
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/pass-allowed",
+    "body": "{\"allowed\":\"bad\"}",
+    "status": 422,
+    "expected": {
+      "detail": [
+        {
+          "type": "bool_parsing",
+          "loc": [
+            "body",
+            "allowed"
+          ],
+          "msg": "Input should be a valid boolean, unable to interpret input",
+          "input": "bad"
+        }
+      ]
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/pass-allowed",
+    "body": "{\"allowed\":true}",
+    "status": 401,
+    "expected": {
+      "detail": "Sign in to this account first"
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/accounts/missing/pass-allowed",
+    "body": "{\"allowed\":\"yes\"}",
+    "status": 401,
+    "expected": {
+      "detail": "Sign in to this account first"
+    }
+  }
+]

@@ -37,7 +37,7 @@ class NginxInstallTests(unittest.TestCase):
 
             with patch.object(nginx.subprocess, 'run', side_effect=run):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    nginx.configure('aa.yellowteacrew.ru', 8080)
+                    nginx.configure('aa.ytc-srv.org', 8080)
             self.assertEqual(config.read_bytes(), original)
             self.assertFalse((config.parent / 'antiattendance-managed/sessions.conf').exists())
             self.assertFalse(any('reload' in call for call in calls))
@@ -51,22 +51,22 @@ class NginxInstallTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, f'# configuration file {config}:\n' + config.read_text())
 
             with patch.object(nginx.subprocess, 'run', side_effect=run):
-                nginx.configure('aa.yellowteacrew.ru', 18088)
+                nginx.configure('aa.ytc-srv.org', 18088)
                 first = config.read_text()
-                nginx.configure('aa.yellowteacrew.ru', 18088)
+                nginx.configure('aa.ytc-srv.org', 18088)
             self.assertEqual(first, config.read_text())
             self.assertIn('server_name other.example;', first)
             site = (config.parent / 'antiattendance-managed/sessions.conf').read_text()
-            self.assertIn('server_name aa.yellowteacrew.ru;', site)
+            self.assertIn('server_name aa.ytc-srv.org;', site)
             self.assertIn('127.0.0.1:18088', site)
 
     def test_existing_domain_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             config = pathlib.Path(directory) / 'nginx.conf'
-            config.write_text('events {}\nhttp {server {server_name aa.yellowteacrew.ru;}}')
+            config.write_text('events {}\nhttp {server {server_name aa.ytc-srv.org;}}')
             with patch.object(nginx.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, f'# configuration file {config}:\n' + config.read_text())):
                 with self.assertRaises(ValueError):
-                    nginx.configure('aa.yellowteacrew.ru', 8080)
+                    nginx.configure('aa.ytc-srv.org', 8080)
 
 
 if __name__ == '__main__':

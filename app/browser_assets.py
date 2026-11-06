@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 
 class BrowserAssets:
-    def __init__(self, budget=32 * 1024 * 1024, max_item=4 * 1024 * 1024):
+    def __init__(self, budget=64 * 1024 * 1024, max_item=32 * 1024 * 1024):
         self.budget, self.max_item = budget, max_item
         self.entries = OrderedDict()
         self.size = 0
@@ -21,9 +21,11 @@ class BrowserAssets:
         request = route.request
         url = urlparse(request.url)
         # Keep authenticated documents, API responses and SSO outside this cache.
-        if (request.method != 'GET' or url.hostname != 'pulse.mirea.ru'
-                or request.resource_type not in {'script', 'stylesheet', 'font'}
-                or not url.path.lower().endswith(('.js', '.css', '.woff', '.woff2', '.ttf'))):
+        static = (request.resource_type in {'script', 'stylesheet', 'font'}
+                  and url.path.lower().endswith(('.js', '.css', '.woff', '.woff2', '.ttf')))
+        framework = (url.path.startswith('/_framework/')
+                     and url.path.lower().endswith(('.wasm', '.dll', '.dat', '.bin', '.json')))
+        if request.method != 'GET' or url.hostname != 'pulse.mirea.ru' or not (static or framework):
             await route.continue_()
             return
         key = request.url
@@ -53,7 +55,7 @@ class BrowserAssets:
                 body = await response.body()
                 self.downloaded_bytes += len(body)
                 try:
-                    ttl = min(max(0, int(age[1]) - int(headers.get('age', '0'))), 900)
+                    ttl = min(max(0, int(age[1]) - int(headers.get('age', '0'))), 86400)
                 except ValueError:
                     ttl = 0
                 if ttl > 0 and len(body) <= min(self.max_item, self.budget):

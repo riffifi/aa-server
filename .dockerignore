@@ -1,4 +1,7 @@
 .env
+.env.go
+.go-data
+signing.key
 *.sqlite*
 master.key
 .venv
@@ -8,3 +11,11 @@ tests
 README.md
 
 .git
+.test-deps
+.go-cache
+.go-mod-cache
+bin
+.postgres-test
+.playwright-driver
+.playwright-browsers
+*.aa-snapshot.jsonl
