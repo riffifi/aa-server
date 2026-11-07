@@ -76,6 +76,17 @@ restore anonymous API access.
 
 The primary entrypoint is `bash install.sh`, with a first-run wizard and
 `update`/`check` commands. `install-go.sh` remains a compatible alias.
+For an existing Python Docker deployment, `sudo bash install.sh update`
+detects the legacy `.env` when `.env.go` is missing and offers a managed
+snapshot/import. An explicit alternative is
+`sudo bash install.sh migrate --from-python /home/aa/aa-server`.
+It creates `.env.go`, preserves both original keys and the database panel
+password, and uses the **new** loopback ports 18080/18091/18092. It never
+inherits legacy ports. Update existing host nginx upstreams manually after
+successful import; otherwise public requests still reach the stopped Python
+deployment. See [installer.md](installer.md#перенос-старых-данных) for the
+stop confirmation, backups, failure recovery and retry limitations.
+
 See [installer.md](installer.md) for dependency checks, nginx/TLS, progress
 and logging levels. The legacy Python entrypoint is `install-python.sh`.
 

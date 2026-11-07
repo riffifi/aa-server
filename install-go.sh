@@ -16,14 +16,16 @@ site_port=18080 aaid_port=18091 panel_port=18092
 configure_nginx=0 tls=0 tls_email= nginx_config=
 interactive=auto start=1 build=1 pull=1 install_deps=1 deps_explicit=0
 show_password=0
+python_dir=$PWD python_project=antiattendance-sessions python_requested=0 stop_python=0
+original_args=("$@")
 declare -A updates=()
 usage() {
   cat <<'HELP'
 AntiAttendance · установка и обновление Go / PostgreSQL
 
-  bash install.sh [install|update|check] [параметры]
+  bash install.sh [install|update|check|migrate] [параметры]
 
-Без команды: новая установка или обновление по наличию .env.go.
+Без команды: установка/обновление Go; при старой .env — перенос Python.
 При первом запуске в терминале открывается мастер настройки.
 
 Адреса и порты:
@@ -43,6 +45,10 @@ Nginx и HTTPS:
   --no-tls              Не запускать Certbot (например, внешний TLS-прокси)
 
 Режим работы:
+  migrate               Перенести старую Python-установку в Go
+  --from-python DIR     Каталог старой .env; включает перенос Python
+  --python-project NAME Исходный Compose-проект (antiattendance-sessions)
+  --stop-python         Разрешить короткую остановку Python для снимка/переноса
   --interactive         Запросить настройки в консоли
   --non-interactive     Без вопросов; для автоматизации
   --no-start            Подготовить настройки, не запускать сервер/nginx
@@ -102,18 +108,26 @@ while (($#)); do
     --verbose|-v|--debug) ui_set_log_level debug; shift ;;
     --log-file) ui_value "$@"; UI_LOG_FILE=$2; shift 2 ;;
     --show-password) show_password=1; shift ;;
+    --from-python) ui_value "$@"; python_dir=$2; python_requested=1; shift 2 ;;
+    --python-project) ui_value "$@"; python_project=$2; python_requested=1; shift 2 ;;
+    --stop-python) stop_python=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) ui_die "Неизвестный параметр: $1. Справка: bash install.sh --help" ;;
   esac
 done
-[[ $mode == auto || $mode == install || $mode == update || $mode == check ]] || ui_die "Команда должна быть install, update или check."
+[[ $mode == auto || $mode == install || $mode == update || $mode == check || $mode == migrate ]] || ui_die "Команда должна быть install, update, check или migrate."
 [[ ! -L $env_file ]] || ui_die "Файл настроек не должен быть символической ссылкой."
 fresh=1
 if [[ -e $env_file ]]; then
   [[ -f $env_file ]] || ui_die "Настройки должны быть обычным файлом: $env_file"
   fresh=0
 fi
-[[ $mode != update || $fresh == 0 ]] || ui_die "Нет $env_file. Для новой установки используйте install."
+pending_python=
+if [[ -f $env_file ]]; then pending_python=$(installer_env_value "$env_file" GO_PYTHON_MIGRATION_PENDING); fi
+if ((python_requested)) || [[ $mode == migrate ]] || { [[ $mode == auto || $mode == update ]] && { [[ $pending_python == 1 ]] || { ((fresh)) && [[ -f $python_dir/.env ]]; }; }; }; then
+  exec bash "$PWD/upgrade-python.sh" "${original_args[@]}"
+fi
+[[ $mode != update || $fresh == 0 ]] || ui_die "Нет $env_file. Для новой установки используйте install; для Python используйте migrate --from-python КАТАЛОГ."
 [[ $mode != check || $fresh == 0 ]] || ui_die "Нет $env_file. Сначала выполните install --no-start."
 if [[ $mode == auto ]]; then if ((fresh)); then mode=install; else mode=update; fi; fi
 env_value() {
