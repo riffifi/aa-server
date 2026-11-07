@@ -29,6 +29,9 @@ class InstallerTests(unittest.TestCase):
         self.bin.mkdir()
         self.executable('docker', '''#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$MOCK_CALLS"
+if [[ " $* " == *" build initialize "* ]]; then
+  printf 'build-metadata:%s:%s\\n' "${AA_BUILD_VERSION:-}" "${AA_BUILD_COMMIT:-}" >> "$MOCK_CALLS"
+fi
 if [[ " $* " == *" build initialize "* && ${MOCK_FAIL_BUILD:-0} == 1 ]]; then
   printf '=> registry unavailable\\n' >&2
   exit 17
@@ -67,11 +70,12 @@ printf 'mock Docker ready\\n'
         settings = (self.root / '.env.go').read_text()
         self.assertIn('GO_PORT=19180', settings)
         self.assertIn('GO_INSTALL_PROJECT=test-project', settings)
-        self.assertIn('[ГОТОВО]', result.stdout)
+        self.assertIn('[OK]', result.stdout)
         self.assertIn('100%', result.stdout)
-        self.assertIn('всего 00:', result.stdout)
+        self.assertIn('total 00:', result.stdout)
         self.assertNotIn('\x1b', result.stdout)
         self.assertNotIn('=>', result.stdout)
+        self.assertNotRegex(result.stdout + result.stderr, '[А-Яа-яЁё]')
         self.assertNotIn('0123456789abcdef0123456789abcdef0123456789abcdef', result.stdout)
         calls = (self.root / 'calls').read_text()
         self.assertNotIn(' up ', calls)
@@ -107,7 +111,7 @@ printf 'mock Docker ready\\n'
             with self.subTest(args=args):
                 result = self.run_installer(*args)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Ошибка:', result.stderr)
+                self.assertIn('Error:', result.stderr)
                 self.assertFalse((self.root / '.env.go').exists())
 
     def test_failed_build_stops_sequence_retains_settings_and_suggests_solution(self):
@@ -116,10 +120,10 @@ printf 'mock Docker ready\\n'
         result = self.run_installer('update', '--non-interactive', '--no-install-deps',
                                     '--plain', '--skip-pull')
         self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
-        self.assertIn('[ОШИБКА]', result.stderr)
-        self.assertIn('Решение:', result.stderr)
+        self.assertIn('[ERROR]', result.stderr)
+        self.assertIn('Solution:', result.stderr)
         self.assertNotIn('=>', result.stderr)
-        self.assertNotIn('[ЗАВЕРШЕНО]', result.stdout)
+        self.assertNotIn('[DONE]', result.stdout)
         self.assertNotIn(' up ', (self.root / 'calls').read_text())
         self.assertTrue((self.root / '.env.go').exists())
 
@@ -134,19 +138,27 @@ printf 'mock Docker ready\\n'
         self.assertIn('up -d --no-build --wait --wait-timeout 321', calls)
         self.assertNotIn('build initialize', calls)
 
+    def test_release_metadata_is_passed_to_image_build(self):
+        self.prepare()
+        self.env['AA_BUILD_VERSION'] = 'v1.2.3-test'
+        self.env['AA_BUILD_COMMIT'] = '1234567890abcdef1234567890abcdef12345678'
+        result = self.run_installer('update', '--non-interactive', '--no-install-deps', '--plain', '--skip-pull')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('build-metadata:v1.2.3-test:' + self.env['AA_BUILD_COMMIT'], (self.root / 'calls').read_text())
+
     def test_first_run_wizard_uses_console_answers(self):
-        answers = 'https://portal.ytc-srv.org\n\n19180\n19191\n19192\nнет\nда\n'
+        answers = 'https://portal.ytc-srv.org\n\n19180\n19191\n19192\nno\nyes\n'
         result = self.run_installer('--interactive', '--no-start', '--no-install-deps',
                                     '--no-host-nginx', '--plain', input=answers)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('мастер настройки', result.stdout)
+        self.assertIn('setup wizard', result.stdout)
         settings = (self.root / '.env.go').read_text()
         self.assertIn('GO_PUBLIC_URL=https://portal.ytc-srv.org', settings)
         self.assertIn('GO_PORT=19180', settings)
         self.assertIn('GO_INSTALL_NGINX=0', settings)
 
     def test_wizard_cancel_changes_nothing(self):
-        answers = '\n\n\n\n\nнет\nнет\n'
+        answers = '\n\n\n\n\nno\nno\n'
         result = self.run_installer('--interactive', '--no-start', '--no-install-deps',
                                     '--no-host-nginx', '--plain', input=answers)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -159,7 +171,7 @@ source scripts/installer-ui.sh
 UI_LOG_FILE=animation-test.log
 ui_init 1 demo
 UI_ANIMATE=1
-ui_run 'Тест загрузки' sleep 0.3
+ui_run 'Loading test' sleep 0.3
 ui_finish done
 '''
         result = subprocess.run([BASH, '-c', script], cwd=self.root, env=self.env,
@@ -193,17 +205,17 @@ installer_dependencies
                 result = self.run_installer('check', '--non-interactive', '--plain',
                                             '--log-level=' + level, '--log-file', log.name)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn('[ЗАВЕРШЕНО]', result.stdout)
+                self.assertIn('[DONE]', result.stdout)
                 self.assertTrue(log.exists())
-                self.assertIn('[INFO] Этап', log.read_text(encoding='utf-8'))
+                self.assertIn('[INFO] Stage', log.read_text(encoding='utf-8'))
                 if level in ('error', 'warn'):
-                    self.assertNotIn('[ГОТОВО]', result.stdout)
+                    self.assertNotIn('[OK]', result.stdout)
                     self.assertNotIn('mock Docker ready', result.stdout)
                 elif level == 'debug':
-                    self.assertIn('[DEBUG] Исполнитель:', result.stdout)
+                    self.assertIn('[DEBUG] Command:', result.stdout)
                     self.assertIn('mock Docker ready', result.stdout)
                 else:
-                    self.assertIn('[ГОТОВО]', result.stdout)
+                    self.assertIn('[OK]', result.stdout)
                 self.assertNotIn('0123456789abcdef0123456789abcdef0123456789abcdef', result.stdout)
                 self.assertNotIn('\x1b', result.stdout)
 
@@ -231,7 +243,7 @@ installer_dependencies
                                 cwd=self.root, env=self.env, capture_output=True,
                                 text=True, encoding='utf-8', timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('атомарный импорт', result.stdout)
+        self.assertIn('atomically importing', result.stdout)
         self.assertIn('100%', result.stdout)
         calls = (self.root / 'calls').read_text()
         self.assertIn('--project-name migration-project', calls)

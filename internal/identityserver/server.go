@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"aa-server/internal/browser"
+	"aa-server/internal/buildinfo"
 	"aa-server/internal/cryptocompat"
 	"aa-server/internal/httpserver"
 	"aa-server/internal/postgres"
@@ -333,6 +334,9 @@ func NativeRoutes() []httpserver.Route {
 	return server.registered
 }
 func (s *Server) routes() {
+	s.handle("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		write(w, http.StatusOK, buildinfo.Current("aa-id"))
+	})
 	s.handle("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, map[string]any{"ok": true, "service": "aa-id"})
 	})

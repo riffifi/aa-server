@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"aa-server/internal/browser"
+	"aa-server/internal/buildinfo"
 	"aa-server/internal/cryptocompat"
 	"aa-server/internal/postgres"
 	"aa-server/internal/pulse"
@@ -373,7 +374,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
-	if !scoped(r) && strings.HasPrefix(r.URL.Path, "/api/") && s.config.Verify != nil {
+	if !scoped(r) && strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/version" && s.config.Verify != nil {
 		browserAllowed := r.URL.Path == "/api/groups/search"
 		if r.Header.Get("Authorization") == "" && strings.HasPrefix(r.URL.Path, "/api/accounts/") {
 			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/accounts/"), "/")
@@ -462,6 +463,9 @@ func group(w http.ResponseWriter, r *http.Request) (*int64, bool) {
 	return &value, true
 }
 func (s *Server) routes() {
+	s.handle("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		write(w, http.StatusOK, buildinfo.Current("sessions"))
+	})
 	s.handle("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		aaid := map[string]any{"required": true, "url": s.config.AAIDURL}
 		if s.config.Verify != nil {

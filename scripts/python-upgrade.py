@@ -23,12 +23,12 @@ class LegacyDeployment:
 
     def discover(self):
         if self.project == self.target_project:
-            raise ValueError('Python и Go должны иметь разные Compose-проекты.')
+            raise ValueError('Python and Go must use different Compose projects.')
         existing = self.command('ps', '-a', '--filter',
                                 'label=com.docker.compose.project=' + self.target_project,
                                 '--format', '{{.ID}}')
         if existing:
-            raise ValueError('Целевой Go-проект уже содержит контейнеры. Не удаляйте его данные: выберите новый --project и --env-file либо продолжите ранее начатый перенос по журналу.')
+            raise ValueError('The target Go project already contains containers. Preserve its data: choose a new --project and --env-file, or recover the previous migration using its log.')
         containers = {}
         for service in ('sessions', 'aaid', 'nginx'):
             ids = self.command('ps', '-a', '--filter',
@@ -36,11 +36,11 @@ class LegacyDeployment:
                                '--filter', 'label=com.docker.compose.service=' + service,
                                '--format', '{{.ID}}').splitlines()
             if len(ids) != 1:
-                raise ValueError(f'Нужен один Python-контейнер {service}, найдено {len(ids)}. Решение: уточните --python-project.')
+                raise ValueError(f'Expected one Python container for {service}, found {len(ids)}. Solution: check --python-project.')
             identifier = ids[0]
             command = self.inspect(identifier, '.Config.Cmd')
             if service != 'nginx' and 'uvicorn' not in json.dumps(command):
-                raise ValueError(f'{service} не похож на исходную Python-версию; автоматическая остановка запрещена.')
+                raise ValueError(f'{service} does not appear to be the source Python version; automatic stop refused.')
             containers[service] = {'id': identifier, 'running': bool(self.inspect(identifier, '.State.Running'))}
         nginx_ports = self.inspect(containers['nginx']['id'], '.HostConfig.PortBindings') or {}
         identity_ports = self.inspect(containers['aaid']['id'], '.HostConfig.PortBindings') or {}
@@ -48,17 +48,17 @@ class LegacyDeployment:
         def local_port(bindings, key):
             values = bindings.get(key) or []
             if len(values) != 1 or values[0].get('HostIp') != '127.0.0.1':
-                raise ValueError(f'{key}: ожидается один опубликованный порт на 127.0.0.1. Для другой схемы используйте ручную миграцию.')
+                raise ValueError(f'{key}: expected one published port on 127.0.0.1. Use manual migration for other configurations.')
             port = int(values[0]['HostPort'])
             if not 1 <= port <= 65535:
-                raise ValueError('Некорректный опубликованный порт Python.')
+                raise ValueError('Invalid published Python port.')
             return port
 
         ports = {'site': local_port(nginx_ports, '80/tcp'),
                  'panel': local_port(nginx_ports, '8081/tcp'),
                  'aaid': local_port(identity_ports, '8090/tcp')}
         if len(set(ports.values())) != 3:
-            raise ValueError('Порты исходной установки должны различаться.')
+            raise ValueError('Source deployment ports must be different.')
         return {'legacy_project': self.project, 'target_project': self.target_project,
                 'containers': containers, 'ports': ports}
 
@@ -67,7 +67,7 @@ class LegacyDeployment:
         for service in ('sessions', 'aaid'):
             identifier = manifest['containers'][service]['id']
             if self.inspect(identifier, '.State.Running'):
-                raise ValueError('Перед резервным копированием оба Python-сервиса должны быть остановлены.')
+                raise ValueError('Both Python services must be stopped before backup.')
             folder = destination / service
             folder.mkdir(mode=0o700)
             self.command('cp', identifier + ':/data/.', str(folder.resolve()))
@@ -76,7 +76,7 @@ class LegacyDeployment:
                     destination / 'aaid/aaid.sqlite3',
                     destination / 'aaid/signing.key']
         if any(not file.is_file() or file.is_symlink() for file in required):
-            raise ValueError('В /data отсутствуют обычные файлы БД/ключей. Исходные контейнеры будут восстановлены; проверьте backup-каталог.')
+            raise ValueError('Regular database/key files are missing from /data. Source containers will be restored; check the backup directory.')
 
 
 def main():
@@ -101,13 +101,13 @@ def main():
             descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 json.dump(data, stream)
-            print('Найдена Python-установка; порты и контейнеры проверены.')
+            print('Python deployment found; ports and containers checked.')
         elif args.action == 'mark-pending':
             if not args.env_file or args.pending is None:
                 parser.error('--env-file and --pending are required')
             settings = Path(args.env_file)
             if settings.is_symlink():
-                raise ValueError('Файл настроек не должен быть symlink.')
+                raise ValueError('The settings file must not be a symlink.')
             lines = [line for line in settings.read_text(encoding='utf-8').splitlines()
                      if not line.startswith('GO_PYTHON_MIGRATION_PENDING=')]
             lines.append('GO_PYTHON_MIGRATION_PENDING=' + args.pending)
@@ -136,7 +136,7 @@ def main():
                     if not args.running_only or value['running']:
                         print(value['id'])
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-        print(f'Ошибка переноса Python: {error}', file=sys.stderr)
+        print(f'Python migration error: {error}', file=sys.stderr)
         return 1
     return 0
 

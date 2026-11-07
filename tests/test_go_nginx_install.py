@@ -62,7 +62,7 @@ class GoNginxTests(unittest.TestCase):
         self.config.write_text('events {}\nhttp { server { server_name aa.ytc-srv.org; } }\n')
         before = self.config.read_bytes()
         with patch.object(nginx.subprocess, 'run', side_effect=self.command):
-            with self.assertRaisesRegex(ValueError, 'Решение:'):
+            with self.assertRaisesRegex(ValueError, 'Solution:'):
                 self.configure()
         self.assertEqual(self.config.read_bytes(), before)
         self.assertFalse(self.managed.exists())

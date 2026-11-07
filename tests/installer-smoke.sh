@@ -30,7 +30,7 @@ grep 'PASSWORD=' .env.go > updated-passwords
 cmp initial-passwords updated-passwords
 grep -q 'GO_PORT=19180' .env.go
 bash install.sh check --non-interactive --log-level=warn --plain > check.txt
-if grep -q '\[ГОТОВО\]' check.txt; then exit 1; fi
+if grep -q '\[OK\]' check.txt; then exit 1; fi
 bash install.sh check --non-interactive --debug --plain > debug.txt
 grep -q '\[DEBUG\]' debug.txt
 (
@@ -55,5 +55,5 @@ sleep 0.3
 kill -TERM "$cancel_pid"
 if wait "$cancel_pid"; then exit 1; else cancel_status=$?; fi
 [[ $cancel_status == 143 ]]
-grep -q '\[ОТМЕНЕНО\]' cancel.txt
-printf '\n[SMOKE] Linux: подготовка, обновление, анимация, уровни логирования и сохранение паролей проверены.\n'
+grep -q '\[CANCELLED\]' cancel.txt
+printf '\n[SMOKE] Linux: preparation, updates, animation, logging levels and password preservation checked.\n'

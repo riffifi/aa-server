@@ -36,14 +36,14 @@ class PreflightTests(unittest.TestCase):
             checks.check_host(self.args(require_dns=require_dns))
 
     def test_foreign_process_on_required_port_has_solution(self):
-        with self.assertRaisesRegex(ValueError, 'занят другим процессом.*Решение:'):
+        with self.assertRaisesRegex(ValueError, 'used by another process.*Solution:'):
             self.run_checks(busy=True)
 
     def test_update_accepts_ports_owned_by_same_compose_project(self):
         self.run_checks(busy=True, ports='127.0.0.1:18080->80/tcp,127.0.0.1:18091->8090/tcp,127.0.0.1:18092->8081/tcp')
 
     def test_missing_dns_blocks_certificate_issuance_with_remedy(self):
-        with self.assertRaisesRegex(ValueError, 'создайте A/AAAA'):
+        with self.assertRaisesRegex(ValueError, 'create an A/AAAA'):
             self.run_checks(dns_error=True, require_dns=True)
 
     def test_missing_dns_does_not_prevent_local_only_installation(self):
@@ -73,7 +73,7 @@ class PreflightTests(unittest.TestCase):
         opener = MagicMock()
         opener.open.return_value = stream
         with patch.object(checks.urllib.request, 'build_opener', return_value=opener):
-            with self.assertRaisesRegex(ValueError, 'Решение:'):
+            with self.assertRaisesRegex(ValueError, 'Solution:'):
                 checks.check_health(self.args())
 
 

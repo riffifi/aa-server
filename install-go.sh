@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 if [ -z "${BASH_VERSION:-}" ]; then
-  printf '%s\n' 'Нужен Bash: bash install.sh --help' >&2; exit 2
+  printf '%s\n' 'Bash is required: bash install.sh --help' >&2; exit 2
 fi
 set +x
 set -euo pipefail
@@ -21,59 +21,59 @@ original_args=("$@")
 declare -A updates=()
 usage() {
   cat <<'HELP'
-AntiAttendance · установка и обновление Go / PostgreSQL
+AntiAttendance · Go / PostgreSQL installation and updates
 
-  bash install.sh [install|update|check|migrate] [параметры]
+  bash install.sh [install|update|check|migrate] [options]
 
-Без команды: установка/обновление Go; при старой .env — перенос Python.
-При первом запуске в терминале открывается мастер настройки.
+Without a command: install/update Go, or migrate Python if a legacy .env exists.
+The first interactive run opens the setup wizard.
 
-Адреса и порты:
-  --site-url URL         Сайт (также --public-url, --url)
+URLs and ports:
+  --site-url URL         Site URL (also --public-url, --url)
   --aaid-url URL         AA ID
-  --site-port PORT       Локальный порт сайта (также --port)
-  --aaid-port PORT       Локальный порт AA ID
-  --panel-port PORT      Локальный порт приватной панели
-  -e, --env-file FILE    Файл настроек, по умолчанию .env.go
-  -p, --project NAME     Имя Compose-проекта, по умолчанию antiattendance-go
+  --site-port PORT       Local site port (also --port)
+  --aaid-port PORT       Local AA ID port
+  --panel-port PORT      Local private panel port
+  -e, --env-file FILE    Settings file, default: .env.go
+  -p, --project NAME     Compose project name, default: antiattendance-go
 
-Nginx и HTTPS:
-  --configure-nginx     Настроить отдельные блоки сайта и AA ID
-  --no-host-nginx       Оставить host nginx под ручным управлением
-  --nginx-config FILE   Глобальный nginx.conf для настройки
-  --tls-email EMAIL     Выпустить/проверить Let's Encrypt через Certbot
-  --no-tls              Не запускать Certbot (например, внешний TLS-прокси)
+Nginx and HTTPS:
+  --configure-nginx     Configure separate site and AA ID server blocks
+  --no-host-nginx       Manage host nginx manually
+  --nginx-config FILE   Main nginx.conf to configure
+  --tls-email EMAIL     Issue/check a Let's Encrypt certificate with Certbot
+  --no-tls              Skip Certbot (for example, with an external TLS proxy)
 
-Режим работы:
-  migrate               Перенести старую Python-установку в Go
-  --from-python DIR     Каталог старой .env; включает перенос Python
-  --python-project NAME Исходный Compose-проект (antiattendance-sessions)
-  --stop-python         Разрешить короткую остановку Python для снимка/переноса
-  --interactive         Запросить настройки в консоли
-  --non-interactive     Без вопросов; для автоматизации
-  --no-start            Подготовить настройки, не запускать сервер/nginx
-  --check               Только проверить существующую конфигурацию
-  --no-build            Использовать уже собранный Go-образ
-  --skip-pull           Не загружать заново образы PostgreSQL/nginx
-  --timeout SECONDS     Ожидание готовности сервисов, по умолчанию 240
-  --no-install-deps     Только проверять зависимости, не устанавливать
-  --install-deps        Устанавливать недостающие зависимости (по умолчанию)
+Operation:
+  migrate               Migrate a legacy Python installation to Go
+  --from-python DIR     Legacy .env directory; enables Python migration
+  --python-project NAME Source Compose project (antiattendance-sessions)
+  --stop-python         Allow Python downtime for a consistent snapshot/migration
+  --interactive         Prompt for settings in the terminal
+  --non-interactive     Run without prompts; for automation
+  --no-start            Prepare settings without starting services/nginx
+  --check               Only check the existing configuration
+  --no-build            Use an existing Go image
+  --skip-pull           Skip pulling PostgreSQL/nginx images
+  --timeout SECONDS     Service readiness timeout, default: 240
+  --no-install-deps     Check dependencies without installing them
+  --install-deps        Install missing dependencies (default)
 
-Вывод:
-  --plain               Обычный текст без анимации и ANSI-кодов
-  --no-color            Анимация без цвета; также поддерживается NO_COLOR
-  --log-level LEVEL     error, warn, info (по умолчанию), debug
-  -q, --quiet           Только ошибки и итог (log-level error)
-  -v, --verbose         Вывод команд без анимации (log-level debug)
-  --debug               То же, что --log-level debug; без shell xtrace
-  --log-file FILE       Новый приватный файл журнала
-  --show-password       Показать новый пароль также без терминала
-  -h, --help            Эта справка
+Output:
+  --plain               Plain text without animation or ANSI codes
+  --no-color            Animation without colors; also supports NO_COLOR
+  --log-level LEVEL     error, warn, info (default), debug
+  -q, --quiet           Only errors and the result (log-level error)
+  -v, --verbose         Stream command output without animation (log-level debug)
+  --debug               Same as --log-level debug; no shell xtrace
+  --log-file FILE       New private log file
+  --show-password       Show the new password even without a terminal
+  -h, --help            Show this help
 
-Можно писать --site-port=18080. Явные параметры обновляют только соответствующие
-настройки; существующие пароли и ключи сохраняются.
-Домены: aa.ytc-srv.org и aaid.ytc-srv.org; разрешены *.ytc-srv.org и loopback.
-Старый Python-установщик сохранён как install-python.sh.
+Supports --site-port=18080. Explicit options update only the corresponding
+settings; existing passwords and keys are preserved.
+Domains: aa.ytc-srv.org and aaid.ytc-srv.org; *.ytc-srv.org and loopback are allowed.
+The legacy Python installer is available as install-python.sh.
 HELP
 }
 if (($#)) && [[ $1 != -* ]]; then mode=$1; shift; fi
@@ -112,14 +112,14 @@ while (($#)); do
     --python-project) ui_value "$@"; python_project=$2; python_requested=1; shift 2 ;;
     --stop-python) stop_python=1; shift ;;
     --help|-h) usage; exit 0 ;;
-    *) ui_die "Неизвестный параметр: $1. Справка: bash install.sh --help" ;;
+    *) ui_die "Unknown option: $1. Help: bash install.sh --help" ;;
   esac
 done
-[[ $mode == auto || $mode == install || $mode == update || $mode == check || $mode == migrate ]] || ui_die "Команда должна быть install, update, check или migrate."
-[[ ! -L $env_file ]] || ui_die "Файл настроек не должен быть символической ссылкой."
+[[ $mode == auto || $mode == install || $mode == update || $mode == check || $mode == migrate ]] || ui_die "Command must be install, update, check or migrate."
+[[ ! -L $env_file ]] || ui_die "The settings file must not be a symbolic link."
 fresh=1
 if [[ -e $env_file ]]; then
-  [[ -f $env_file ]] || ui_die "Настройки должны быть обычным файлом: $env_file"
+  [[ -f $env_file ]] || ui_die "Settings must be a regular file: $env_file"
   fresh=0
 fi
 pending_python=
@@ -127,8 +127,8 @@ if [[ -f $env_file ]]; then pending_python=$(installer_env_value "$env_file" GO_
 if ((python_requested)) || [[ $mode == migrate ]] || { [[ $mode == auto || $mode == update ]] && { [[ $pending_python == 1 ]] || { ((fresh)) && [[ -f $python_dir/.env ]]; }; }; }; then
   exec bash "$PWD/upgrade-python.sh" "${original_args[@]}"
 fi
-[[ $mode != update || $fresh == 0 ]] || ui_die "Нет $env_file. Для новой установки используйте install; для Python используйте migrate --from-python КАТАЛОГ."
-[[ $mode != check || $fresh == 0 ]] || ui_die "Нет $env_file. Сначала выполните install --no-start."
+[[ $mode != update || $fresh == 0 ]] || ui_die "Missing $env_file. Use install for a new deployment, or migrate --from-python DIRECTORY for Python."
+[[ $mode != check || $fresh == 0 ]] || ui_die "Missing $env_file. Run install --no-start first."
 if [[ $mode == auto ]]; then if ((fresh)); then mode=install; else mode=update; fi; fi
 env_value() {
   [[ -f $env_file ]] || return 0
@@ -157,61 +157,61 @@ fi
 ask() {
   local reply default=$2
   printf '%s [%s]: ' "$1" "$default" >&2
-  IFS= read -r reply || ui_die "Ввод завершён. Для автоматизации используйте --non-interactive."
+  IFS= read -r reply || ui_die "Input ended. Use --non-interactive for automation."
   reply=${reply%$'\r'}
   REPLY=${reply:-$default}
 }
 if ((interactive)) && [[ $mode != check ]]; then
   if ((fresh)) && [[ -z ${updates[GO_INSTALL_NGINX]+x} ]]; then configure_nginx=1; fi
   if ((fresh)) && [[ -z ${updates[GO_INSTALL_TLS]+x} ]]; then tls=1; fi
-  printf '\nAntiAttendance · мастер настройки\nПароли и ключи существующей установки сохраняются.\n\n'
-  ask 'Адрес сайта' "$public_url"; public_url=$REPLY; updates[GO_PUBLIC_URL]=${REPLY%/}
-  ask 'Адрес AA ID' "$aaid_url"; aaid_url=$REPLY; updates[GO_AAID_PUBLIC_URL]=${REPLY%/}
-  ask 'Локальный порт сайта' "$site_port"; site_port=$REPLY; updates[GO_PORT]=$REPLY
-  ask 'Локальный порт AA ID' "$aaid_port"; aaid_port=$REPLY; updates[GO_AAID_PORT]=$REPLY
-  ask 'Локальный порт приватной панели' "$panel_port"; panel_port=$REPLY; updates[GO_PANEL_PORT]=$REPLY
-  ask 'Настроить host nginx: да/нет' "$([[ $configure_nginx == 1 ]] && printf да || printf нет)"
-  case "${REPLY,,}" in да|д|yes|y) configure_nginx=1 ;; нет|н|no|n) configure_nginx=0; tls=0 ;; *) ui_die "Ожидалось да или нет." ;; esac
+  printf '\nAntiAttendance · setup wizard\nExisting installation passwords and keys are preserved.\n\n'
+  ask 'Site URL' "$public_url"; public_url=$REPLY; updates[GO_PUBLIC_URL]=${REPLY%/}
+  ask 'AA ID URL' "$aaid_url"; aaid_url=$REPLY; updates[GO_AAID_PUBLIC_URL]=${REPLY%/}
+  ask 'Local site port' "$site_port"; site_port=$REPLY; updates[GO_PORT]=$REPLY
+  ask 'Local AA ID port' "$aaid_port"; aaid_port=$REPLY; updates[GO_AAID_PORT]=$REPLY
+  ask 'Local private panel port' "$panel_port"; panel_port=$REPLY; updates[GO_PANEL_PORT]=$REPLY
+  ask 'Configure host nginx: yes/no' "$([[ $configure_nginx == 1 ]] && printf yes || printf no)"
+  case "${REPLY,,}" in yes|y) configure_nginx=1 ;; no|n) configure_nginx=0; tls=0 ;; *) ui_die "Expected yes or no." ;; esac
   updates[GO_INSTALL_NGINX]=$configure_nginx
   if ((configure_nginx)); then
-    ask 'Глобальный nginx.conf (auto — определить автоматически)' "${nginx_config:-auto}"
+    ask 'Main nginx.conf (auto to detect automatically)' "${nginx_config:-auto}"
     nginx_config=$REPLY; [[ $nginx_config != auto ]] || nginx_config=
     updates[GO_NGINX_CONFIG]=$nginx_config
-    ask 'Настроить HTTPS через Let’s Encrypt: да/нет' "$([[ $tls == 1 ]] && printf да || printf нет)"
-    case "${REPLY,,}" in да|д|yes|y) tls=1 ;; нет|н|no|n) tls=0 ;; *) ui_die "Ожидалось да или нет." ;; esac
-    if ((tls)); then ask 'Email для Let’s Encrypt' "$tls_email"; tls_email=$REPLY; updates[GO_TLS_EMAIL]=$tls_email; fi
+    ask 'Configure HTTPS with Let’s Encrypt: yes/no' "$([[ $tls == 1 ]] && printf yes || printf no)"
+    case "${REPLY,,}" in yes|y) tls=1 ;; no|n) tls=0 ;; *) ui_die "Expected yes or no." ;; esac
+    if ((tls)); then ask 'Email for Let’s Encrypt' "$tls_email"; tls_email=$REPLY; updates[GO_TLS_EMAIL]=$tls_email; fi
   fi
   updates[GO_INSTALL_TLS]=$tls
 fi
-installer_origin "$public_url" 'Адрес сайта'; installer_origin "$aaid_url" 'Адрес AA ID'
-[[ ${public_url%/} != "${aaid_url%/}" ]] || ui_die "Сайт и AA ID должны иметь разные origin."
-installer_port 'Сайт' "$site_port"; installer_port 'AA ID' "$aaid_port"; installer_port 'Панель' "$panel_port"
-((10#$site_port != 10#$aaid_port && 10#$site_port != 10#$panel_port && 10#$aaid_port != 10#$panel_port)) || ui_die "Три локальных порта должны различаться."
+installer_origin "$public_url" 'Site URL'; installer_origin "$aaid_url" 'AA ID URL'
+[[ ${public_url%/} != "${aaid_url%/}" ]] || ui_die "Site and AA ID must have different origins."
+installer_port 'Site' "$site_port"; installer_port 'AA ID' "$aaid_port"; installer_port 'Panel' "$panel_port"
+((10#$site_port != 10#$aaid_port && 10#$site_port != 10#$panel_port && 10#$aaid_port != 10#$panel_port)) || ui_die "The three local ports must be different."
 installer_project "$project"
-[[ $timeout =~ ^[0-9]{1,4}$ ]] && ((10#$timeout >= 1 && 10#$timeout <= 3600)) || ui_die "--timeout: от 1 до 3600 секунд."
-[[ $configure_nginx == 0 || $configure_nginx == 1 ]] || ui_die "GO_INSTALL_NGINX должен быть 0 или 1."
-[[ $tls == 0 || $tls == 1 ]] || ui_die "GO_INSTALL_TLS должен быть 0 или 1."
+[[ $timeout =~ ^[0-9]{1,4}$ ]] && ((10#$timeout >= 1 && 10#$timeout <= 3600)) || ui_die "--timeout: between 1 and 3600 seconds."
+[[ $configure_nginx == 0 || $configure_nginx == 1 ]] || ui_die "GO_INSTALL_NGINX must be 0 or 1."
+[[ $tls == 0 || $tls == 1 ]] || ui_die "GO_INSTALL_TLS must be 0 or 1."
 if ((tls)); then
-  ((configure_nginx)) || ui_die "TLS требует --configure-nginx."
-  [[ $tls_email =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || ui_die "Укажите email: --tls-email admin@ytc-srv.org"
-  [[ $public_url == https://* && $aaid_url == https://* ]] || ui_die "Для Certbot адреса должны начинаться с https://."
+  ((configure_nginx)) || ui_die "TLS requires --configure-nginx."
+  [[ $tls_email =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || ui_die "Provide an email: --tls-email admin@ytc-srv.org"
+  [[ $public_url == https://* && $aaid_url == https://* ]] || ui_die "Certbot requires URLs starting with https://."
 fi
 if [[ $mode == check ]] || ((!start && !deps_explicit)); then install_deps=0; fi
-case "$mode" in install) operation_title='Установка' ;; update) operation_title='Обновление' ;; check) operation_title='Проверка' ;; esac
+case "$mode" in install) operation_title='Installation' ;; update) operation_title='Update' ;; check) operation_title='Check' ;; esac
 if ((UI_LEVEL_NUM >= 2 || interactive)); then
-  nginx_title='ручная настройка'
-  if ((configure_nginx)); then nginx_title='настройка установщиком'; fi
-  tls_title='внешний TLS-прокси или ручная настройка'
+  nginx_title='manual configuration'
+  if ((configure_nginx)); then nginx_title='configured by the installer'; fi
+  tls_title='external TLS proxy or manual configuration'
   if ((tls)); then tls_title='Let’s Encrypt / Certbot'; fi
-  printf '\nПараметры сервера\n  Режим: %s\n  Сайт: %s\n  AA ID: %s\n  Панель: http://127.0.0.1:%s/panel\n  Файл настроек: %s\n  Compose-проект: %s\n  Nginx: %s\n  HTTPS: %s\n' \
+  printf '\nServer settings\n  Mode: %s\n  Site: %s\n  AA ID: %s\n  Panel: http://127.0.0.1:%s/panel\n  Settings file: %s\n  Compose project: %s\n  Nginx: %s\n  HTTPS: %s\n' \
     "$operation_title" "$public_url" "$aaid_url" "$panel_port" "$env_file" "$project" "$nginx_title" "$tls_title"
 fi
 if ((fresh)) && [[ -f .env ]]; then
-  printf '\nРекомендация: обнаружена .env старой установки. SQLite автоматически не импортируется; для сохранения аккаунтов используйте migrate-go.sh по инструкции docs/go-postgres-migration.md.\n'
+  printf '\nRecommendation: a legacy .env was found. This explicit install does not import SQLite; use migrate to preserve accounts (docs/go-postgres-migration.md).\n'
 fi
 if ((interactive)); then
-  ask 'Применить эти настройки: да/нет' да
-  case "${REPLY,,}" in да|д|yes|y) ;; *) printf 'Настройки не изменены.\n'; exit 0 ;; esac
+  ask 'Apply these settings: yes/no' yes
+  case "${REPLY,,}" in yes|y) ;; *) printf 'Settings were not changed.\n'; exit 0 ;; esac
 fi
 # Authorize sudo visibly before any background stage can need it.
 need_privilege=0
@@ -224,7 +224,7 @@ if ((install_deps)); then
 fi
 if ((EUID != 0 && need_privilege)) && [[ $mode != check ]]; then
   if command -v sudo >/dev/null 2>&1; then
-    if ((interactive)) || [[ -t 0 ]]; then sudo -v; else sudo -n true || ui_die "Нужны права администратора. Запустите sudo bash install.sh $mode --non-interactive."; fi
+    if ((interactive)) || [[ -t 0 ]]; then sudo -v; else sudo -n true || ui_die "Administrator privileges required. Run sudo bash install.sh $mode --non-interactive."; fi
   fi
 fi
 total=4
@@ -232,11 +232,11 @@ if [[ $mode != check ]] && ((start)); then
   total=$((total + 3 + pull + build + configure_nginx + tls))
 fi
 ui_init "$total" "Go / PostgreSQL · $operation_title"
-ui_run 'Проверка и подготовка зависимостей' installer_dependencies
+ui_run 'Checking and preparing dependencies' installer_dependencies
 DOCKER=(docker)
 if ! docker info >/dev/null 2>&1; then
   if privileged docker info >/dev/null 2>&1; then DOCKER=(sudo -n docker); else
-    printf 'Решение: запустите Docker и повторите с sudo; проверьте systemctl status docker.\n' >&2
+    printf 'Solution: start Docker and retry with sudo; check systemctl status docker.\n' >&2
     exit 1
   fi
 fi
@@ -271,33 +271,33 @@ write_settings() {
     for key in "${!updates[@]}"; do printf '%s=%s\n' "$key" "${updates[$key]}" >> "$temporary"; done
     chmod 600 -- "$temporary"; mv -f -- "$temporary" "$env_file"
   fi
-  printf 'Настройки готовы; существующие пароли и ключи не заменялись.\n'
+  printf 'Settings are ready; existing passwords and keys were preserved.\n'
 }
 if [[ $mode == check ]]; then
-  ui_run 'Проверка файла настроек' test -r "$env_file"
+  ui_run 'Checking the settings file' test -r "$env_file"
 else
-  ui_run 'Подготовка настроек и паролей' write_settings
+  ui_run 'Preparing settings and passwords' write_settings
 fi
-ui_run 'Проверка Compose-конфигурации' "${compose[@]}" config --quiet
-ui_run 'Проверка ресурсов, портов, DNS и nginx' installer_preflight
+ui_run 'Checking the Compose configuration' "${compose[@]}" config --quiet
+ui_run 'Checking resources, ports, DNS and nginx' installer_preflight
 if [[ $mode == check ]] || ((!start)); then
-  ui_finish 'Проверки завершены; сервисы не запускались'
+  ui_finish 'Checks complete; services were not started'
 else
-  if ((pull)); then ui_run 'Загрузка PostgreSQL и nginx' "${compose[@]}" pull postgres nginx; fi
-  if ((build)); then ui_run 'Сборка Go-сервисов и Chromium' "${compose[@]}" build initialize; fi
-  ui_run 'Запуск PostgreSQL' "${compose[@]}" up -d --wait --wait-timeout "$timeout" postgres
-  ui_run 'Запуск и ожидание готовности сервисов' "${compose[@]}" up -d --no-build --wait --wait-timeout "$timeout"
-  if ((configure_nginx)); then ui_run 'Настройка блоков host nginx' installer_nginx; fi
-  if ((tls)); then ui_run 'Проверка и настройка HTTPS' installer_tls; fi
-  ui_run 'Проверка HTTP-ответов сервера и AA ID' installer_health
-  ui_finish 'Сервер установлен и проверен'
+  if ((pull)); then ui_run 'Pulling PostgreSQL and nginx images' "${compose[@]}" pull postgres nginx; fi
+  if ((build)); then ui_run 'Building Go services and Chromium' installer_build; fi
+  ui_run 'Starting PostgreSQL' "${compose[@]}" up -d --wait --wait-timeout "$timeout" postgres
+  ui_run 'Starting services and waiting for readiness' "${compose[@]}" up -d --no-build --wait --wait-timeout "$timeout"
+  if ((configure_nginx)); then ui_run 'Configuring host nginx server blocks' installer_nginx; fi
+  if ((tls)); then ui_run 'Checking and configuring HTTPS' installer_tls; fi
+  ui_run 'Checking site and AA ID HTTP responses' installer_health
+  ui_finish 'Server installed and verified'
 fi
-printf '\nДанные установки\n  Сайт: %s\n  AA ID: %s\n  Панель: http://127.0.0.1:%s/panel\n  Локальные upstream: сайт %s, AA ID %s\n  Настройки и пароли: %s\n  Журнал: %s\n' \
+printf '\nInstallation details\n  Site: %s\n  AA ID: %s\n  Panel: http://127.0.0.1:%s/panel\n  Local upstreams: site %s, AA ID %s\n  Settings and passwords: %s\n  Log: %s\n' \
   "$public_url" "$aaid_url" "$panel_port" "$site_port" "$aaid_port" "$env_file" "$UI_LOG_FILE"
-printf '  Тома для резервного копирования: %s_keys, %s_postgres_data\n' "$project" "$project"
+printf '  Volumes to back up: %s_keys, %s_postgres_data\n' "$project" "$project"
 if ((fresh)) && { [[ -t 1 ]] || ((show_password)); }; then
-  printf '  Пароль панели для новой пустой БД: %s\n' "$(env_value GO_ADMIN_PASSWORD)"
+  printf '  Panel password for a new empty database: %s\n' "$(env_value GO_ADMIN_PASSWORD)"
 else
-  printf '  Пароль панели сохранён; после импорта действует прежний пароль.\n'
+  printf '  Panel password preserved; after import, use the original password.\n'
 fi
-if ((!configure_nginx)); then printf '  Nginx: используйте nginx/go-hosts.conf.example с указанными upstream-портами.\n'; fi
+if ((!configure_nginx)); then printf '  Nginx: use nginx/go-hosts.conf.example with the configured upstream ports.\n'; fi

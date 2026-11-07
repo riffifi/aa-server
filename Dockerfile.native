@@ -5,8 +5,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY internal ./internal
 COPY cmd ./cmd
-RUN CGO_ENABLED=0 go build -trimpath -o /out/aa-server ./cmd/aa-server && \
-    CGO_ENABLED=0 go build -trimpath -o /out/aa-id ./cmd/aa-id && \
+ARG BUILD_VERSION
+ARG BUILD_COMMIT=unknown
+ARG BUILD_DIRTY=false
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X aa-server/internal/buildinfo.Version=${BUILD_VERSION} -X aa-server/internal/buildinfo.Commit=${BUILD_COMMIT} -X aa-server/internal/buildinfo.Dirty=${BUILD_DIRTY}" -o /out/aa-server ./cmd/aa-server && \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-X aa-server/internal/buildinfo.Version=${BUILD_VERSION} -X aa-server/internal/buildinfo.Commit=${BUILD_COMMIT} -X aa-server/internal/buildinfo.Dirty=${BUILD_DIRTY}" -o /out/aa-id ./cmd/aa-id && \
     CGO_ENABLED=0 go build -trimpath -o /out/aa-import ./cmd/aa-import && \
     CGO_ENABLED=0 go build -trimpath -o /out/aa-init ./cmd/aa-init && \
     CGO_ENABLED=0 go build -trimpath -o /out/aa-health ./cmd/aa-health && \

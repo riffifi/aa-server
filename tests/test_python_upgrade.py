@@ -59,7 +59,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_backup_refuses_running_writer(self):
         deployment = self.fixture()
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, 'остановлены'):
+            with self.assertRaisesRegex(ValueError, 'stopped'):
                 deployment.backup(deployment.discover(), directory)
 
 
@@ -196,7 +196,7 @@ esac
         self.assertIn('GO_PORT=18080', settings)
         self.assertIn('GO_AAID_PORT=18091', settings)
         self.assertIn('GO_PANEL_PORT=18092', settings)
-        self.assertIn('[ТРЕБУЕТСЯ ПЕРЕКЛЮЧЕНИЕ NGINX]', result.stdout)
+        self.assertIn('[NGINX SWITCH REQUIRED]', result.stdout)
         self.assertIn('GO_PYTHON_MIGRATION_PENDING=0', settings)
         self.assertEqual((self.root / '.env').read_bytes(), old_env)
         backups = list((self.root / '.go-data').glob('python-backup-*'))
@@ -234,7 +234,7 @@ esac
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(all(self.state()['running'].values()))
         self.assertFalse(self.state()['go_running'])
-        self.assertIn('[ВОССТАНОВЛЕНО]', result.stderr)
+        self.assertIn('[RESTORED]', result.stderr)
         self.assertTrue(list((self.root / '.go-data').glob('python-backup-*/snapshot.jsonl')), result.stdout + result.stderr)
 
     def test_noninteractive_stop_requires_explicit_permission(self):

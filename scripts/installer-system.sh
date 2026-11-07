@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 privileged() {
   if ((EUID == 0)); then "$@"; else
-    command -v sudo >/dev/null || { printf 'Решение: запустите установщик от root либо установите sudo.\n' >&2; return 1; }
+    command -v sudo >/dev/null || { printf 'Solution: run the installer as root or install sudo.\n' >&2; return 1; }
     sudo -n -- "$@"
   fi
 }
 installer_apt() {
   [[ $(uname -s) == Linux && -r /etc/os-release ]] || {
-    printf 'Автоустановка поддерживает Ubuntu/Debian. Решение: установите Docker Compose, Python 3, OpenSSL и curl вручную.\n' >&2; return 1;
+    printf 'Automatic installation supports Ubuntu/Debian. Solution: install Docker Compose, Python 3, OpenSSL and curl manually.\n' >&2; return 1;
   }
   local ID VERSION_CODENAME UBUNTU_CODENAME
   source /etc/os-release
-  [[ $ID == ubuntu || $ID == debian ]] || { printf 'Решение: установите зависимости вручную для вашей ОС и повторите --no-install-deps.\n' >&2; return 1; }
+  [[ $ID == ubuntu || $ID == debian ]] || { printf 'Solution: install dependencies manually for your OS and retry with --no-install-deps.\n' >&2; return 1; }
   if ((!APT_UPDATED)); then privileged apt-get update || return; APT_UPDATED=1; fi
   privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
 }
@@ -28,11 +28,11 @@ installer_dependencies() {
   fi
   if (("${#missing[@]}" > 0)); then
     if ((!install_deps)); then
-      printf 'Не установлены: %s\n' "${missing[*]}" >&2
+      printf 'Missing dependencies: %s\n' "${missing[*]}" >&2
       if [[ $mode == migration ]]; then
-        printf 'Решение: повторите sudo bash migrate-go.sh с теми же параметрами и --install-deps.\n' >&2
+        printf 'Solution: rerun the migration command with the same options and --install-deps.\n' >&2
       else
-        printf 'Решение: sudo bash install.sh %s --install-deps\n' "$mode" >&2
+        printf 'Solution: sudo bash install.sh %s --install-deps\n' "$mode" >&2
       fi
       return 1
     fi
@@ -40,7 +40,7 @@ installer_dependencies() {
   fi
   if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
     if ((!install_deps)); then
-      printf 'Нет Docker Compose. Решение: повторите с --install-deps или установите Docker Engine и Compose plugin.\n' >&2; return 1
+      printf 'Docker Compose is missing. Solution: retry with --install-deps or install Docker Engine and the Compose plugin.\n' >&2; return 1
     fi
     installer_apt ca-certificates curl || return
     local ID VERSION_CODENAME UBUNTU_CODENAME architecture codename source_file
@@ -63,7 +63,7 @@ installer_dependencies() {
   if ! docker info >/dev/null 2>&1 && ! privileged docker info >/dev/null 2>&1; then
     if ((install_deps)) && command -v systemctl >/dev/null; then privileged systemctl start docker || return; fi
     if ! docker info >/dev/null 2>&1 && ! privileged docker info >/dev/null 2>&1; then
-      printf 'Docker daemon недоступен. Решение: sudo systemctl start docker; запустите установщик с sudo или проверьте права Docker socket.\n' >&2; return 1
+      printf 'Docker daemon is unavailable. Solution: sudo systemctl start docker; run the installer with sudo or check Docker socket permissions.\n' >&2; return 1
     fi
   fi
   docker compose version || return
@@ -94,7 +94,7 @@ installer_tls() {
   local args=(--nginx --non-interactive --agree-tos --keep-until-expiring --email "$tls_email" --redirect -d "$site_host" -d "$identity_host")
   if [[ -n $nginx_config ]]; then
     args+=(--nginx-server-root "$(dirname -- "$nginx_config")")
-    [[ $(basename -- "$nginx_config") == nginx.conf ]] || { printf 'Решение: для нестандартного имени nginx.conf настройте Certbot вручную и используйте --no-tls.\n' >&2; return 1; }
+    [[ $(basename -- "$nginx_config") == nginx.conf ]] || { printf 'Solution: for a custom nginx.conf filename, configure Certbot manually and use --no-tls.\n' >&2; return 1; }
   fi
   privileged certbot "${args[@]}" || return
   curl --noproxy '*' --fail --silent --show-error --max-time 15 --resolve "$site_host:443:127.0.0.1" "${public_url%/}/health" || return
@@ -102,4 +102,27 @@ installer_tls() {
 }
 installer_health() {
   python3 scripts/installer-preflight.py --health --site-port "$site_port" --aaid-port "$aaid_port" --panel-port "$panel_port"
+}
+
+# Embed the source revision in both services without copying .git into the image.
+installer_build() {
+  local version=${AA_BUILD_VERSION:-} commit=${AA_BUILD_COMMIT:-} dirty=${AA_BUILD_DIRTY:-} changes=
+  if [[ -z $version && -f internal/buildinfo/VERSION ]]; then
+    IFS= read -r version < internal/buildinfo/VERSION || [[ -n $version ]] || return 1
+    version=${version%$'\r'}
+  fi
+  if command -v git >/dev/null 2>&1; then
+    if [[ -z $commit ]]; then commit=$(git rev-parse HEAD 2>/dev/null) || commit=unknown; fi
+    if [[ -z $dirty ]]; then
+      changes=$(git status --porcelain 2>/dev/null) || changes=
+      dirty=false; if [[ -n $changes ]]; then dirty=true; fi
+    fi
+  fi
+  version=${version:-dev}; commit=${commit:-unknown}; dirty=${dirty:-false}
+  [[ $version =~ ^[a-zA-Z0-9._+-]{1,128}$ ]] || ui_die 'AA_BUILD_VERSION must contain only letters, digits, dots, underscores, + or - (up to 128 characters).'
+  [[ $commit == unknown || $commit =~ ^[a-fA-F0-9]{7,64}$ ]] || ui_die 'AA_BUILD_COMMIT must be a Git commit hash or unknown.'
+  [[ $dirty == true || $dirty == false ]] || ui_die 'AA_BUILD_DIRTY must be true or false.'
+  export AA_BUILD_VERSION=$version AA_BUILD_COMMIT=$commit AA_BUILD_DIRTY=$dirty
+  printf 'Build version: %s; commit: %s\n' "$version" "$commit"
+  "${compose[@]}" build initialize
 }

@@ -37,7 +37,8 @@ func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/site/") {
+	// Release metadata is public, like /health; no account or configuration data.
+	if r.URL.Path != "/api/version" && (strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/site/")) {
 		var claims map[string]any
 		if header := r.Header.Get("Authorization"); header != "" {
 			scheme, token, ok := strings.Cut(header, " ")

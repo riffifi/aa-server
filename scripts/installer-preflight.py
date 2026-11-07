@@ -23,53 +23,53 @@ def check_host(args):
         roots.append(Path(info.stdout.strip()))
     for root in roots:
         free = shutil.disk_usage(root).free
-        print(f'Диск {root}: свободно {free / (1 << 30):.1f} GiB')
+        print(f'Disk {root}: {free / (1 << 30):.1f} GiB free')
         if free < 4 << 30:
-            raise ValueError('Мало места для сборки Go/Chromium. Решение: освободите не менее 4 GiB на диске проекта и Docker.')
+            raise ValueError('Not enough space to build Go/Chromium. Solution: free at least 4 GiB on the project and Docker disks.')
     memory = Path('/proc/meminfo')
     if memory.exists():
         fields = dict(line.split(':', 1) for line in memory.read_text().splitlines())
         available = int(fields.get('MemAvailable', fields['MemTotal']).split()[0]) / (1 << 20)
-        print(f'Доступная память: {available:.1f} GiB; CPU: {os.cpu_count()}')
+        print(f'Available memory: {available:.1f} GiB; CPU: {os.cpu_count()}')
         if available < 2:
-            print('Рекомендация: для Chromium желательно от 2 GiB свободной RAM; уменьшите LOGIN_SLOTS/RENEW_SLOTS или освободите память.')
-    for name, port in [('Сайт', args.site_port), ('AA ID', args.aaid_port), ('Панель', args.panel_port)]:
+            print('Recommendation: Chromium should have at least 2 GiB of available RAM; reduce LOGIN_SLOTS/RENEW_SLOTS or free memory.')
+    for name, port in [('Site', args.site_port), ('AA ID', args.aaid_port), ('Panel', args.panel_port)]:
         with socket.socket() as probe:
             try:
                 probe.bind(('127.0.0.1', port))
             except OSError:
                 if f'127.0.0.1:{port}->' not in owned_ports:
-                    raise ValueError(f'{name}: порт {port} занят другим процессом. Решение: выберите другой --site-port/--aaid-port/--panel-port либо освободите порт.')
-                print(f'{name}: порт {port} принадлежит текущему Compose-проекту')
+                    raise ValueError(f'{name}: port {port} is used by another process. Solution: choose another --site-port/--aaid-port/--panel-port or free the port.')
+                print(f'{name}: port {port} belongs to the current Compose project')
             else:
-                print(f'{name}: порт {port} свободен')
-    for name, origin in [('Сайт', args.site_url), ('AA ID', args.aaid_url)]:
+                print(f'{name}: port {port} is available')
+    for name, origin in [('Site', args.site_url), ('AA ID', args.aaid_url)]:
         host = urlsplit(origin).hostname
         try:
             addresses = sorted({entry[4][0] for entry in socket.getaddrinfo(host, None)})
             print(f'DNS {name}: {host} = {", ".join(addresses)}')
         except socket.gaierror:
-            message = f'DNS {host} не разрешается. Решение: создайте A/AAAA-запись домена на адрес сервера и дождитесь обновления DNS.'
+            message = f'DNS {host} does not resolve. Solution: create an A/AAAA record pointing to the server and wait for DNS propagation.'
             if args.require_dns:
                 raise ValueError(message)
-            print('Рекомендация: ' + message)
+            print('Recommendation: ' + message)
     if args.require_dns:
-        print('Для Let’s Encrypt порт 80 должен быть доступен извне. Локальная DNS-проверка не подтверждает доступность через NAT/firewall.')
+        print('Let’s Encrypt requires port 80 to be accessible externally. Local DNS checks cannot confirm access through NAT/firewall.')
 
 
 def check_health(args):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    for name, port, field, expected in [('Сайт', args.site_port, 'protocol', 2),
+    for name, port, field, expected in [('Site', args.site_port, 'protocol', 2),
                                         ('AA ID', args.aaid_port, 'service', 'aa-id'),
-                                        ('Панель', args.panel_port, 'protocol', 2)]:
+                                        ('Panel', args.panel_port, 'protocol', 2)]:
         try:
             with opener.open(f'http://127.0.0.1:{port}/health', timeout=10) as response:
                 data = json.loads(response.read(65536))
                 if response.status != 200 or data.get('ok') is not True or data.get(field) != expected:
                     raise ValueError('unexpected health response')
         except Exception as error:
-            raise ValueError(f'{name}: health-проверка не прошла. Решение: проверьте docker compose ps/logs и соответствующий локальный порт {port}.') from error
-        print(f'{name}: HTTP 200, ожидаемый протокол подтверждён')
+            raise ValueError(f'{name}: health check failed. Solution: check docker compose ps/logs and the corresponding local port {port}.') from error
+        print(f'{name}: HTTP 200, expected protocol confirmed')
 
 
 def main():
@@ -90,7 +90,7 @@ def main():
         else:
             check_host(args)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
-        print(f'Ошибка проверки: {error}', file=sys.stderr)
+        print(f'Check error: {error}', file=sys.stderr)
         return 1
     return 0
 

@@ -29,6 +29,9 @@ def main():
     for path in ('/panel/api/debug/browser', '/panel/api/pass-snapshot'):
         if ('sessions', 'GET', path) not in mentions:
             missing.append('sessions GET ' + path)
+    for service in ('sessions', 'aaid'):
+        if (service, 'GET', '/api/version') not in mentions:
+            missing.append(service + ' GET /api/version')
     if missing:
         raise SystemExit('Undocumented API routes:\n' + '\n'.join(missing))
     examples = re.findall(r'~~~json\s*\n(.*?)\n~~~', document, re.S)
@@ -37,7 +40,7 @@ def main():
             json.loads(example)
         except ValueError as error:
             raise SystemExit(f'Invalid JSON example {index}: {error}') from error
-    print(f'API reference: {count} legacy in-scope routes, 2 additional native routes and {len(examples)} JSON examples checked.')
+    print(f'API reference: {count} legacy in-scope routes, 4 additional native routes and {len(examples)} JSON examples checked.')
 
 
 if __name__ == '__main__':

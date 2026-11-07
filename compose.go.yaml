@@ -19,6 +19,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.native
+      args:
+        BUILD_VERSION: ${AA_BUILD_VERSION:-}
+        BUILD_COMMIT: ${AA_BUILD_COMMIT:-unknown}
+        BUILD_DIRTY: ${AA_BUILD_DIRTY:-false}
     user: '0:0'
     command: [aa-init, -directory, /keys, -uid, '10001', -schema, -split, -roles, -admin]
     environment:

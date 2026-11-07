@@ -18,9 +18,9 @@ def domain(origin):
     if (parsed.scheme not in ('http', 'https') or parsed.username or parsed.password
             or parsed.path not in ('', '/') or parsed.query or parsed.fragment
             or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+ytc-srv\.org', host)):
-        raise ValueError('Host nginx требует домен под *.ytc-srv.org. Для localhost используйте --no-host-nginx.')
+        raise ValueError('Host nginx requires a domain under *.ytc-srv.org. Use --no-host-nginx for localhost.')
     if parsed.port not in (None, 443 if parsed.scheme == 'https' else 80):
-        raise ValueError('Автоматический nginx использует порты 80/443. Решение: для другого публичного порта используйте --no-host-nginx.')
+        raise ValueError('Automatic nginx configuration uses ports 80/443. Solution: use --no-host-nginx for a different public port.')
     return host
 
 
@@ -40,7 +40,7 @@ def server_spans(text):
                     depth -= 1
                 end += 1
             if depth:
-                raise ValueError('Незакрытый server-блок nginx.')
+                raise ValueError('Unclosed nginx server block.')
             yield token.start(), tokens[end - 1].end()
             index = end
         else:
@@ -60,7 +60,7 @@ def render_existing(text, targets):
         names.update(declared)
         selected = declared.intersection(targets)
         if len(selected) > 1 or declared - set(targets):
-            raise ValueError('В managed include есть неожиданные server_name. Решение: проверьте файл вручную; чужие сайты не заменяются.')
+            raise ValueError('Unexpected server_name in the managed include. Solution: check the file manually; unrelated sites are not replaced.')
         if selected:
             name = next(iter(selected))
             block, count = re.subn(r'\bproxy_pass\s+http://127\.0\.0\.1:[0-9]+;', f'proxy_pass http://127.0.0.1:{targets[name]};', block)
@@ -68,16 +68,16 @@ def render_existing(text, targets):
                 changed.add(name)
             output = output[:start] + block + output[end:]
     if names != set(targets) or changed != set(targets):
-        raise ValueError('Состав доменов managed include изменился. Решение: перенесите домены/сертификаты вручную; установщик не удаляет существующие TLS-настройки.')
+        raise ValueError('Managed include domains have changed. Solution: migrate domains/certificates manually; existing TLS settings are preserved.')
     return output
 
 
 def configure(site_url, aaid_url, site_port, aaid_port, config=None, dry_run=False):
     targets = {domain(site_url): site_port, domain(aaid_url): aaid_port}
     if len(targets) != 2:
-        raise ValueError('Сайт и AA ID должны иметь разные домены.')
+        raise ValueError('Site and AA ID must have different domains.')
     if any(not 1 <= port <= 65535 for port in targets.values()):
-        raise ValueError('Некорректный upstream-порт.')
+        raise ValueError('Invalid upstream port.')
     args = ['nginx']
     if config:
         args += ['-c', str(Path(config).resolve())]
@@ -85,13 +85,13 @@ def configure(site_url, aaid_url, site_port, aaid_port, config=None, dry_run=Fal
     if not config:
         first = re.search(r'^# configuration file (.+):$', dump, re.M)
         if not first:
-            raise ValueError('Не найден nginx.conf. Решение: передайте --nginx-config /путь/nginx.conf.')
+            raise ValueError('nginx.conf not found. Solution: use --nginx-config /path/nginx.conf.')
         config = first.group(1)
         args += ['-c', config]
     main = Path(config).resolve()
     managed = main.parent / 'antiattendance-go-managed' / 'services.conf'
     if managed.is_symlink() or managed.parent.is_symlink():
-        raise ValueError('Managed include не должен быть символической ссылкой.')
+        raise ValueError('The managed include must not be a symbolic link.')
     for section in re.finditer(r'^# configuration file ([^\r\n]+):\n(.*?)(?=^# configuration file |\Z)', dump, re.M | re.S):
         if Path(section.group(1)).resolve() == managed:
             continue
@@ -99,7 +99,7 @@ def configure(site_url, aaid_url, site_port, aaid_port, config=None, dry_run=Fal
         for declaration in re.findall(r'\bserver_name\s+([^;]+);', clean):
             conflict = set(declaration.split()).intersection(targets)
             if conflict:
-                raise ValueError(f'Домен {", ".join(sorted(conflict))} уже настроен в {section.group(1)}. Решение: обновите его upstream вручную или используйте --no-host-nginx; конфликтующие блоки не создаются.')
+                raise ValueError(f'Domain {", ".join(sorted(conflict))} is already configured in {section.group(1)}. Solution: update its upstream manually or use --no-host-nginx; conflicting blocks are not created.')
     original = main.read_bytes()
     old_site = managed.read_bytes() if managed.exists() else None
     updated = add_include(original.decode(), managed)
@@ -112,7 +112,7 @@ def configure(site_url, aaid_url, site_port, aaid_port, config=None, dry_run=Fal
     else:
         rendered = render_existing(old_site.decode(), targets)
     if dry_run:
-        print(f'Nginx: проверены домены и include {managed}; файлы не изменены.')
+        print(f'Nginx: domains and include {managed} checked; files unchanged.')
         return
     # Each write has a backup; validate before reload, restore both files on failure.
     stamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
@@ -140,7 +140,7 @@ def configure(site_url, aaid_url, site_port, aaid_port, config=None, dry_run=Fal
         except (OSError, subprocess.SubprocessError):
             pass
         raise
-    print(f'Nginx настроен: {", ".join(targets)}. Резервная копия: {backup}')
+    print(f'Nginx configured: {", ".join(targets)}. Backup: {backup}')
 
 
 def main():
@@ -155,7 +155,7 @@ def main():
     try:
         configure(args.site_url, args.aaid_url, args.site_port, args.aaid_port, args.config, args.dry_run)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
-        print(f'Ошибка nginx: {error}', file=sys.stderr)
+        print(f'Nginx error: {error}', file=sys.stderr)
         return 1
     return 0
 
