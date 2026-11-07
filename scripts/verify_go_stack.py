@@ -44,6 +44,11 @@ def verify(env_file, site, identity, panel, panel_password=None):
 
     assert request(site, '/health')['ok'] is True
     assert request(identity, '/health')['service'] == 'aa-id'
+    assert request(site, '/api/version')['service'] == 'sessions'
+    assert request(identity, '/api/version')['service'] == 'aa-id'
+    for path in ('/api/accounts/import', '/api/accounts/synthetic/rpc/profile', '/api/accounts/synthetic/pass', '/api/debug/pass-testing'):
+        request(site, path, 404, body={})
+    request(identity, '/v1/auth/mirea', 404, body={})
     keys = request(identity, '/.well-known/jwks.json')['keys']
     assert len(keys) == 1 and keys[0]['kty'] == 'OKP' and 'd' not in keys[0]
     request(site, '/')

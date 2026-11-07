@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"aa-server/internal/cryptocompat"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"net/http"
@@ -155,23 +154,4 @@ func (s *Server) debugAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, 200, map[string]any{"events": events})
-}
-func (s *Server) unlockPassTesting(w http.ResponseWriter, r *http.Request) {
-	body, ok := DecodeBody(w, r, []Field{{Name: "password", Kind: "string", Required: true, Min: 1, Max: 256}})
-	if !ok {
-		return
-	}
-	if s.limited(w, "pass-test:"+identity(r), 8, 5*60*1000000000) {
-		return
-	}
-	access := cryptocompat.Daily(cryptocompat.PassTestingKey([]byte(s.config.MasterKey)), s.config.Vault.Now())
-	if !cryptocompat.MatchDaily(body["password"].(string), access) {
-		detail(w, 401, "Wrong or expired pass testing password")
-		return
-	}
-	if err := s.config.Vault.Audit(r.Context(), "pass_testing_unlocked", actor(r), nil); err != nil {
-		s.failure(w, err)
-		return
-	}
-	write(w, 200, map[string]any{"expires_at": access.ExpiresAt, "day": access.Day})
 }

@@ -20,6 +20,22 @@ func webCookie(r *http.Request) string {
 	return cookie.Value
 }
 func (s *Server) webSession(w http.ResponseWriter, r *http.Request) (map[string]any, map[string]any, bool) {
+	if r.Header.Get("Authorization") != "" {
+		claims, user, ok := s.caller(w, r)
+		if !ok {
+			return nil, nil, false
+		}
+		session, err := s.config.Store.ActiveSession(r.Context(), claims["sid"].(string))
+		if err != nil {
+			failure(w, err)
+			return nil, nil, false
+		}
+		if session == nil {
+			detail(w, 401, "Sign in to AA ID")
+			return nil, nil, false
+		}
+		return session, user, true
+	}
 	session, err := s.config.Store.WebSession(r.Context(), webCookie(r))
 	if err != nil {
 		failure(w, err)
@@ -138,6 +154,10 @@ func (s *Server) webRevoke(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, map[string]any{"ok": true})
 }
 func (s *Server) webLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "" {
+		s.logout(w, r)
+		return
+	}
 	session, err := s.config.Store.WebSession(r.Context(), webCookie(r))
 	if err != nil {
 		failure(w, err)

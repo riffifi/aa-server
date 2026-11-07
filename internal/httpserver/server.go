@@ -1,5 +1,4 @@
-// Package httpserver contains native Go HTTP handlers under migration.
-// It is not yet wired into the production Docker deployment.
+// Package httpserver implements the shared server-owned website/application API.
 package httpserver
 
 import (
@@ -57,8 +56,6 @@ type Server struct {
 	signal          chan struct{}
 	cancel          context.CancelFunc
 	done            chan struct{}
-	stateMu         sync.Mutex
-	issued          map[string]map[string]int64
 	ownedPulse      *pulse.Transport
 	ownedCalendar   *schedule.Cache
 	ownedBrowser    *browser.Engine
@@ -118,7 +115,6 @@ func New(ctx context.Context, config Config) (*Server, error) {
 		return nil, errors.New("AA ID verifier is required when enforcement is enabled")
 	}
 	s := &Server{config: config, mux: http.NewServeMux(), attempts: map[string][]time.Time{}, signal: make(chan struct{}), done: make(chan struct{})}
-	s.issued = map[string]map[string]int64{}
 	s.attemptWindows = map[string]time.Duration{}
 	s.maintenanceDone = make(chan struct{})
 	if s.config.Pulse == nil {
@@ -251,18 +247,6 @@ func (s *Server) prune() {
 		}
 	}
 	s.attemptsMu.Unlock()
-	s.stateMu.Lock()
-	for id, tokens := range s.issued {
-		for key, expiry := range tokens {
-			if expiry <= now.Unix() {
-				delete(tokens, key)
-			}
-		}
-		if len(tokens) == 0 {
-			delete(s.issued, id)
-		}
-	}
-	s.stateMu.Unlock()
 }
 func (s *Server) changed() {
 	s.signalMu.Lock()
@@ -343,6 +327,10 @@ func (s *Server) allowOwner(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if RetiredClientPath(r.URL.Path) {
+		detail(w, 404, "Not Found")
+		return
+	}
 	if s.config.PanelLocalOnly && strings.HasPrefix(r.URL.Path, "/panel") && r.Header.Get("X-AA-Panel") != "1" {
 		detail(w, 404, "Not Found")
 		return
@@ -494,7 +482,6 @@ func (s *Server) routes() {
 	s.handle("GET /auth/aaid", s.signIn)
 	s.handle("GET /auth/callback", s.callback)
 	s.handle("POST /site/logout", s.siteLogout)
-	s.handle("POST /api/accounts/import", s.importAccount)
 	s.handle("POST /internal/aaid/link", s.linkIdentity)
 	s.handle("GET /api/groups/search", s.searchGroups)
 	s.handle("GET /site/schedule", s.weekSchedule)
@@ -511,14 +498,13 @@ func (s *Server) routes() {
 	s.handle("GET /panel/api/debug/tables", s.debugTables)
 	s.handle("GET /panel/api/debug/tables/{name}", s.debugTables)
 	s.handle("GET /panel/api/debug/audit", s.debugAudit)
-	s.handle("POST /api/debug/pass-testing", s.unlockPassTesting)
 	s.handle("GET /api/me/attendance", s.attendance)
 	s.handle("GET /api/accounts/{id}/attendance", s.attendance)
 	s.handle("GET /panel/api/accounts/{id}/attendance", s.attendance)
 	s.handle("GET /panel/api/accounts/{id}/profile-fields", s.profileFields)
 	s.handle("POST /panel/api/accounts/{id}/refresh", s.refreshHandler)
 	s.handle("GET /panel/api/debug/browser", s.browserDebug)
-	s.handle("GET /panel/api/pass-snapshot", s.accounts)
+	s.handle("GET /panel/api/pass-snapshot", s.panelState)
 	s.handle("GET /api/me/account", s.myAccount)
 	s.handle("PUT /api/me/account", s.changeMyAccount)
 	s.handle("GET /api/me/people", s.people)
@@ -542,8 +528,6 @@ func (s *Server) routes() {
 		s.staticRoutes()
 	}
 	s.handle("DELETE /panel/api/accounts/{id}", s.deleteAccount)
-	s.handle("POST /api/accounts/{id}/rpc/{method}", s.rpc)
-	s.handle("PUT /api/accounts/{id}/pass", s.publishPass)
 	for _, prefix := range []string{"/api/accounts/", "/panel/api/accounts/"} {
 		s.handle("PUT "+prefix+"{id}/label", s.rename)
 		s.handle("PUT "+prefix+"{id}/pass-allowed", s.passAllowed)

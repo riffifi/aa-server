@@ -18,6 +18,7 @@ func TestUnknownRoutesAndUnsupportedMethodsAreNotDependencyFailures(t *testing.T
 		{"POST", "/unknown", 404, ""},
 		{"GET", "/unknown", 404, ""},
 		{"POST", "/health", 405, "GET"},
+		{"POST", "/v1/auth/mirea", 404, ""},
 		{"GET", "/v1/auth/refresh", 405, "POST"},
 		{"PATCH", "/v1/me", 405, "GET"},
 	} {

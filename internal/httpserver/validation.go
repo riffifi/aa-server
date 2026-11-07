@@ -55,8 +55,6 @@ func validation(kind string, loc []any, message string, input any, ctx map[strin
 }
 func model(r *http.Request) []field {
 	switch {
-	case r.URL.Path == "/api/accounts/import":
-		return []field{{Name: "cookie", Kind: "string", Required: true, Min: 1, Max: 65536}, {Name: "label", Kind: "string", Required: true, Min: 1, Max: 60}, {Name: "account_id", Kind: "string", Nullable: true}, {Name: "expected_version", Kind: "int", Nullable: true}, {Name: "expected_session_version", Kind: "int", Nullable: true}, {Name: "group_id", Kind: "int", Nullable: true, Min: 1, Max: math.MaxInt64, GT: true}, {Name: "group_name", Kind: "string", Nullable: true, Max: 100}}
 	case r.URL.Path == "/internal/aaid/link":
 		return []field{{Name: "cookie", Kind: "string", Required: true, Min: 1, Max: 65536}, {Name: "storage_state", Kind: "dict", Nullable: true}, {Name: "expires_at", Kind: "float", Nullable: true}, {Name: "renewed_at", Kind: "float", Nullable: true}, {Name: "group_id", Kind: "int", Nullable: true, Min: 1, Max: math.MaxInt64, GT: true}, {Name: "group_name", Kind: "string", Nullable: true, Max: 100}}
 	case r.URL.Path == "/api/me/account":
@@ -71,8 +69,6 @@ func model(r *http.Request) []field {
 		return []field{{Name: "allowed", Kind: "bool", Required: true}, {Name: "expected_version", Kind: "int", Nullable: true, Min: 0}}
 	case strings.HasSuffix(r.URL.Path, "/group"):
 		return []field{{Name: "group_id", Kind: "int", Nullable: true, Min: 1, Max: math.MaxInt64, GT: true}, {Name: "group_name", Kind: "string", Nullable: true, Max: 100}, {Name: "expected_version", Kind: "int", Required: true}}
-	case strings.HasSuffix(r.URL.Path, "/pass"):
-		return []field{{Name: "number", Kind: "string", Required: true, Min: 1, Max: 19}, {Name: "expected_version", Kind: "int", Required: true}}
 	}
 	return nil
 }

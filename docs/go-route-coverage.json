@@ -1,8 +1,8 @@
 {
-  "excluded": 3,
-  "implemented": 97,
-  "in_scope": 97,
-  "note": "Handler implementation coverage; Telegram excluded by user request; full behavioral parity is not established.",
+  "excluded": 8,
+  "implemented": 92,
+  "in_scope": 92,
+  "note": "Handler coverage; Telegram and retired client-owned workflows excluded by user request. See docs/client-api-migration.md for 2.1 changes.",
   "remaining": 0,
   "routes": [
     {
@@ -46,9 +46,10 @@
       "source": "services/aa-id/aaid/main.py"
     },
     {
+      "excluded_reason": "Retired in 2.1: application uses server-owned website workflows",
       "handler": "sign_in",
       "method": "POST",
-      "native_go": true,
+      "native_go": false,
       "path": "/v1/auth/mirea",
       "service": "aaid",
       "source": "services/aa-id/aaid/main.py"
@@ -262,9 +263,10 @@
       "source": "app/main.py"
     },
     {
+      "excluded_reason": "Retired in 2.1: application uses server-owned website workflows",
       "handler": "import_account",
       "method": "POST",
-      "native_go": true,
+      "native_go": false,
       "path": "/api/accounts/import",
       "service": "sessions",
       "source": "app/main.py"
@@ -310,9 +312,10 @@
       "source": "app/main.py"
     },
     {
+      "excluded_reason": "Retired in 2.1: application uses server-owned website workflows",
       "handler": "publish_pass",
       "method": "PUT",
-      "native_go": true,
+      "native_go": false,
       "path": "/api/accounts/{identifier}/pass",
       "service": "sessions",
       "source": "app/main.py"
@@ -335,17 +338,19 @@
       "source": "app/main.py"
     },
     {
+      "excluded_reason": "Retired in 2.1: application uses server-owned website workflows",
       "handler": "rpc",
       "method": "POST",
-      "native_go": true,
+      "native_go": false,
       "path": "/api/accounts/{identifier}/rpc/{method}",
       "service": "sessions",
       "source": "app/main.py"
     },
     {
+      "excluded_reason": "Retired in 2.1: application uses server-owned website workflows",
       "handler": "unlock_pass_testing",
       "method": "POST",
-      "native_go": true,
+      "native_go": false,
       "path": "/api/debug/pass-testing",
       "service": "sessions",
       "source": "app/main.py"

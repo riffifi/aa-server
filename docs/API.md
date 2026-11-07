@@ -2,11 +2,20 @@
 
 Справочник относится к нативной Go-версии с PostgreSQL. Дата проверки:
 7 ноября 2026 года. Основной протокол синхронизации — `2`.
-Telegram отключён; старые анонимные способы доступа не поддерживаются.
+Telegram и клиентские RPC/импорт сессий отключены. В 2.1.0 сайт и приложение используют общие серверные операции; см. [переход на 2.1](client-api-migration.md).
 
 Документ описывает реализованный контракт. Примеры содержат вымышленные
 идентификаторы и токены. Проверки с PostgreSQL и Chromium выполнялись локально;
 реальный вход в MIREA и поведение внешних сервисов этим не подтверждаются.
+
+
+В версии 2.1.0 сайт и приложение используют одни обработчики. На основном
+сервере `/site/state`, `/site/today`, `/site/mark`, `/site/schedule` и
+`/site/schedule/search` принимают и cookie `aa_site`, и Bearer приложения.
+На AA ID защищённые `/web/*` принимают `aaid_web` или действующий Bearer;
+публичные `/web/logins*` используют отдельный секрет задания.
+Явный неверный Bearer не заменяется браузерной cookie.
+Обновление требует адаптации старого приложения — см. [переход](client-api-migration.md).
 
 ## Содержание
 
@@ -17,7 +26,7 @@ Telegram отключён; старые анонимные способы дос
 5. [Синхронизация аккаунтов](#синхронизация-аккаунтов).
 6. [Управление собственным аккаунтом](#управление-собственным-аккаунтом).
 7. [Пропуска и разрешения](#пропуска-и-разрешения).
-8. [Бинарный RPC к Pulse](#бинарный-rpc-к-pulse).
+8. [Удалённые низкоуровневые методы приложения](#удалённые-низкоуровневые-методы-приложения).
 9. [Сайт, расписание и посещаемость](#сайт-расписание-и-посещаемость).
 10. [Браузерный интерфейс AA ID](#браузерный-интерфейс-aa-id).
 11. [Административная панель](#административная-панель).
@@ -82,7 +91,6 @@ Go принимает публичные origin только под `*.ytc-srv.o
 | Обычный запрос основного сервиса | 200000 байт |
 | Запрос AA ID | 100000 байт |
 | `POST /internal/aaid/link` напрямую к Go | 4000000 байт |
-| Unary gRPC-Web запрос | 65536 байт вместе с 5-байтовым кадром |
 | Ответ Pulse, читаемый нативным транспортом | 1 MiB |
 | Cookie Pulse как строка | 1–65536 символов |
 | Список людей для `/site/mark` | 1–200 строк при явной передаче |
@@ -151,8 +159,6 @@ Cookie панели определяется фактическим TLS-соед
 | Карточка в снимке `/api/accounts` | Да | Только при включённом пропуске и действующем разрешении | Отдельный полный снимок панели |
 | Чтение `GET /api/accounts/{id}` | Да | Нет | Панель использует своё состояние |
 | Номер разрешённого пропуска в снимке | Да, если включён | Да, если включён | Да при разрешённом тестовом режиме |
-| `pass-token` / `pass-code` / `pass-issue` | Да, если включён | Да, в пределах разрешения | Сам API всё равно требует AA ID |
-| Профиль, ACS, attendance и прочие RPC аккаунта | Да | Нет | Диагностические маршруты панели |
 | Переименование/завершение сессии/включение пропуска | Да | Нет | Да |
 | Назначение группы | Нет через обычный API | Нет | Да |
 | Удаление аккаунта из БД | Нет | Нет | Да |
@@ -196,7 +202,7 @@ Cookie панели определяется фактическим TLS-соед
 
 | Код | Значение |
 | --- | --- |
-| `200` | Успех, в том числе некоторые бинарные gRPC-Web ответы с ошибкой в trailers |
+| `200` | Успех; для составных действий также проверяйте результаты отдельных операций |
 | `301` | Старые страницы `/login` и `/u/{id}` перенаправляются на `/` |
 | `303` | Начало входа/возврат через AA ID |
 | `304` | Статический файл не изменился |
@@ -207,7 +213,7 @@ Cookie панели определяется фактическим TLS-соед
 | `405` | Метод HTTP не поддерживается |
 | `409` | Конфликт версии/состояния, сессия завершена, QR-вход ещё не готов |
 | `413` | Превышен размер |
-| `422` | Не прошли JSON/поля/типы или Pulse не подтвердил импорт |
+| `422` | Не прошли JSON/поля/типы или Pulse не подтвердил внутреннюю привязку |
 | `429` | Превышен лимит запросов/попыток/одновременных входов |
 | `500` | Внутренняя ошибка |
 | `502` | Не удалось разобрать ответ внешнего сервиса в диагностике |
@@ -264,50 +270,53 @@ JWKS содержит `issuer`, `audience` и `keys` с полями
 `x` — base64url открытого ключа. Закрытый ключ не выдаётся.
 Кэшируйте JWKS; не скачивайте его для каждого запроса.
 
-### POST ID/v1/auth/mirea
+### POST ID/v1/auth/logins
 
-Начало сессии приложения по уже полученной на устройстве cookie Pulse.
-Bearer не требуется: это точка входа. Сервер проверяет cookie через Pulse,
-определяет личность и группу, связывает/создаёт AA ID.
-Cookie используется для проверки и не сохраняется этим маршрутом;
-подключение Pulse-сессии к основному серверу — отдельный импорт/handoff.
+Начать тот же серверный QR-вход, что используется сайтом. Без Bearer и тела.
+Ответ `200`: `{"id":"job-id","token":"secret-capability"}`.
+Сохраните оба значения до завершения входа; секрет не публикуется.
+Лимит запуска общий с веб-входом: 10 запросов за 5 минут на адрес клиента,
+а также общая ограниченная очередь браузерных заданий. `429` — превышен лимит,
+`503` — очередь занята. Cookie Pulse и browser storage приложение не передаёт.
 
-| Поле JSON | Тип | Требование |
-| --- | --- | --- |
-| `pulse_cookie` | string | Обязательно, 1–65536 символов, валидный cookie header |
-| `device` | string | Необязательно, по умолчанию пусто, максимум 80 символов |
+### GET ID/v1/auth/logins/{identifier}
+
+Заголовок `X-Login-Token` обязателен. Ответ совпадает с веб-входом:
 
 ~~~json
-{"pulse_cookie":"SESSION=example","device":"AntiAttendance · Windows"}
+{"status":"login","error":null,"qr":"https://sso.mirea.ru/example","qr_png":"data:image/png;base64,..."}
 ~~~
 
-В `device` удаляются управляющие символы; пустое имя становится
-`Unknown device`. Лимит активных app-сессий по умолчанию — 2.
-При превышении вытесняется наиболее давно использовавшаяся сессия такого вида.
+Покажите `qr_png` пользователю. Возможны `waiting`, `login`, `finishing`,
+`complete`, `expired`, `cancelled`, `failed`. Неверный секрет или неизвестное
+задание дают `404`. Не запускайте новый браузер при каждом опросе статуса.
 
-Успешный ответ `Grant`:
+### POST ID/v1/auth/logins/{identifier}/claim
+
+Без тела, с тем же `X-Login-Token`. Результат можно получить один раз:
+незавершённое/уже использованное задание — `409`, неверный секрет — `404`,
+заблокированный пользователь — `403`.
+Сервер сам сохраняет подтверждённую Pulse-сессию через внутренний handoff.
+Ответ приложения не содержит Pulse-cookie и browser storage, не ставит
+браузерную cookie. Успешный ответ `Grant`:
 
 ~~~json
 {
-  "access_token": "eyJ…",
-  "access_expires_at": 1793952600,
-  "refresh_token": "opaque-refresh-token",
-  "session_id": "d92267ce-90ba-47eb-a541-6027dc247754",
-  "user": {
-    "id": "05f3b968-e721-4222-a53b-168185384bc3",
-    "created": 1793952000,
-    "username": "student",
-    "group_id": 5330,
-    "group_name": "Группа",
-    "verified_at": 1793952000
-  }
+  "access_token":"eyJ…",
+  "access_expires_at":1793952600,
+  "refresh_token":"opaque-refresh-token",
+  "session_id":"d92267ce-90ba-47eb-a541-6027dc247754",
+  "linked":true,
+  "user":{"id":"05f3b968-e721-4222-a53b-168185384bc3","created":1793952000,"username":"student","group_id":5330,"group_name":"Группа","verified_at":1793952000}
 }
 ~~~
 
-Основные ошибки: `400` неверная cookie, `401` Pulse-сессия недействительна,
-`403` AA ID заблокирован, `503` Pulse недоступен.
-Точный состав `user` задаётся публичным представлением AA ID;
-не путайте его с карточкой Pulse-аккаунта.
+`linked=false` означает успешный вход в AA ID, но неуспешную передачу
+Pulse-сессии основному серверу. Не считайте такой аккаунт подключённым:
+покажите ошибку/повторный вход; клиентский импорт вместо handoff запрещён.
+App-сессий по умолчанию не больше двух; имя устройства определяется по
+User-Agent и является только отображаемой подписью.
+`POST /v1/auth/mirea` удалён и возвращает `404`.
 
 ### POST ID/v1/auth/refresh
 
@@ -399,7 +408,7 @@ Bearer обязателен. Тела нет. Отзывает текущую с
 ~~~json
 {
   "service": "sessions",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "commit": "unknown",
   "dirty": false,
   "protocol": 2
@@ -409,7 +418,7 @@ Bearer обязателен. Тела нет. Отзывает текущую с
 | Поле | Значение |
 | --- | --- |
 | `service` | `sessions` для основного сервера, `aa-id` для AA ID |
-| `version` | Номер релиза из `internal/buildinfo/VERSION`, сейчас `2.0.3`; возможна явная метка сборки |
+| `version` | Номер релиза из `internal/buildinfo/VERSION`, сейчас `2.1.0`; возможна явная метка сборки |
 | `commit` | Полный Git commit сборки, либо `unknown` |
 | `dirty` | Исходники содержали локальные изменения при сборке |
 | `protocol` | Версия протокола синхронизации, сейчас `2` |
@@ -422,7 +431,7 @@ Bearer обязателен. Тела нет. Отзывает текущую с
 в ответ не включаются.
 
 После переноса на Go базовый релиз — `2.0.0`; текущие исходники имеют
-версию `2.0.3`. Источник номера релиза — `internal/buildinfo/VERSION`,
+версию `2.1.0`. Источник номера релиза — `internal/buildinfo/VERSION`,
 он встраивается в Go-бинарники даже без Git и без установщика.
 При сборке через установщик Git-метаданные встраиваются в оба бинарника.
 Без Git commit равен `unknown`; для архивной сборки можно явно задать
@@ -481,16 +490,10 @@ AA ID Bearer или `aa_site`. Необязательный query `group_id` —
       "pass_access": "approved"
     }
   ],
-  "passes": [
-    {"account_id":"52a3a3c8-1bfc-4d3b-9f8f-70c193091228","number":"1234567890123456789","version":1}
-  ],
   "cursor": 501,
   "protocol": 2,
   "sync": "automatic",
-  "group_filter": 5330,
-  "pass_agreements_required": true,
-  "pass_access_expires_at": 1793952300,
-  "pass_testing_expires_at": null
+  "group_filter": 5330
 }
 ~~~
 
@@ -507,16 +510,12 @@ AA ID Bearer или `aa_site`. Необязательный query `group_id` —
 | `pass_allowed` | Глобальный переключатель владельца на использование пропуска |
 | `own` | Карточка принадлежит вошедшей личности |
 | `pass_access` | В Go-снимке `approved` либо `disabled` |
-| `passes[].number` | Строка номера либо `null`, если он недоступен/не сохранён |
-| `passes[].version` | Версия номера; соответствует `pass_version` аккаунта |
 | `cursor` | Курсор для следующего long poll |
-| `pass_access_expires_at` | Срок локального кэширования решения о доступе, сейчас около 300 секунд |
 
 Общая карточка не содержит `expires_at`, `checked_at`, `updated_at`.
 `session_version` сохраняется для совместимости клиента. Cookie, browser storage
 и зашифрованный `secret` не выдаются никому через этот снимок.
-Наличие номера в старом локальном кэше не даёт права выполнять RPC:
-права проверяются заново на каждом обращении.
+Номера цифровых пропусков больше не выдаются клиентским снимком.
 
 ### GET BASE/api/events
 
@@ -585,40 +584,12 @@ AA ID Bearer или `aa_site`. Long polling.
 Знание разрешённого чужого пропуска не разрешает чтение этого маршрута.
 Чужой/отсутствующий аккаунт — `404`.
 
-### POST BASE/api/accounts/import
+### Подключение аккаунта
 
-Только после AA ID-входа. Подключает или обновляет свою Pulse-сессию.
-
-| JSON | Тип | Условия |
-| --- | --- | --- |
-| `cookie` | string | Обязательно, 1–65536, валидный cookie header |
-| `label` | string | Обязательно, 1–60 |
-| `account_id` | string/null | Необязательно; при передаче должен совпасть с существующим аккаунтом этой личности |
-| `expected_version` | integer/null | Необязательно, ≥ 0 |
-| `expected_session_version` | integer/null | Необязательно, ≥ 0 |
-| `group_id` | integer/null | Необязательно, > 0, ≤ 2^63−1; должен совпасть с проверенным `grp` |
-| `group_name` | string/null | Необязательно, максимум 100 |
-
-~~~json
-{
-  "cookie": "SESSION=example",
-  "label": "Имя",
-  "account_id": "52a3a3c8-1bfc-4d3b-9f8f-70c193091228",
-  "expected_session_version": 3,
-  "group_id": 5330,
-  "group_name": "Группа"
-}
-~~~
-
-Сервер спрашивает Pulse о владельце cookie. Другая личность — `403`;
-неподтверждённая сессия — `422`; несовпадение ID/версии — `409`.
-При уже рабочей сессии и отсутствии ожидаемых версий сервер может вернуть
-существующую карточку, не затирая её новой загрузкой. Известная группа
-сохраняется. Ответ — публичная карточка.
-
-Импорт одной cookie не предоставляет browser storage для автоматического
-SSO-продления. Оно появляется после поддерживаемого браузерного QR-входа
-и внутреннего handoff либо входа из панели.
+Подключение выполняет сервер после QR-входа через AA ID.
+`POST /api/accounts/import` удалён: клиент не публикует cookie, группу,
+browser storage или сроки продления. Для входа используйте `/v1/auth/logins`
+либо веб-вход AA ID; результат передаётся через `/internal/aaid/link`.
 
 ## Управление собственным аккаунтом
 
@@ -673,7 +644,6 @@ SSO-продления. Оно появляется после поддержи�
 | `POST /panel/api/accounts/{identifier}/end-session` | Без тела | Панельный вариант |
 | `PUT /api/accounts/{identifier}/group` | См. ниже | В Go обычному пользователю запрещено, `403` |
 | `PUT /panel/api/accounts/{identifier}/group` | См. ниже | Только панель назначает/снимает группу |
-| `PUT /api/accounts/{identifier}/pass` | См. ниже | Сохраняет номер уже полученного пропуска |
 
 При несовпадении ожидаемой версии — `409`. Перечитайте карточку/снимок,
 покажите новое состояние пользователю и повторите только осознанное действие.
@@ -688,23 +658,11 @@ SSO-продления. Оно появляется после поддержи�
 `expected_version` обязателен, ≥ 0.
 `group_id` — `null` для снятия группы либо положительное 64-битное число.
 `group_name` — `null` либо строка до 100 символов. Смена группы через панель —
-доверенная административная операция; обычный импорт не может произвольно
-назначить подписанную личность в чужую группу.
-
-Сохранение номера:
-
-~~~json
-{"number":"1234567890123456789","expected_version":1}
-~~~
-
-`number` — строка 1–19 символов, дополнительно проверяется допустимый номер.
-Здесь `expected_version` относится к `pass_version`, а не к общей `version`.
-Маршрут не выпускает пропуск в университете, а сохраняет полученный номер.
-Нужен включённый `pass_allowed`; разрешены положительные числа до 2^63−1
-без ведущего нуля. Некорректный номер — `400`.
+доверенная административная операция. Обычный клиент не может назначить
+подписанную личность в чужую группу; импорт клиентской сессии удалён.
 
 `end-session` намеренно прекращает автоматическое продление этой сессии.
-Вернуть её можно новым входом/импортом. Сетевой сбой Pulse при фоновой
+Вернуть её можно новым серверным QR-входом. Сетевой сбой Pulse при фоновой
 проверке сам по себе не должен стирать сохранённые credentials.
 
 ## Пропуска и разрешения
@@ -826,84 +784,18 @@ Query обрезается до 60 символов. Ответ:
 `decision` — только `allow` или `deny`.
 Успех возвращает `/api/me/pass`; чужой/не найденный запрос — `404`.
 
-### POST BASE/api/debug/pass-testing
 
-JSON `{"password":"суточный-тестовый-пароль"}`, строка 1–256.
-Требует обычную авторизацию и проверяет суточный пароль из панели.
-Ответ `{"expires_at":1794009600,"day":"2026-11-06"}`.
-Неверный/истёкший пароль — `401`.
 
-В Go этот маршрут **не расширяет область аккаунтов**. Тестовый пароль и
-`X-Pass-Test-Key` не обходят проверку владения/AA ID-sharing на внешнем API.
-Не стройте клиентскую интеграцию на старой схеме общего тестового доступа.
+## Удалённые низкоуровневые методы приложения
 
-## Бинарный RPC к Pulse
-
-### POST BASE/api/accounts/{identifier}/rpc/{method}
-
-Авторизация обязательна. Внешний адрес Pulse/произвольный URL клиент не задаёт.
-Метод выбирается только из фиксированного списка ниже.
-
-~~~http
-Content-Type: application/grpc-web+proto
-Authorization: Bearer ACCESS_TOKEN
-~~~
-
-Тело — **не JSON**, а один несжатый unary gRPC-Web кадр:
-
-| Смещение | Длина | Значение |
-| --- | --- | --- |
-| 0 | 1 байт | Флаг `0` |
-| 1 | 4 байта | Длина protobuf payload, unsigned big-endian |
-| 5 | Указанная длина | Protobuf payload нужного RPC |
-
-Кадр должен занимать всё тело, без хвоста/нескольких сообщений.
-Некорректный кадр — `400`, > 65536 байт — `413`.
-Даже «пустой» protobuf требует 5-байтового заголовка.
-
-| method | RPC Pulse | Права |
-| --- | --- | --- |
-| `profile` | `/rtu_tc.rtu_attend.app.UserService/GetMeInfo` | Свой аккаунт |
-| `attendance` | `/rtu_tc.attendance.api.AttendanceService/SelfApproveAttendanceThroughQRCode` | Свой аккаунт |
-| `pass-token` | `/rtu.pulse_app.LongTimeTokenService/GetAccessTokenForDigitalPass` | Включённый свой/разрешённый пропуск |
-| `pass-code` | `/rtu_tc.rtu_attend.humanpass.HumanPassService/SendVerificationCode` | То же + свежий X-Pulse-Token |
-| `pass-issue` | `/rtu_tc.rtu_attend.humanpass.HumanPassService/GetDigitalPass` | То же + свежий X-Pulse-Token |
-| `schedules` | `/rtu.schedule.api.PersonalScheduleService/GetSubscribedSchedules` | Свой аккаунт |
-| `acs-timeline` | `/rtu_tc.rtu_attend.humanpass.HumanPassService/GetHumanAcsTimeline` | Свой аккаунт и собственный UID в payload |
-| `visiting-logs` | `/rtu_tc.attendance.api.VisitingLogService/GetAvailableVisitingLogsOfStudent` | Свой аккаунт |
-| `day-lessons` | `/rtu_tc.attendance.api.LessonService/GetAvailableLessonsOfVisitingLogs` | Свой аккаунт |
-| `lesson-attendance` | `/rtu_tc.attendance.api.AttendanceService/GetAttendanceForLesson` | Свой аккаунт |
-
-Payload зависит от внешнего protobuf-контракта MIREA. Сервер не превращает
-этот интерфейс в универсальный REST-профиль и не принимает выдуманные JSON
-структуры вместо protobuf. Для ACS есть готовый JSON-маршрут посещений,
-для уроков — дневные представления ниже.
-В `acs-timeline` строковое поле 1 должно точно совпасть с Pulse UID своего
-аккаунта; чужой UID получает `403`.
-
-Ответ обычно бинарный gRPC-Web. Разбирайте и HTTP-код, и `Grpc-Status`,
-`Grpc-Message`, и trailers-кадр с флагом `0x80`.
-HTTP `200` не гарантирует успех RPC. В частности upstream HTTP `401`
-преобразуется в `200` с `grpc-status: 16` в trailers.
-
-Сессия без cookie получает `409`. Ошибка соединения с Pulse — `503`;
-сохранённая сессия при этом удерживается.
-`profile` обновляет известное состояние сессии. `attendance` записывает
-результат локальной отметки с источником `app`.
-
-Порядок получения пропуска:
-
-1. Получить свежий `pass-token` для выбранного аккаунта.
-2. Использовать возвращённый Pulse-токен в `X-Pulse-Token` для `pass-code`.
-3. Передать подтверждение в protobuf `pass-issue` с тем же допустимым токеном.
-4. При успешной выдаче сервер сохраняет разобранный номер и обновляет
-   `pass_version`; перечитать снимок.
-
-`X-Pulse-Token` привязан к аккаунту и должен быть ранее выдан именно этим
-процессом сервера. После перезапуска нужно получить новый.
-Пустой/чужой/истёкший токен — `403`.
-Разрешение на чужой пропуск не разрешает запускать для его владельца
-`profile`, `attendance` или чтение turnstile/journal RPC.
+В 2.1.0 `POST /api/accounts/{identifier}/rpc/{method}`,
+`PUT /api/accounts/{identifier}/pass` и `POST /api/debug/pass-testing`
+возвращают `404` при любых учётных данных. Приложение не формирует protobuf,
+не получает Pulse-токены выпуска пропуска и не публикует его номер.
+Для отметок используется общий `POST /site/mark`, для расписания —
+`GET /site/schedule`, для турникетов — `GET /api/me/attendance` или
+`GET ID/web/attendance`. Формирование запросов и проверка результатов — на сервере.
+Подробный переход: [client-api-migration.md](client-api-migration.md).
 
 ## Сайт, расписание и посещаемость
 
@@ -924,7 +816,7 @@ Callback не является API обмена произвольных access 
 
 ### GET BASE/site/state
 
-Требует `aa_site`. Тела/query нет.
+Требует `aa_site` или Bearer приложения. Тела/query нет.
 Возвращает текущий контекст урока:
 
 ~~~json
@@ -964,8 +856,7 @@ Callback не является API обмена произвольных access 
 
 ### GET BASE/site/today и GET BASE/api/me/today
 
-Одинаковое дневное представление, но первый маршрут требует `aa_site`,
-второй принимает токен приложения. Период — сегодняшний день по Москве.
+Одинаковое дневное представление, но оба маршрута принимают `aa_site` или Bearer приложения и выполняют один обработчик. Период — сегодняшний день по Москве.
 Query не нужен.
 
 ~~~json
@@ -999,7 +890,7 @@ Query не нужен.
 
 ### POST BASE/site/mark
 
-Требует `aa_site`. Отмечает выбранных людей учительским QR Pulse.
+Требует `aa_site` или Bearer приложения. Отмечает выбранных людей учительским QR Pulse.
 
 | JSON | Тип | Правило |
 | --- | --- | --- |
@@ -1031,7 +922,7 @@ QR другого назначения/хоста не принимается.
 
 ### GET BASE/site/schedule
 
-Требует `aa_site`. Query:
+Требует `aa_site` или Bearer приложения. Query:
 
 | Query | Тип/значение |
 | --- | --- |
@@ -1282,31 +1173,39 @@ JSON `{"password":"panel-password"}`, обязательная строка 1–
 
 ~~~json
 {
-  "csrf":"opaque-csrf-token",
-  "accounts":[
+  "csrf": "opaque-csrf-token",
+  "accounts": [
     {
-      "id":"account-id","label":"Имя","group_id":5330,"group_name":"Группа",
-      "state":"valid","version":12,"session_version":3,"pass_version":1,
-      "pass_allowed":true,"expires_at":1793955600,"checked_at":1793952000,
-      "updated_at":1793952000,"username":"student",
-      "automatic_renewal":true,"renewed_at":1793951900,"page_seen_at":1793951800
+      "id": "account-id",
+      "label": "Имя",
+      "group_id": 5330,
+      "group_name": "Группа",
+      "state": "valid",
+      "version": 12,
+      "session_version": 3,
+      "pass_version": 1,
+      "pass_allowed": true,
+      "expires_at": 1793955600,
+      "checked_at": 1793952000,
+      "updated_at": 1793952000,
+      "username": "student",
+      "automatic_renewal": true,
+      "renewed_at": 1793951900,
+      "page_seen_at": 1793951800
     }
   ],
-  "cursor":501,
-  "pass_testing":{"password":"суточное-значение","expires_at":1794009600,"day":"2026-11-06"}
+  "cursor": 501
 }
 ~~~
 
 `automatic_renewal` показывает наличие browser storage, а не гарантию
 успеха будущего продления. `renewed_at`/`page_seen_at` могут быть `null`.
-`pass_testing.password` — текущая суточная административная тестовая capability;
-`expires_at` — срок, `day` — московская календарная дата.
-Ни этот ответ, ни просмотр таблиц не выдают сохранённые cookie/browser state.
+Суточный ключ тестирования больше не выдаётся; режим удалён в 2.1.0.
 
 ### GET PANEL/panel/api/pass-snapshot
 
-Добавленный в Go панельный маршрут. Возвращает форму `Snapshot` для
-панельного интерфейса без ослабления `/api/accounts`.
+Панельный алиас `/panel/api/state`: csrf, accounts и cursor.
+Номера цифровых пропусков и суточные тестовые ключи не возвращаются.
 Поддерживает `group_id`. Доступ только по панельной сессии.
 Для получения номеров тестовым интерфейсом используется суточный
 `X-Pass-Test-Key` из состояния панели. Обычный Bearer пользователя
@@ -1607,6 +1506,16 @@ ETag поддерживает условные запросы и `304`.
 | `POST /site/telegram-link` | `404` |
 | `POST /api/accounts/{identifier}/pass-request` | `404` |
 
+В 2.1.0 также удалены:
+
+| Маршрут | Ответ |
+| --- | --- |
+| `POST ID/v1/auth/mirea` | `404` |
+| `POST BASE/api/accounts/import` | `404` |
+| `POST BASE/api/accounts/{identifier}/rpc/{method}` | `404` |
+| `PUT BASE/api/accounts/{identifier}/pass` | `404` |
+| `POST BASE/api/debug/pass-testing` | `404` |
+
 Это осознанные исключения переноса, а не незавершённые обработчики.
 Старые Telegram-таблицы могут сохраняться после импорта для целостности
 данных и отката, но не авторизуют запросы и не запускают бота.
@@ -1616,18 +1525,18 @@ ETag поддерживает условные запросы и `304`.
 ### PowerShell: вход и чтение
 
 Пример для Windows PowerShell/PowerShell 7. Используйте адреса своей
-установки и cookie, полученную законным входом в собственную MIREA-сессию.
+установки. Вход подтверждается через серверный QR собственной MIREA-сессии.
 Не вставляйте реальные токены в публикуемый transcript.
 
 ~~~powershell
 $baseUrl = 'https://aa.ytc-srv.org'
 $identityUrl = 'https://aaid.ytc-srv.org'
-$pulseCookie = Read-Host 'Cookie собственной Pulse-сессии'
-$signInBody = @{
-    pulse_cookie = $pulseCookie
-    device = 'AntiAttendance test on Windows'
-} | ConvertTo-Json
-$grant = Invoke-RestMethod -Method Post -Uri "$identityUrl/v1/auth/mirea" -ContentType 'application/json' -Body $signInBody
+$job = Invoke-RestMethod -Method Post -Uri "$identityUrl/v1/auth/logins"
+$loginHeaders = @{ 'X-Login-Token' = $job.token }
+$loginState = Invoke-RestMethod -Uri "$identityUrl/v1/auth/logins/$($job.id)" -Headers $loginHeaders
+# Покажите loginState.qr_png в интерфейсе и дождитесь status=complete,
+# опрашивая тот же GET с паузой. Только после подтверждения QR:
+$grant = Invoke-RestMethod -Method Post -Uri "$identityUrl/v1/auth/logins/$($job.id)/claim" -Headers $loginHeaders
 $apiHeaders = @{ Authorization = 'Bearer ' + $grant.access_token }
 $snapshot = Invoke-RestMethod -Uri "$baseUrl/api/accounts?group_id=5330" -Headers $apiHeaders
 $snapshot.accounts | Select-Object id, label, state, version, session_version
@@ -1665,34 +1574,23 @@ $browserStats = Invoke-RestMethod -Uri "$panelUrl/panel/api/debug/browser" -WebS
 Не нужно вручную посылать `X-AA-Panel` в публичный адрес:
 это не пароль и не способ обойти приватный nginx.
 
-### Пример запроса профиля как gRPC-Web
-
-Формирование того же профильного кадра, что у нативного транспорта,
-на Python без внешних библиотек:
-
-~~~python
-from pathlib import Path
-host = b'https://pulse.mirea.ru'
-payload = b'\x0a' + bytes([len(host)]) + host + b'\x18\x01'
-frame = b'\x00' + len(payload).to_bytes(4, 'big') + payload
-Path('profile-request.bin').write_bytes(frame)
-~~~
-
-Отправка с Windows curl:
+### Приложение вызывает те же операции, что сайт
 
 ~~~powershell
-curl.exe --silent --show-error --request POST "https://aa.ytc-srv.org/api/accounts/ACCOUNT_ID/rpc/profile" --header "Authorization: Bearer ACCESS_TOKEN" --header "Content-Type: application/grpc-web+proto" --data-binary "@profile-request.bin" --output profile-response.bin --dump-header profile-response.headers
+$today = Invoke-RestMethod -Uri "$baseUrl/site/today" -Headers $apiHeaders
+$state = Invoke-RestMethod -Uri "$baseUrl/site/state" -Headers $apiHeaders
+$schedule = Invoke-RestMethod -Uri "$baseUrl/site/schedule?week=0" -Headers $apiHeaders
 ~~~
 
-`profile-response.bin` — бинарный файл, не JSON.
-Не используйте пример как способ читать чужой профиль.
+Для отметки отправьте `POST /site/mark` с qr/account_ids/own_group.
+Клиент не формирует собственный RPC или результат отметки.
 
 ### Рекомендованный алгоритм синхронизации
 
 1. Прочитать `/health`, проверить `protocol=2` и требование AA ID.
 2. Войти/обновить AA ID, сериализуя refresh на уровне клиента.
 3. Загрузить `/api/accounts` с выбранным `group_id`.
-4. Полностью заменить доступный набор карточек и пропусков этим снимком.
+4. Полностью заменить доступный набор метаданных карточек этим снимком; номера пропусков не синхронизируются.
 5. Запустить один `/api/events` с полученным cursor и тем же фильтром.
 6. При событиях перечитать снимок; при пустом ответе сохранить новый cursor.
 7. При `401` один раз выполнить корректный refresh; при повторном отказе
@@ -1716,7 +1614,6 @@ curl.exe --silent --show-error --request POST "https://aa.ytc-srv.org/api/accoun
 | `linked=false` после QR AA ID | Проверить подключение основного аккаунта; AA ID-вход мог сохраниться |
 | `inside=null` | Показать «неизвестно», а не «человек вышел» |
 | `schedule_error` при `200` | Показать проблему расписания, не ложное «пар нет» |
-| HTTP `200` бинарного RPC | Разобрать gRPC status/trailers |
 | Успешный health | Не считать доказательством доступности MIREA |
 
 В Go намеренно изменены только согласованные области: PostgreSQL,

@@ -114,15 +114,8 @@ func TestStrictSnapshotsEventsAndRPCEnforceOwnerAndExplicitPassShare(t *testing.
 			}
 		}
 	}
-	found := false
-	for _, item := range snapshot["passes"].([]any) {
-		data := item.(map[string]any)
-		if data["account_id"] == ownerID && data["number"] == "123456" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("approved pass missing")
+	if _, exists := snapshot["passes"]; exists {
+		t.Fatal("client snapshot still exposes digital pass payloads")
 	}
 	for _, suffix := range []string{"", "/rpc/profile", "/rpc/acs-timeline", "/rpc/attendance", "/group", "/end-session", "/pass-allowed"} {
 		method := "POST"
@@ -144,8 +137,8 @@ func TestStrictSnapshotsEventsAndRPCEnforceOwnerAndExplicitPassShare(t *testing.
 	r.Header.Set("Authorization", "Bearer guest")
 	response := httptest.NewRecorder()
 	s.ServeHTTP(response, r)
-	if response.Code != 200 || upstream.calls != 1 {
-		t.Fatal("explicit pass permission failed", response.Body.String())
+	if response.Code != 404 || upstream.calls != 0 {
+		t.Fatal("retired RPC remained accessible through a pass share", response.Body.String())
 	}
 	w, events := secureRequest(t, s, "GET", "/api/events?wait=0", "", headers)
 	if w.Code != 200 {
@@ -222,8 +215,8 @@ func TestStrictImportCannotPublishAnotherPersonsSessionAndCookiesDoNotMaskBadBea
 	}
 	headers := map[string]string{"Cookie": "aa_site=" + token}
 	w, _ := secureRequest(t, s, "POST", "/api/accounts/import", `{"cookie":"session=other","label":"Other"}`, headers)
-	if w.Code != 403 {
-		t.Fatal("another person's import accepted", w.Body.String())
+	if w.Code != 404 {
+		t.Fatal("retired import accepted", w.Body.String())
 	}
 	headers["Authorization"] = "Bearer invalid"
 	w, _ = secureRequest(t, s, "GET", "/api/accounts", "", headers)
@@ -247,15 +240,15 @@ func TestOwnGroupCannotBeForgedForClassAccess(t *testing.T) {
 		t.Fatal("owner forged group membership")
 	}
 	w, _ = secureRequest(t, s, "POST", "/api/accounts/import", `{"cookie":"session=valid","label":"Owner","group_id":2}`, headers)
-	if w.Code != 403 {
-		t.Fatal("import forged group membership")
+	if w.Code != 404 {
+		t.Fatal("retired import allowed group mutation")
 	}
 	body := pulse.ACSTimelineRequest("someone-else", 1, 2)
 	request := httptest.NewRequest("POST", "http://testserver/api/accounts/"+row["id"].(string)+"/rpc/acs-timeline", strings.NewReader(string(body)))
 	request.Header.Set("Authorization", "Bearer valid")
 	response := httptest.NewRecorder()
 	s.ServeHTTP(response, request)
-	if response.Code != 403 {
-		t.Fatal("foreign turnstile uid accepted")
+	if response.Code != 404 {
+		t.Fatal("retired turnstile RPC accepted")
 	}
 }

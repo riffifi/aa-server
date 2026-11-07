@@ -96,7 +96,7 @@ func TestStaticETagRevalidationAndDirectoryBoundaries(t *testing.T) {
 	s, _ := setup(t, func(c *Config) { c.StaticDir = root })
 	first := rawRequest(s, "GET", "/static/site.js", nil)
 	if first.Code != 200 || first.Header().Get("ETag") == "" || first.Header().Get("Cache-Control") != "public, max-age=0, must-revalidate" {
-		t.Fatal("static cache headers missing")
+		t.Fatalf("static cache headers missing: status=%d headers=%v body=%s", first.Code, first.Header(), first.Body.String())
 	}
 	second := rawRequest(s, "GET", "/static/site.js", map[string]string{"If-None-Match": first.Header().Get("ETag")})
 	if second.Code != 304 || second.Body.Len() != 0 {

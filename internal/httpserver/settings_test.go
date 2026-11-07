@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,33 +59,29 @@ func TestOwnerRequestsSharingAndRevocationPreservePersonBoundAccess(t *testing.T
 	if w.Code != 200 || len(allowed["people"].([]any)) != 1 || allowed["people"].([]any)[0].(map[string]any)["account_id"] != guestID {
 		t.Fatal(w.Body.String())
 	}
-	w, snapshot := request(t, s, "GET", "/api/accounts?group_id=999999", "", guestHeaders)
+	w, snapshot := secureRequest(t, s, "GET", "/api/accounts", "", guestHeaders)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	found := false
-	for _, raw := range snapshot["passes"].([]any) {
-		pass := raw.(map[string]any)
-		if pass["account_id"] == ownerID {
+	for _, raw := range snapshot["accounts"].([]any) {
+		if raw.(map[string]any)["id"] == ownerID {
 			found = true
-			if pass["number"] != "987654321" {
-				t.Fatal("allowed pass was not included outside group filter")
-			}
 		}
 	}
-	if !found {
-		t.Fatal("shared account disappeared behind group filter")
+	if !found || strings.Contains(w.Body.String(), "987654321") {
+		t.Fatal("shared metadata missing or digital pass leaked")
 	}
 	w, _ = request(t, s, "DELETE", "/api/me/pass/people/aaid/"+guestID, "", ownerHeaders)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	w, snapshot = request(t, s, "GET", "/api/accounts?group_id=999999", "", guestHeaders)
+	w, snapshot = secureRequest(t, s, "GET", "/api/accounts", "", guestHeaders)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	for _, raw := range snapshot["passes"].([]any) {
-		if raw.(map[string]any)["account_id"] == ownerID {
+	for _, raw := range snapshot["accounts"].([]any) {
+		if raw.(map[string]any)["id"] == ownerID {
 			t.Fatal("revoked account remained accessible across groups")
 		}
 	}

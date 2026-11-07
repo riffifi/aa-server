@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"aa-server/internal/cryptocompat"
 	"aa-server/internal/postgres"
 )
 
@@ -42,6 +41,14 @@ func TestCapturedPythonHTTPContracts(t *testing.T) {
 	for i, f := range fixtures {
 		t.Run(fmt.Sprintf("%02d_%s_%s", i, f.Method, f.Path), func(t *testing.T) {
 			path := f.Path
+			if strings.Split(path, "?")[0] == "/api/accounts" {
+				f.Status = 401
+				f.Expected = map[string]any{"detail": "AA ID sign-in required", "aaid_url": s.config.AAIDURL}
+			}
+			if RetiredClientPath(strings.Split(path, "?")[0]) {
+				f.Status = 404
+				f.Expected = map[string]any{"detail": "Not Found"}
+			}
 			// Mandatory sign-in intentionally replaces the old optional-auth health flag.
 			if path == "/health" {
 				f.Expected["aaid"] = map[string]any{"required": true, "url": s.config.AAIDURL}
@@ -147,34 +154,31 @@ func TestAnonymousAndOwnerSnapshotsDoNotLeakCredentials(t *testing.T) {
 	if _, err := v.SavePass(context.Background(), id, "987654321", nil); err != nil {
 		t.Fatal(err)
 	}
-	w, result := request(t, s, "GET", "/api/accounts", "", nil)
-	if w.Code != 200 {
-		t.Fatalf("snapshot failed: %s", w.Body.String())
+	w, _ := secureRequest(t, s, "GET", "/api/accounts", "", nil)
+	if w.Code != 401 {
+		t.Fatal("anonymous snapshot accepted")
 	}
-	entries := result["accounts"].([]any)
-	passes := result["passes"].([]any)
-	if len(entries) != 1 || entries[0].(map[string]any)["own"] != false || passes[0].(map[string]any)["number"] != nil {
-		t.Fatal("anonymous pass disclosure")
+	headers := map[string]string{"Authorization": "Bearer valid"}
+	w, result := secureRequest(t, s, "GET", "/api/accounts", "", headers)
+	if w.Code != 200 || result["accounts"].([]any)[0].(map[string]any)["own"] != true {
+		t.Fatal(w.Body.String())
 	}
-	if strings.Contains(w.Body.String(), "session=synthetic") || strings.Contains(w.Body.String(), "storage_state") {
-		t.Fatal("credentials leaked")
+	for _, value := range []string{"987654321", "session=synthetic", "storage_state"} {
+		if strings.Contains(w.Body.String(), value) {
+			t.Fatal("credential or digital pass leaked", value)
+		}
 	}
-	w, result = request(t, s, "GET", "/api/accounts", "", map[string]string{"Authorization": "Bearer valid"})
-	if w.Code != 200 || result["accounts"].([]any)[0].(map[string]any)["own"] != true || result["passes"].([]any)[0].(map[string]any)["number"] != "987654321" {
-		t.Fatal("owner pass missing")
-	}
-	daily := cryptocompat.Daily(cryptocompat.PassTestingKey([]byte(s.config.MasterKey)), v.Now())
-	w, result = request(t, s, "GET", "/api/accounts", "", map[string]string{"X-Pass-Test-Key": daily.Password})
-	if w.Code != 200 || result["passes"].([]any)[0].(map[string]any)["number"] != "987654321" {
-		t.Fatal("daily testing contract changed")
+	if _, exists := result["passes"]; exists {
+		t.Fatal("legacy pass payload remains")
 	}
 	if _, err := v.SetPassAllowed(context.Background(), id, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, result = request(t, s, "GET", "/api/accounts", "", map[string]string{"Authorization": "Bearer valid", "X-Pass-Test-Key": daily.Password})
-	if result["passes"].([]any)[0].(map[string]any)["number"] != nil || result["accounts"].([]any)[0].(map[string]any)["pass_access"] != "disabled" {
-		t.Fatal("owner pass switch was bypassed")
+	w, result = secureRequest(t, s, "GET", "/api/accounts", "", headers)
+	if w.Code != 200 || result["accounts"].([]any)[0].(map[string]any)["pass_access"] != "disabled" {
+		t.Fatal("owner permission ignored")
 	}
+
 }
 
 func TestPanelLoginCSRFAndOptimisticRename(t *testing.T) {

@@ -9,6 +9,15 @@ import (
 )
 
 func (s *Server) person(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
+	if scoped(r) {
+		claims, _ := r.Context().Value(principalKey{}).(map[string]any)
+		group := numberAny(claims["grp"])
+		var gid any
+		if group > 0 {
+			gid = int64(group)
+		}
+		return map[string]any{"mirea": identity(r), "aaid_id": claims["sub"], "group_id": gid, "group_name": claims["group_name"]}, true
+	}
 	session, err := s.config.Vault.Session(r.Context(), "site", cookie(r, "aa_site"))
 	if err != nil {
 		s.failure(w, err)

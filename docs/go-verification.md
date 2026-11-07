@@ -1,3 +1,18 @@
+# Current verification note: 2.1.0
+
+The application now uses website operations. Client-authored pass numbers,
+raw Pulse RPCs, cookie imports and daily pass testing were retired deliberately.
+Server-owned QR login has a native token response, while protected AA ID web
+operations and main site operations accept either their web session or an app
+Bearer. See [client-api-migration.md](client-api-migration.md).
+
+Current route coverage is 92/92 retained legacy routes (8 exclusions) plus
+7 native additions. The API reference validates 43 JSON examples. Historical
+parity counts below describe the original migration, not compatibility with
+retired endpoints. Local PostgreSQL integration tests cover website/app result
+parity, class-scope authorization, one-shot QR claiming, token refresh/revocation,
+no Pulse credentials in app grants, and rejection of retired workflows.
+
 # Local Go migration verification
 
 Verified on 2026-11-06. No production host or production database was accessed.

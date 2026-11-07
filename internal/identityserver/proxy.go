@@ -35,7 +35,7 @@ func ascii(value string) bool {
 }
 func (s *Server) access(user, session map[string]any) (string, error) {
 	now := s.config.Store.Now().Unix()
-	return cryptocompat.Sign(s.config.Seed, map[string]any{"iss": s.config.Issuer, "aud": s.config.Audience, "sub": user["id"], "sid": session["id"], "mirea": user["pulse_uid"], "grp": user["group_id"], "usr": user["username"], "iat": now, "exp": now + 60})
+	return cryptocompat.Sign(s.config.Seed, map[string]any{"iss": s.config.Issuer, "aud": s.config.Audience, "sub": user["id"], "sid": session["id"], "mirea": user["pulse_uid"], "grp": user["group_id"], "group_name": user["group_name"], "usr": user["username"], "iat": now, "exp": now + 60})
 }
 func (s *Server) doSessions(ctx context.Context, user, session map[string]any, method, path string, body any, params url.Values) (int, http.Header, map[string]any, error) {
 	token, err := s.access(user, session)

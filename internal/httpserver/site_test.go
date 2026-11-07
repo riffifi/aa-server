@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -36,9 +37,20 @@ func TestSiteClassScopeMarkAndToday(t *testing.T) {
 		return "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20261106T090000\nDTEND:20261106T103000\nSUMMARY:Физика\nLOCATION:" + room + "\nEND:VEVENT\nEND:VCALENDAR", nil
 	})
 	defer calendars.Close()
-	s, v := setup(t, func(c *Config) { c.Pulse = upstream; c.Calendars = calendars })
+	var ownerUID string
+	s, v := setup(t, func(c *Config) {
+		c.Pulse = upstream
+		c.Calendars = calendars
+		c.Verify = func(_ context.Context, token string) (map[string]any, error) {
+			if token != "app" {
+				return nil, nil
+			}
+			return map[string]any{"mirea": ownerUID, "sub": "site-owner", "grp": int64(900001)}, nil
+		}
+	})
 	v.Now = func() time.Time { return now }
 	prefix := fmt.Sprintf("site-scope-%d-", time.Now().UnixNano())
+	ownerUID = prefix + "0"
 	ids := []string{}
 	for i := 0; i < 3; i++ {
 		gid := int64(900001 + i)
@@ -70,14 +82,22 @@ func TestSiteClassScopeMarkAndToday(t *testing.T) {
 			t.Fatal("other room exposed")
 		}
 	}
+	app := map[string]string{"Authorization": "Bearer app"}
+	for _, path := range []string{"/site/state", "/site/today", "/site/schedule", "/site/schedule/search?q=group"} {
+		webResponse, webData := secureRequest(t, s, "GET", path, "", headers)
+		appResponse, appData := secureRequest(t, s, "GET", path, "", app)
+		if webResponse.Code != 200 || appResponse.Code != 200 || !reflect.DeepEqual(webData, appData) {
+			t.Fatalf("website/app mismatch %s: web=%s app=%s", path, webResponse.Body, appResponse.Body)
+		}
+	}
 	qr := "https://attendance-app.mirea.ru/selfapprove?token=synthetic"
 	body := fmt.Sprintf(`{"qr":%q,"account_ids":[%q,%q]}`, qr, ids[1], ids[2])
-	w, _ = secureRequest(t, s, "POST", "/site/mark", body, headers)
+	w, _ = secureRequest(t, s, "POST", "/site/mark", body, app)
 	if w.Code != 403 || upstream.marks.Load() != 0 {
 		t.Fatal("cross-class mark reached upstream")
 	}
 	body = fmt.Sprintf(`{"qr":%q,"account_ids":[%q,%q,%q]}`, qr, ids[0], ids[1], ids[1])
-	w, result := secureRequest(t, s, "POST", "/site/mark", body, headers)
+	w, result := secureRequest(t, s, "POST", "/site/mark", body, app)
 	if w.Code != 200 || len(result["results"].([]any)) != 2 || upstream.marks.Load() != 2 {
 		t.Fatal(w.Body.String())
 	}

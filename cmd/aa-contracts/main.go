@@ -38,6 +38,12 @@ func run() error {
 		method, _ := route["method"].(string)
 		path, _ := route["path"].(string)
 		service, _ := route["service"].(string)
+		if (service == "sessions" && httpserver.RetiredClientPath(path)) || (service == "aaid" && path == "/v1/auth/mirea") {
+			route["native_go"] = false
+			route["excluded_reason"] = "Retired in 2.1: application uses server-owned website workflows"
+			excluded++
+			continue
+		}
 		if service == "sessions" && (path == "/tg/connect" || path == "/site/telegram-link" || path == "/api/accounts/{identifier}/pass-request") {
 			route["native_go"] = false
 			route["excluded_reason"] = "Telegram disabled by user request"
@@ -50,7 +56,7 @@ func run() error {
 			count++
 		}
 	}
-	report := map[string]any{"total": len(routes), "in_scope": len(routes) - excluded, "excluded": excluded, "implemented": count, "remaining": len(routes) - excluded - count, "note": "Handler implementation coverage; Telegram excluded by user request; full behavioral parity is not established.", "routes": routes}
+	report := map[string]any{"total": len(routes), "in_scope": len(routes) - excluded, "excluded": excluded, "implemented": count, "remaining": len(routes) - excluded - count, "note": "Handler coverage; Telegram and retired client-owned workflows excluded by user request. See docs/client-api-migration.md for 2.1 changes.", "routes": routes}
 	encoded, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return err

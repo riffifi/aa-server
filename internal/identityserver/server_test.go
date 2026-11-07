@@ -59,7 +59,7 @@ func setup(t *testing.T, configure ...func(*Config)) (*Server, *postgres.Identit
 			}
 		}
 	})
-	config := Config{Store: identity, Seed: make([]byte, 32), AdminToken: strings.Repeat("a", 32), WhoAmI: func(context.Context, string) (string, *int64, *string, error) { return pulseID, nil, nil, nil }}
+	config := Config{Store: identity, Seed: make([]byte, 32), AdminToken: strings.Repeat("a", 32)}
 	for _, change := range configure {
 		change(&config)
 	}
@@ -84,9 +84,28 @@ func request(t *testing.T, s *Server, method, path, body string, headers map[str
 	}
 	return w, result
 }
+
+func appGrant(t *testing.T, s *Server, uid string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	user, err := s.config.Store.BindMirea(context.Background(), uid, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, refresh, err := s.config.Store.CreateSession(context.Background(), user["id"].(string), "Test device", float64(s.config.SessionTTL), s.config.MaxSessions, "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := s.grant(user, session, refresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	write(w, 200, grant)
+	return w, grant
+}
 func TestIssuerGrantsCompatibleTokensAndRefreshReuseRevokesImmediately(t *testing.T) {
-	s, _, _ := setup(t)
-	w, grant := request(t, s, "POST", "/v1/auth/mirea", `{"pulse_cookie":"session=synthetic","device":" Test device "}`, nil)
+	s, _, uid := setup(t)
+	w, grant := appGrant(t, s, uid)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -115,8 +134,8 @@ func TestIssuerGrantsCompatibleTokensAndRefreshReuseRevokesImmediately(t *testin
 	}
 }
 func TestIssuerAdminBoundaryAndSessionOwnership(t *testing.T) {
-	s, _, _ := setup(t)
-	w, grant := request(t, s, "POST", "/v1/auth/mirea", `{"pulse_cookie":"session=synthetic"}`, nil)
+	s, _, uid := setup(t)
+	w, grant := appGrant(t, s, uid)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}

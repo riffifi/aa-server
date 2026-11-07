@@ -275,6 +275,9 @@ func containsGroup(groups []int64, value any) bool {
 	return false
 }
 func (s *Server) siteSession(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
+	if scoped(r) {
+		return s.person(w, r)
+	}
 	if r.URL.Path == "/api/me/today" {
 		claims, _ := r.Context().Value(principalKey{}).(map[string]any)
 		if claims == nil {

@@ -7,116 +7,17 @@ import (
 	"strings"
 	"time"
 
-	"aa-server/internal/cryptocompat"
 	"aa-server/internal/postgres"
 )
 
 func (s *Server) accounts(w http.ResponseWriter, r *http.Request) {
-	if scoped(r) {
-		s.visibleAccounts(w, r)
+	if !scoped(r) {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		w.Header().Set("X-AAID-Required", "1")
+		write(w, 401, map[string]any{"detail": "AA ID sign-in required", "aaid_url": s.config.AAIDURL})
 		return
 	}
-	gid, ok := group(w, r)
-	if !ok {
-		return
-	}
-	v := s.config.Vault
-	ctx := r.Context()
-	rows, err := v.Metadata(ctx, gid)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	claims, _ := ctx.Value(principalKey{}).(map[string]any)
-	var own map[string]any
-	shared := map[string]bool{}
-	if claims != nil {
-		mirea, _ := claims["mirea"].(string)
-		own, err = v.MetadataByPulse(ctx, mirea)
-		if err != nil {
-			s.failure(w, err)
-			return
-		}
-		if own != nil {
-			shared[own["id"].(string)] = true
-			extra, err := v.SharedMetadata(ctx, own["id"].(string))
-			if err != nil {
-				s.failure(w, err)
-				return
-			}
-			for _, row := range extra {
-				shared[row["id"].(string)] = true
-			}
-			if gid != nil {
-				known := map[string]bool{}
-				for _, row := range rows {
-					known[row["id"].(string)] = true
-				}
-				for _, row := range append([]map[string]any{own}, extra...) {
-					id := row["id"].(string)
-					if !known[id] {
-						rows = append(rows, row)
-						known[id] = true
-					}
-				}
-			}
-		}
-	}
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row["id"].(string))
-	}
-	statuses, err := v.PassStatuses(ctx, ids, r.Header.Get("X-Pass-Client"))
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	site, err := v.Session(ctx, "site", cookie(r, "aa_site"))
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	daily := cryptocompat.Daily(cryptocompat.PassTestingKey([]byte(s.config.MasterKey)), v.Now())
-	testing := r.Header.Get("X-Pass-Test-Key") != "" && cryptocompat.MatchDaily(r.Header.Get("X-Pass-Test-Key"), daily)
-	metadata := make([]map[string]any, 0, len(rows))
-	passes := make([]map[string]any, 0, len(rows))
-	eligible := []string{}
-	for _, row := range rows {
-		id := row["id"].(string)
-		state := statuses[id]
-		data := postgres.Public(row)
-		if state != "disabled" && state != "unavailable" && shared[id] {
-			data["pass_access"] = "approved"
-		} else {
-			data["pass_access"] = state
-		}
-		data["own"] = claims != nil && row["pulse_id"] == claims["mirea"]
-		metadata = append(metadata, data)
-		siteOwn := site != nil && site["mirea"] == row["pulse_id"]
-		if data["pass_allowed"] == true && (testing || siteOwn || shared[id] || state == "approved") {
-			eligible = append(eligible, id)
-		}
-	}
-	numbers, err := v.PassNumbers(ctx, eligible)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	for _, row := range rows {
-		id := row["id"].(string)
-		passes = append(passes, map[string]any{"account_id": id, "number": numbers[id], "version": row["pass_version"]})
-	}
-	cursor, err := v.Cursor(ctx)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	var testingExpires any
-	if testing {
-		testingExpires = daily.ExpiresAt
-	}
-	write(w, 200, map[string]any{"accounts": metadata, "passes": passes, "cursor": cursor, "protocol": 2, "sync": "automatic", "group_filter": gid,
-		"pass_agreements_required": true, "pass_access_expires_at": float64(v.Now().UnixMicro())/1e6 + 300, "pass_testing_expires_at": testingExpires})
+	s.visibleAccounts(w, r)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +185,7 @@ func (s *Server) panelState(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	write(w, 200, map[string]any{"csrf": session["csrf"], "accounts": metadata, "cursor": cursor, "pass_testing": cryptocompat.Daily(cryptocompat.PassTestingKey([]byte(s.config.MasterKey)), v.Now())})
+	write(w, 200, map[string]any{"csrf": session["csrf"], "accounts": metadata, "cursor": cursor})
 }
 
 func (s *Server) rename(w http.ResponseWriter, r *http.Request) {

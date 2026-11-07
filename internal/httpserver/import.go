@@ -8,91 +8,6 @@ import (
 	"aa-server/internal/pulse"
 )
 
-func optionalInt(body map[string]any, key string) *int64 {
-	value, ok := body[key].(int64)
-	if !ok {
-		return nil
-	}
-	return &value
-}
-func optionalString(body map[string]any, key string) *string {
-	value, ok := body[key].(string)
-	if !ok {
-		return nil
-	}
-	return &value
-}
-func (s *Server) importAccount(w http.ResponseWriter, r *http.Request) {
-	body, ok := input(w, r)
-	if !ok {
-		return
-	}
-	cookie := body["cookie"].(string)
-	if pulse.ValidateCookie(cookie) != nil {
-		detail(w, 400, "Invalid cookie")
-		return
-	}
-	state, uid := s.config.Pulse.Identity(r.Context(), cookie)
-	if scoped(r) && state == "valid" && uid != identity(r) {
-		detail(w, 403, "This session belongs to another MIREA account")
-		return
-	}
-	if scoped(r) {
-		if requested, ok := body["group_id"].(int64); ok {
-			claims, _ := r.Context().Value(principalKey{}).(map[string]any)
-			if requested != int64(numberAny(claims["grp"])) {
-				detail(w, 403, "Group must match the verified MIREA identity")
-				return
-			}
-		}
-	}
-	if state != "valid" {
-		detail(w, 422, "Pulse did not confirm this session")
-		return
-	}
-	v := s.config.Vault
-	existing, err := v.MetadataByPulse(r.Context(), uid)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	accountID, _ := body["account_id"].(string)
-	if accountID != "" && (existing == nil || existing["id"] != accountID) {
-		s.failure(w, &postgres.Conflict{Message: "This session belongs to a different Pulse account"})
-		return
-	}
-	expected, sessionExpected := optionalInt(body, "expected_version"), optionalInt(body, "expected_session_version")
-	groupID, groupName := optionalInt(body, "group_id"), optionalString(body, "group_name")
-	if existing != nil && expected == nil && sessionExpected == nil && existing["state"] == "valid" {
-		if existing["group_id"] == nil && groupID != nil {
-			metadata, err := v.UpdateGroup(r.Context(), existing["id"].(string), groupID, groupName, existing["version"].(int64))
-			if err != nil {
-				s.failure(w, err)
-				return
-			}
-			write(w, 200, metadata)
-			return
-		}
-		write(w, 200, postgres.Public(existing))
-		return
-	}
-	if expected == nil && sessionExpected == nil {
-		var version int64
-		if existing != nil {
-			version = existing["version"].(int64)
-		}
-		expected = &version
-	}
-	if existing != nil && existing["group_id"] != nil {
-		groupID, groupName = nil, nil
-	}
-	row, err := v.Upsert(r.Context(), postgres.Upsert{PulseID: uid, Label: body["label"].(string), Credentials: map[string]any{"cookie": cookie}, AccountID: accountID, Expected: expected, SessionExpected: sessionExpected, GroupID: groupID, GroupName: groupName})
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	write(w, 200, postgres.Public(row))
-}
 func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request) {
 	body, ok := input(w, r)
 	if !ok {
@@ -135,7 +50,15 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request) {
 	if existing != nil {
 		label = ""
 	}
-	groupID, groupName := optionalInt(body, "group_id"), optionalString(body, "group_name")
+	groupID, err := optionalGroup(claims["grp"])
+	if err != nil {
+		detail(w, 422, "Invalid verified group")
+		return
+	}
+	var groupName *string
+	if name, ok := claims["group_name"].(string); ok {
+		groupName = &name
+	}
 	if existing != nil && existing["group_id"] != nil {
 		groupID, groupName = nil, nil
 	}

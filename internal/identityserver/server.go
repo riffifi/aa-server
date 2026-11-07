@@ -21,11 +21,9 @@ import (
 	"aa-server/internal/cryptocompat"
 	"aa-server/internal/httpserver"
 	"aa-server/internal/postgres"
-	"aa-server/internal/pulse"
 	"aa-server/internal/schedule"
 )
 
-type WhoAmI func(context.Context, string) (string, *int64, *string, error)
 type Config struct {
 	Store                                 *postgres.Identity
 	Seed                                  []byte
@@ -35,11 +33,11 @@ type Config struct {
 	AccessTTL, SessionTTL                 int64
 	MaxSessions                           int
 	TrustProxy                            bool
-	WhoAmI                                WhoAmI
-	Calendars                             *schedule.Cache
-	Logins                                *browser.Jobs
-	PublicURL                             string
-	WebTTL                                int64
+
+	Calendars *schedule.Cache
+	Logins    *browser.Jobs
+	PublicURL string
+	WebTTL    int64
 }
 type code struct {
 	Expires time.Time
@@ -50,16 +48,16 @@ type bucket struct {
 	Window time.Duration
 }
 type Server struct {
-	config        Config
-	mux           *http.ServeMux
-	public        ed25519.PublicKey
-	kid           string
-	mu            sync.Mutex
-	attempts      map[string]bucket
-	codes         map[string]code
-	cancel        context.CancelFunc
-	done          chan struct{}
-	ownedPulse    *pulse.Transport
+	config   Config
+	mux      *http.ServeMux
+	public   ed25519.PublicKey
+	kid      string
+	mu       sync.Mutex
+	attempts map[string]bucket
+	codes    map[string]code
+	cancel   context.CancelFunc
+	done     chan struct{}
+
 	registered    []httpserver.Route
 	ownedHTTP     bool
 	ownedCalendar bool
@@ -113,10 +111,6 @@ func New(ctx context.Context, c Config) (*Server, error) {
 		server.config.HTTP = &http.Client{Timeout: 20 * time.Second, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		server.ownedHTTP = true
 	}
-	if c.WhoAmI == nil {
-		server.ownedPulse = pulse.NewTransport(nil)
-		server.config.WhoAmI = server.ownedPulse.WhoAmI
-	}
 	maintenance, cancel := context.WithCancel(ctx)
 	if server.config.Logins == nil {
 		server.ownedBrowser = browser.New(maintenance, browser.Config{Identity: true, LoginSlots: 4})
@@ -157,9 +151,6 @@ func (s *Server) Close() {
 	}
 	if s.ownedCalendar {
 		s.config.Calendars.Close()
-	}
-	if s.ownedPulse != nil {
-		s.ownedPulse.Close()
 	}
 	if s.ownedHTTP {
 		s.config.HTTP.CloseIdleConnections()
@@ -283,7 +274,7 @@ func public(user map[string]any) map[string]any {
 }
 func (s *Server) grant(user, session map[string]any, refresh string) (map[string]any, error) {
 	now := s.config.Store.Now().Unix()
-	claims := map[string]any{"iss": s.config.Issuer, "aud": s.config.Audience, "sub": user["id"], "sid": session["id"], "mirea": user["pulse_uid"], "grp": user["group_id"], "usr": user["username"], "iat": now, "exp": now + s.config.AccessTTL}
+	claims := map[string]any{"iss": s.config.Issuer, "aud": s.config.Audience, "sub": user["id"], "sid": session["id"], "mirea": user["pulse_uid"], "grp": user["group_id"], "group_name": user["group_name"], "usr": user["username"], "iat": now, "exp": now + s.config.AccessTTL}
 	token, err := cryptocompat.Sign(s.config.Seed, claims)
 	if err != nil {
 		return nil, err
@@ -334,6 +325,9 @@ func NativeRoutes() []httpserver.Route {
 	return server.registered
 }
 func (s *Server) routes() {
+	s.handle("POST /v1/auth/logins", s.webLogin)
+	s.handle("GET /v1/auth/logins/{identifier}", s.webLoginState)
+	s.handle("POST /v1/auth/logins/{identifier}/claim", s.webLoginClaim)
 	s.handle("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
 		write(w, http.StatusOK, buildinfo.Current("aa-id"))
 	})
@@ -343,7 +337,6 @@ func (s *Server) routes() {
 	s.handle("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, map[string]any{"issuer": s.config.Issuer, "audience": s.config.Audience, "keys": []any{map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(s.public), "kid": s.kid, "alg": "EdDSA", "use": "sig"}}})
 	})
-	s.handle("POST /v1/auth/mirea", s.signIn)
 	s.handle("POST /v1/auth/refresh", s.refresh)
 	s.handle("POST /v1/auth/logout", s.logout)
 	s.handle("GET /v1/me", s.me)
@@ -352,59 +345,6 @@ func (s *Server) routes() {
 	s.handle("DELETE /v1/me/sessions/{session}", s.revoke)
 	s.handle("PUT /v1/admin/users/{user}/status", s.status)
 	s.webRoutes()
-}
-func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
-	body, ok := httpserver.DecodeBody(w, r, []httpserver.Field{{Name: "pulse_cookie", Kind: "string", Required: true, Min: 1, Max: 65536}, {Name: "device", Kind: "string", Max: 80}})
-	if !ok {
-		return
-	}
-	if s.limit(w, r, "mirea", 30, time.Minute) {
-		return
-	}
-	cookie := body["pulse_cookie"].(string)
-	if pulse.ValidateCookie(cookie) != nil {
-		detail(w, 400, "Invalid Pulse session cookie")
-		return
-	}
-	uid, groupID, groupName, err := s.config.WhoAmI(r.Context(), cookie)
-	if err != nil {
-		if errors.Is(err, pulse.ErrWire) || errors.Is(err, pulse.ErrCookie) || errors.Is(err, pulse.ErrResponseLimit) {
-			detail(w, 400, "Invalid Pulse session cookie")
-		} else {
-			detail(w, 503, "MIREA Pulse is unavailable; try again")
-		}
-		return
-	}
-	if uid == "" {
-		detail(w, 401, "The MIREA session is not valid; sign in to MIREA again")
-		return
-	}
-	user, err := s.config.Store.BindMirea(r.Context(), uid, groupID, groupName)
-	if err != nil {
-		failure(w, err)
-		return
-	}
-	device, _ := body["device"].(string)
-	device = strings.TrimSpace(strings.Map(func(c rune) rune {
-		if c < 32 || c == 127 {
-			return -1
-		}
-		return c
-	}, device))
-	if device == "" {
-		device = "Unknown device"
-	}
-	session, refresh, err := s.config.Store.CreateSession(r.Context(), user["id"].(string), device, float64(s.config.SessionTTL), s.config.MaxSessions, "app")
-	if err != nil {
-		failure(w, err)
-		return
-	}
-	grant, err := s.grant(user, session, refresh)
-	if err != nil {
-		failure(w, err)
-		return
-	}
-	write(w, 200, grant)
 }
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	body, ok := httpserver.DecodeBody(w, r, []httpserver.Field{{Name: "refresh_token", Kind: "string", Required: true, Min: 20, Max: 200}})

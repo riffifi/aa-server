@@ -28,8 +28,6 @@ func (s *Server) visibleAccounts(w http.ResponseWriter, r *http.Request) {
 		rows = filtered
 	}
 	accounts := []any{}
-	passes := []any{}
-	eligible := []string{}
 	for _, row := range rows {
 		data := postgres.Public(row)
 		own := row["pulse_id"] == identity(r)
@@ -45,24 +43,13 @@ func (s *Server) visibleAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		accounts = append(accounts, data)
-		if row["pass_allowed"] != int64(0) {
-			eligible = append(eligible, row["id"].(string))
-		}
-	}
-	numbers, err := v.VisiblePassNumbers(r.Context(), identity(r), eligible)
-	if err != nil {
-		s.failure(w, err)
-		return
-	}
-	for _, row := range rows {
-		passes = append(passes, map[string]any{"account_id": row["id"], "number": numbers[row["id"].(string)], "version": row["pass_version"]})
 	}
 	cursor, err := v.Cursor(r.Context())
 	if err != nil {
 		s.failure(w, err)
 		return
 	}
-	write(w, 200, map[string]any{"accounts": accounts, "passes": passes, "cursor": cursor, "protocol": 2, "sync": "automatic", "group_filter": gid, "pass_agreements_required": true, "pass_access_expires_at": float64(v.Now().UnixMicro())/1e6 + 300, "pass_testing_expires_at": nil})
+	write(w, 200, map[string]any{"accounts": accounts, "cursor": cursor, "protocol": 2, "sync": "automatic", "group_filter": gid})
 }
 func (s *Server) visibleGroups(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.config.Vault.VisibleMetadata(r.Context(), identity(r))

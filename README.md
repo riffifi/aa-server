@@ -1,6 +1,11 @@
-# Pulse session server — URL-only automatic sync
+# AntiAttendance server
 
 ## Native Go / PostgreSQL server
+
+Version **2.1.0** uses the same server-owned workflows for the website and
+application. Client cookie imports, raw Pulse RPCs and digital pass publication
+were removed. Update the application before deploying this release:
+[client API migration guide](docs/client-api-migration.md).
 
 The native implementation uses PostgreSQL, requires AA ID authentication for
 application APIs and disables Telegram. It includes account synchronization,

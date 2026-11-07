@@ -75,7 +75,7 @@ func (s *Server) handOff(r *http.Request, user map[string]any, credentials map[s
 		return false
 	}
 	now := s.config.Store.Now().Unix()
-	token, err := cryptocompat.Sign(s.config.Seed, map[string]any{"iss": s.config.Issuer, "aud": "aa-link", "sub": user["id"], "mirea": user["pulse_uid"], "grp": user["group_id"], "usr": user["username"], "iat": now, "exp": now + 60})
+	token, err := cryptocompat.Sign(s.config.Seed, map[string]any{"iss": s.config.Issuer, "aud": "aa-link", "sub": user["id"], "mirea": user["pulse_uid"], "grp": user["group_id"], "group_name": user["group_name"], "usr": user["username"], "iat": now, "exp": now + 60})
 	if err != nil {
 		return false
 	}
@@ -119,6 +119,21 @@ func (s *Server) webLoginClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	linked := s.handOff(r, user, result.Credentials)
+	if strings.HasPrefix(r.URL.Path, "/v1/auth/logins/") {
+		session, refresh, err := s.config.Store.CreateSession(r.Context(), user["id"].(string), browserName(r.UserAgent()), float64(s.config.SessionTTL), s.config.MaxSessions, "app")
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		grant, err := s.grant(user, session, refresh)
+		if err != nil {
+			failure(w, err)
+			return
+		}
+		grant["linked"] = linked
+		write(w, 200, grant)
+		return
+	}
 	_, token, err := s.config.Store.CreateSession(r.Context(), user["id"].(string), browserName(r.UserAgent()), float64(s.config.WebTTL), 1, "web")
 	if err != nil {
 		failure(w, err)

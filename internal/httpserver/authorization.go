@@ -22,6 +22,10 @@ func identity(r *http.Request) string {
 // ServeHTTP is the production boundary. Contract tests may exercise individual
 // handlers through serveHTTP; network listeners always use this strict policy.
 func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
+	if RetiredClientPath(r.URL.Path) {
+		detail(w, 404, "Not Found")
+		return
+	}
 	if r.URL.Path == "/tg/connect" || r.URL.Path == "/site/telegram-link" || (strings.HasPrefix(r.URL.Path, "/api/accounts/") && strings.HasSuffix(r.URL.Path, "/pass-request")) {
 		detail(w, 404, "Not Found")
 		return
@@ -56,7 +60,7 @@ func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if session != nil {
-				claims = map[string]any{"sub": session["aaid_id"], "mirea": session["mirea"], "grp": session["group_id"]}
+				claims = map[string]any{"sub": session["aaid_id"], "mirea": session["mirea"], "grp": session["group_id"], "group_name": session["group_name"]}
 			}
 		}
 		mirea, _ := claims["mirea"].(string)
@@ -79,22 +83,18 @@ func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "60")
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/accounts/") && r.URL.Path != "/api/accounts/import" {
+		if strings.HasPrefix(r.URL.Path, "/api/accounts/") {
 			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/accounts/"), "/")
-			pass := len(parts) == 3 && parts[1] == "rpc" && (parts[2] == "pass-token" || parts[2] == "pass-code" || parts[2] == "pass-issue")
-			if !s.authorizeAccount(w, r, parts[0], pass) {
+			if !s.authorizeAccount(w, r, parts[0]) {
 				return
 			}
 		}
 	}
 	s.serveHTTP(w, r)
 }
-func (s *Server) authorizeAccount(w http.ResponseWriter, r *http.Request, id string, pass bool) bool {
+func (s *Server) authorizeAccount(w http.ResponseWriter, r *http.Request, id string) bool {
 	var allowed bool
 	query := `SELECT EXISTS(SELECT 1 FROM aa.accounts a WHERE a.id=$1 AND a.pulse_id=$2)`
-	if pass {
-		query = `SELECT EXISTS(SELECT 1 FROM aa.accounts a WHERE a.id=$1 AND (a.pulse_id=$2 OR (a.pass_allowed=1 AND EXISTS(SELECT 1 FROM aa.pass_shares p JOIN aa.accounts own ON own.id=p.grantee_id WHERE p.account_id=a.id AND own.pulse_id=$2))))`
-	}
 	if err := s.config.Vault.Pool.QueryRow(r.Context(), query, id, identity(r)).Scan(&allowed); err != nil {
 		s.failure(w, err)
 		return false

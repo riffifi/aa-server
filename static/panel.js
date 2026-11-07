@@ -1,6 +1,5 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let testingPasses = false;
 let csrf = '', currentJob = null, accounts = [], syncing = false, editingGroup = null;
 const STATE = { valid: ['Сессия работает', 'ok'], expired: ['Сессия истекла', 'bad'], forbidden: ['Доступ запрещён', 'bad'], unavailable: ['Пульс недоступен', 'wait'], invalidResponse: ['Непонятный ответ Пульса', 'wait'] };
 
@@ -69,9 +68,6 @@ async function refresh() {
     // Don't rebuild the list under an open dialog or a pressed button.
     if (!document.querySelector('dialog[open]')) renderList();
     $('server-url').value = location.origin;
-    $('pass-test-password').value = data.pass_testing.password;
-    $('pass-test-expiry').textContent = 'Сменится ' + date(data.pass_testing.expires_at) + ' (полночь по Москве).';
-    if (testingPasses) await previewTestPasses();
   } catch (error) { if ($('panel').hidden === false) notice(error.message); }
   finally { syncing = false; }
 }
@@ -101,13 +97,6 @@ async function copy(input) {
   try { if (navigator.clipboard) await navigator.clipboard.writeText(element.value); else { element.select(); if (!document.execCommand('copy')) throw Error(); } notice('Скопировано'); }
   catch (_) { element.focus(); element.select(); notice('Выделите и скопируйте текст.'); }
 }
-async function previewTestPasses() {
-  const response = await fetch('/api/accounts', { headers: { 'X-Pass-Test-Key': $('pass-test-password').value }, cache: 'no-store' });
-  if (!response.ok) throw Error('Не удалось проверить пропуска.');
-  const result = await response.json();
-  const count = (result.passes || []).filter(pass => pass.number).length;
-  $('pass-test-status').textContent = `Для проверки доступно пропусков: ${count}. Разрешения владельцев не меняются.`;
-}
 
 $('group-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -124,17 +113,9 @@ $('new-account').onclick = () => $('account-dialog').showModal();
 $('account-form').addEventListener('submit', async event => { event.preventDefault(); try { await startLogin($('account-label').value); $('account-dialog').close(); $('account-form').reset(); } catch (error) { notice(error.message); } });
 $('copy-server').onclick = () => copy('server-url');
 $('copy-owner').onclick = () => copy('owner-link');
-$('copy-pass-test').onclick = () => copy('pass-test-password');
 $('filter').addEventListener('input', renderList);
 $('close-enroll').onclick = async () => { if (currentJob) await api('logins/' + currentJob, 'DELETE').catch(error => notice(error.message)); currentJob = null; $('enroll-card').hidden = true; };
-$('sign-out').onclick = async () => { testingPasses = false; $('pass-test-password').value = ''; $('pass-test-status').textContent = ''; try { await api('logout', 'POST'); $('panel').hidden = true; $('sign-in').hidden = false; $('enroll-card').hidden = true; currentJob = null; csrf = ''; } catch (error) { notice(error.message); } };
-$('toggle-pass-test').onclick = async () => {
-  testingPasses = !testingPasses;
-  $('toggle-pass-test').setAttribute('aria-pressed', String(testingPasses));
-  $('toggle-pass-test').textContent = testingPasses ? 'Скрыть' : 'Показать доступные пропуска';
-  if (!testingPasses) { $('pass-test-status').textContent = ''; return; }
-  try { await previewTestPasses(); } catch (error) { notice(error.message); }
-};
+$('sign-out').onclick = async () => { try { await api('logout', 'POST'); $('panel').hidden = true; $('sign-in').hidden = false; $('enroll-card').hidden = true; currentJob = null; csrf = ''; } catch (error) { notice(error.message); } };
 document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => button.closest('dialog').close(); });
 
 // ---- Debug tabs -----------------------------------------------------------
