@@ -52,7 +52,7 @@ func (s *Server) siteToday(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, row["id"].(string))
 		}
 	}
-	marks, err := s.config.Vault.MarksSince(r.Context(), ids, float64(schedule.Day(c.now).Unix()-900))
+	marks, err := s.config.Vault.MarksSince(r.Context(), ids, float64(schedule.Day(c.now).Unix()-1800))
 	if err != nil {
 		s.failure(w, err)
 		return
@@ -64,11 +64,14 @@ func (s *Server) siteToday(w http.ResponseWriter, r *http.Request) {
 	}
 	result["mirea"] = meta
 	lessons := []any{}
+	foreign := map[string]bool{}
+	for _, row := range rows {
+		foreign[row["id"].(string)] = c.group != nil && row["group_id"] != *c.group
+	}
 	for i, lesson := range c.lessons {
 		cells := map[string]any{}
 		for _, mark := range marks {
-			created := numberAny(mark["created"])
-			if created >= float64(lesson.Start.Unix()-900) && created < float64(lesson.End.Unix()) {
+			if markBelongs(mark, lesson, foreign[mark["account_id"].(string)]) {
 				id := mark["account_id"].(string)
 				previous, _ := cells[id].(map[string]any)
 				if previous["state"] != "approved" {
@@ -81,7 +84,7 @@ func (s *Server) siteToday(w http.ResponseWriter, r *http.Request) {
 			if containsGroup(columns[i], row["group_id"]) {
 				id := row["id"].(string)
 				studentMarks[id] = cells[id]
-				journalMarks[id] = journalStatus(journals, row, &lesson)
+				journalMarks[id] = journalStatusFor(journals, row, &lesson, foreign[id])
 			}
 		}
 		shown := schedule.Shown(&lesson).(map[string]any)
@@ -98,7 +101,11 @@ func (s *Server) siteToday(w http.ResponseWriter, r *http.Request) {
 	result["lessons"] = lessons
 	people := []map[string]any{}
 	for _, row := range rows {
-		people = append(people, sitePerson(c, row))
+		person := sitePerson(c, row)
+		if foreign[row["id"].(string)] {
+			delete(person, "session")
+		}
+		people = append(people, person)
 	}
 	sortPeople(people, c.group, false)
 	result["people"] = people
@@ -152,6 +159,21 @@ func (s *Server) siteState(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	requested, valid := integer(w, r, "lesson_start", 0)
+	if !valid {
+		return
+	}
+	if !chooseLesson(c, requested) {
+		detail(w, 409, "Lesson is outside the permitted 30 minute window")
+		return
+	}
+	if c.active != nil {
+		c.rows, err = s.config.Vault.MetadataGroups(r.Context(), c.groups(c.active))
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
 	people := []map[string]any{}
 	groups := []any{}
 	activeGroups := c.groups(c.active)
@@ -167,22 +189,36 @@ func (s *Server) siteState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if c.active != nil {
-		marks, err := s.config.Vault.LatestMarks(r.Context(), ids, float64(c.active.Start.Unix()-900))
+		allMarks, err := s.config.Vault.MarksSince(r.Context(), ids, float64(c.active.Start.Unix()-1800))
 		if err != nil {
 			s.failure(w, err)
 			return
 		}
+		foreign := map[string]bool{}
+		for _, row := range rows {
+			foreign[row["id"].(string)] = c.group != nil && row["group_id"] != *c.group
+		}
+		marks := map[string]map[string]any{}
+		for _, mark := range allMarks {
+			id := mark["account_id"].(string)
+			if markBelongs(mark, *c.active, foreign[id]) && marks[id]["state"] != "approved" {
+				marks[id] = mark
+			}
+		}
 		journals := s.journalFor(r.Context(), c, activeGroups)
 		for _, row := range rows {
 			person := sitePerson(c, row)
-			here, _ := s.site.presence.get(r.Context(), row["id"].(string))
-			person["inside"] = here
+			person["inside"] = nil
+			if !foreign[row["id"].(string)] {
+				here, _ := s.site.presence.get(r.Context(), row["id"].(string))
+				person["inside"] = here
+			}
 			var mark any
 			if value := marks[row["id"].(string)]; value != nil {
 				mark = map[string]any{"state": value["state"], "message": value["message"], "created": value["created"]}
 			}
 			person["mark"] = mark
-			person["mirea"] = journalStatus(journals, row, c.active)
+			person["mirea"] = journalStatusFor(journals, row, c.active, c.group != nil && row["group_id"] != *c.group)
 			people = append(people, person)
 		}
 	}
@@ -195,8 +231,11 @@ func (s *Server) siteState(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.active != nil {
 		active = "soon"
-		if c.current != nil {
+		if !c.active.Start.After(c.now) {
 			active = "now"
+		}
+		if !c.active.End.After(c.now) {
+			active = "recent"
 		}
 	}
 	had := false
@@ -215,10 +254,26 @@ func (s *Server) siteState(w http.ResponseWriter, r *http.Request) {
 	if s.config.AAIDURL != "" {
 		aaid = s.config.AAIDURL
 	}
-	write(w, 200, map[string]any{"me": map[string]any{"group_id": c.group, "group_name": c.name, "account_id": accountID, "label": label, "connected": connected}, "lesson": schedule.Shown(c.current), "next": schedule.Shown(c.next), "active": active, "had_lessons": had, "own_group_size": size, "schedule_url": "/schedule", "schedule_error": c.error, "groups": groups, "people": people, "aaid_url": aaid})
+	available := []any{}
+	for _, lesson := range c.lessons {
+		if lessonWindow(lesson, c.now.Unix()) {
+			item := schedule.Shown(&lesson).(map[string]any)
+			item["lesson_start"] = lesson.Start.Unix()
+			available = append(available, item)
+		}
+	}
+	var chosen any
+	if c.active != nil {
+		item := schedule.Shown(c.active).(map[string]any)
+		item["lesson_start"] = c.active.Start.Unix()
+		item["starts_at"] = c.active.Start.Unix()
+		item["ends_at"] = c.active.End.Unix()
+		chosen = item
+	}
+	write(w, 200, map[string]any{"me": map[string]any{"group_id": c.group, "group_name": c.name, "account_id": accountID, "label": label, "connected": connected}, "lesson": schedule.Shown(c.current), "next": schedule.Shown(c.next), "selected_lesson": chosen, "available_lessons": available, "active": active, "had_lessons": had, "own_group_size": size, "schedule_url": "/schedule", "schedule_error": c.error, "groups": groups, "people": people, "aaid_url": aaid})
 }
 func (s *Server) siteMark(w http.ResponseWriter, r *http.Request) {
-	body, ok := DecodeBody(w, r, []Field{{Name: "qr", Kind: "string", Required: true, Min: 1, Max: 8192}, {Name: "account_ids", Kind: "strings", Nullable: true, Min: 1, Max: 200}, {Name: "own_group", Kind: "bool"}})
+	body, ok := DecodeBody(w, r, []Field{{Name: "qr", Kind: "string", Required: true, Min: 1, Max: 8192}, {Name: "account_ids", Kind: "strings", Nullable: true, Min: 1, Max: 200}, {Name: "own_group", Kind: "bool"}, {Name: "lesson_start", Kind: "int", Min: 0}})
 	if !ok {
 		return
 	}
@@ -240,6 +295,18 @@ func (s *Server) siteMark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	own, _ := body["own_group"].(bool)
+	requested, _ := body["lesson_start"].(int64)
+	if !chooseLesson(c, requested) {
+		detail(w, 409, "Lesson is outside the permitted 30 minute window")
+		return
+	}
+	if c.active != nil {
+		c.rows, err = s.config.Vault.MetadataGroups(r.Context(), c.groups(c.active))
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
 	groups := c.groups(c.active)
 	if own {
 		if c.group == nil {
@@ -325,7 +392,12 @@ func (s *Server) siteMark(w http.ResponseWriter, r *http.Request) {
 	workers.Wait()
 	actor, _ := session["aaid_id"].(string)
 	for _, result := range results {
-		if err := s.config.Vault.RecordMark(r.Context(), result["id"].(string), result["state"].(string), result["message"].(string), "site:"+actor); err != nil {
+		var lessonStart *float64
+		if c.active != nil {
+			start := float64(c.active.Start.Unix())
+			lessonStart = &start
+		}
+		if err := s.config.Vault.RecordLessonMark(r.Context(), result["id"].(string), result["state"].(string), result["message"].(string), "site:"+actor, lessonStart); err != nil {
 			s.failure(w, err)
 			return
 		}

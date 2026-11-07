@@ -67,8 +67,8 @@ func (s *Server) doSessions(ctx context.Context, user, session map[string]any, m
 		return 0, nil, nil, err
 	}
 	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, (64<<20)+1))
-	if err != nil || len(raw) > 64<<20 {
+	raw, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+	if err != nil || len(raw) > 2<<20 {
 		return 0, nil, nil, errors.New("invalid session server response")
 	}
 	var data map[string]any

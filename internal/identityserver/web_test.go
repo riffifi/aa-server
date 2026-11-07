@@ -57,6 +57,34 @@ func TestWebCodeIsSingleUseAndSessionLogoutRevokesCookie(t *testing.T) {
 	}
 }
 
+func TestCallbackCodeCannotOutliveItsOriginatingSession(t *testing.T) {
+	s, store, pulseID := setup(t, func(c *Config) { c.SiteURL = "https://aa.ytc-srv.org" })
+	user, err := store.BindMirea(context.Background(), pulseID, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, token, err := store.CreateSession(context.Background(), user["id"].(string), "browser", 3600, 3, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := map[string]string{"Cookie": "aaid_web=" + token}
+	w, data := request(t, s, "POST", "/web/authorize", `{"state":"synthetic_state_1234567890"}`, headers)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	location, err := url.Parse(data["redirect"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Revoke(context.Background(), user["id"].(string), session["id"].(string), "test"); err != nil {
+		t.Fatal(err)
+	}
+	w, _ = request(t, s, "POST", "/v1/site/exchange", `{"code":"`+location.Query().Get("code")+`"}`, nil)
+	if w.Code != 401 {
+		t.Fatal("code from revoked session redeemed", w.Body.String())
+	}
+}
+
 func TestWebProxyForwardsOnlyShortLivedJWTAndPublicFields(t *testing.T) {
 	seed := make([]byte, 32)
 	public := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)

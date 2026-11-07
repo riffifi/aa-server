@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aa-server/internal/postgres"
+	"aa-server/internal/schedule"
 )
 
 const password = "synthetic-admin-password"
@@ -97,7 +98,9 @@ func setup(t *testing.T, configure func(*Config)) (*Server, *postgres.Vault) {
 	if err = v.InitializeAdmin(ctx, password); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Vault: v, MasterKey: key}
+	calendar := schedule.NewCache(ctx, func(context.Context, string) (string, error) { return "", nil })
+	t.Cleanup(calendar.Close)
+	cfg := Config{Vault: v, MasterKey: key, Calendars: calendar}
 	if configure != nil {
 		configure(&cfg)
 	}

@@ -21,6 +21,29 @@ func (s *Server) accounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	if scoped(r) {
+		key := identity(r)
+		s.attemptsMu.Lock()
+		if s.activeEvents == nil {
+			s.activeEvents = map[string]int{}
+		}
+		if s.activeEvents[key] >= 2 {
+			s.attemptsMu.Unlock()
+			w.Header().Set("Retry-After", "1")
+			detail(w, 429, "Too many concurrent event polls")
+			return
+		}
+		s.activeEvents[key]++
+		s.attemptsMu.Unlock()
+		defer func() {
+			s.attemptsMu.Lock()
+			s.activeEvents[key]--
+			if s.activeEvents[key] == 0 {
+				delete(s.activeEvents, key)
+			}
+			s.attemptsMu.Unlock()
+		}()
+	}
 	after, ok := integer(w, r, "after", 0)
 	if !ok {
 		return
@@ -112,6 +135,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	now := s.config.Vault.Now()
 	host := remoteHost(r)
 	s.attemptsMu.Lock()
+	if _, exists := s.attempts[host]; !exists && len(s.attempts) >= 8192 {
+		s.attemptsMu.Unlock()
+		detail(w, 429, "Server is busy; retry later")
+		return
+	}
 	queue := s.attempts[host]
 	for len(queue) > 0 && queue[0].Before(now.Add(-time.Minute)) {
 		queue = queue[1:]

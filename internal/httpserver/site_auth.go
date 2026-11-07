@@ -97,6 +97,16 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
+	if sessionID, ok := person["session_id"].(string); ok && sessionID != "" {
+		if err = v.BindSiteIdentity(r.Context(), token, sessionID); err != nil {
+			s.failure(w, err)
+			return
+		}
+	} else if s.config.RequireIdentityState {
+		_ = v.Logout(r.Context(), "site", token)
+		redirect(w, "/?signin=failed", 303)
+		return
+	}
 	own, err := v.MetadataByPulse(r.Context(), mirea)
 	if err != nil {
 		s.failure(w, err)

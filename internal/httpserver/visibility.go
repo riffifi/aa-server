@@ -12,6 +12,10 @@ func (s *Server) visibleAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := s.config.Vault
+	scope, allowed := s.rosterScope(w, r)
+	if !allowed {
+		return
+	}
 	rows, err := v.VisibleMetadata(r.Context(), identity(r))
 	if err != nil {
 		s.failure(w, err)
@@ -29,6 +33,9 @@ func (s *Server) visibleAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	accounts := []any{}
 	for _, row := range rows {
+		if !scope.allows(row) {
+			continue
+		}
 		data := postgres.Public(row)
 		own := row["pulse_id"] == identity(r)
 		data["own"] = own
@@ -52,6 +59,10 @@ func (s *Server) visibleAccounts(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, map[string]any{"accounts": accounts, "cursor": cursor, "protocol": 2, "sync": "automatic", "group_filter": gid})
 }
 func (s *Server) visibleGroups(w http.ResponseWriter, r *http.Request) {
+	scope, allowed := s.rosterScope(w, r)
+	if !allowed {
+		return
+	}
 	rows, err := s.config.Vault.VisibleMetadata(r.Context(), identity(r))
 	if err != nil {
 		s.failure(w, err)
@@ -59,6 +70,9 @@ func (s *Server) visibleGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	known := map[int64]map[string]any{}
 	for _, row := range rows {
+		if !scope.allows(row) {
+			continue
+		}
 		group, ok := row["group_id"].(int64)
 		if !ok {
 			continue

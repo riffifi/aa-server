@@ -91,6 +91,8 @@ func run() error {
 		return errors.New("preserved admin credentials are missing; import data or explicitly initialize the empty development database")
 	}
 	cfg := httpserver.Config{Vault: vault, MasterKey: string(key), AAIDURL: identityURL, PublicURL: publicURL, StaticDir: *static, EnforceAAID: true, PanelLocalOnly: enabled(os.Getenv("PANEL_LOCAL_ONLY"))}
+	cfg.RequireIdentityState = true
+	cfg.MetricsFile = os.Getenv("METRICS_FILE")
 	if endpoint := os.Getenv("AAID_JWKS_URL"); endpoint != "" {
 		verifier := cryptocompat.NewVerifier(endpoint, nil)
 		defer verifier.Close()

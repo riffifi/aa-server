@@ -63,6 +63,22 @@ func (s *Server) limited(w http.ResponseWriter, key string, count int, window ti
 	now := s.config.Vault.Now()
 	s.attemptsMu.Lock()
 	defer s.attemptsMu.Unlock()
+	if _, exists := s.attempts[key]; !exists && len(s.attempts) >= 8192 {
+		for candidate, values := range s.attempts {
+			retention := s.attemptWindows[candidate]
+			if retention < 10*time.Minute {
+				retention = 10 * time.Minute
+			}
+			if len(values) == 0 || values[len(values)-1].Before(now.Add(-retention)) {
+				delete(s.attempts, candidate)
+				delete(s.attemptWindows, candidate)
+			}
+		}
+		if len(s.attempts) >= 8192 {
+			detail(w, 429, "Server is busy; retry later")
+			return true
+		}
+	}
 	queue := s.attempts[key]
 	for len(queue) > 0 && queue[0].Before(now.Add(-window)) {
 		queue = queue[1:]
@@ -78,6 +94,10 @@ func (s *Server) limited(w http.ResponseWriter, key string, count int, window ti
 	return false
 }
 func (s *Server) passList(w http.ResponseWriter, r *http.Request, own map[string]any) {
+	scope, permitted := s.rosterScope(w, r)
+	if !permitted {
+		return
+	}
 	v := s.config.Vault
 	id := own["id"].(string)
 	people := []any{}
@@ -88,6 +108,9 @@ func (s *Server) passList(w http.ResponseWriter, r *http.Request, own map[string
 		return
 	}
 	for _, row := range shares {
+		if !scope.allows(row) {
+			continue
+		}
 		item := card(row)
 		item["kind"] = "aaid"
 		item["id"] = row["id"]
@@ -99,6 +122,9 @@ func (s *Server) passList(w http.ResponseWriter, r *http.Request, own map[string
 		return
 	}
 	for _, row := range pending {
+		if !scope.allows(row) {
+			continue
+		}
 		item := card(row)
 		item["id"] = row["request_id"]
 		item["requested_at"] = row["requested_at"]
@@ -107,6 +133,10 @@ func (s *Server) passList(w http.ResponseWriter, r *http.Request, own map[string
 	write(w, 200, map[string]any{"pass_allowed": own["pass_allowed"] != int64(0), "people": people, "requests": requests})
 }
 func (s *Server) myPasses(w http.ResponseWriter, r *http.Request, own map[string]any) {
+	scope, permitted := s.rosterScope(w, r)
+	if !permitted {
+		return
+	}
 	id := own["id"].(string)
 	shares, err := s.config.Vault.SharedMetadata(r.Context(), id)
 	if err != nil {
@@ -116,6 +146,9 @@ func (s *Server) myPasses(w http.ResponseWriter, r *http.Request, own map[string
 	passes := []any{}
 	requests := []any{}
 	for _, row := range shares {
+		if !scope.allows(row) {
+			continue
+		}
 		item := card(row)
 		item["pass_allowed"] = row["pass_allowed"] != int64(0)
 		passes = append(passes, item)
@@ -126,6 +159,9 @@ func (s *Server) myPasses(w http.ResponseWriter, r *http.Request, own map[string
 		return
 	}
 	for _, row := range pending {
+		if !scope.allows(row) {
+			continue
+		}
 		item := card(row)
 		item["id"] = row["request_id"]
 		item["requested_at"] = row["requested_at"]
@@ -175,6 +211,10 @@ func (s *Server) changeMyAccount(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, settings(row))
 }
 func (s *Server) people(w http.ResponseWriter, r *http.Request) {
+	scope, permitted := s.rosterScope(w, r)
+	if !permitted {
+		return
+	}
 	own, ok := s.ownAccount(w, r, scoped(r))
 	if !ok {
 		return
@@ -206,6 +246,9 @@ func (s *Server) people(w http.ResponseWriter, r *http.Request) {
 	}
 	people := []any{}
 	for _, row := range rows {
+		if !scope.allows(row) {
+			continue
+		}
 		people = append(people, card(row))
 	}
 	write(w, 200, map[string]any{"people": people})
@@ -226,7 +269,11 @@ func (s *Server) share(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	if grantee == nil || grantee["id"] == id {
+	scope, permitted := s.rosterScope(w, r)
+	if !permitted {
+		return
+	}
+	if !scope.allows(grantee) || grantee["id"] == id {
 		detail(w, 404, "Человек не найден")
 		return
 	}
@@ -296,7 +343,11 @@ func (s *Server) askPass(w http.ResponseWriter, r *http.Request) {
 		s.failure(w, err)
 		return
 	}
-	if owner == nil || owner["id"] == own["id"] {
+	scope, permitted := s.rosterScope(w, r)
+	if !permitted {
+		return
+	}
+	if !scope.allows(owner) || owner["id"] == own["id"] {
 		detail(w, 404, "Человек не найден")
 		return
 	}
@@ -328,6 +379,26 @@ func (s *Server) answerPass(w http.ResponseWriter, r *http.Request) {
 	id := own["id"].(string)
 	decision := r.PathValue("decision")
 	if decision != "allow" && decision != "deny" {
+		detail(w, 404, "Такого запроса нет")
+		return
+	}
+	scope, permitted := s.rosterScope(w, r)
+	if !permitted {
+		return
+	}
+	pending, err := s.config.Vault.ShareRequests(r.Context(), id, true)
+	if err != nil {
+		s.failure(w, err)
+		return
+	}
+	visible := false
+	for _, row := range pending {
+		if row["request_id"] == r.PathValue("request") && scope.allows(row) {
+			visible = true
+			break
+		}
+	}
+	if !visible {
 		detail(w, 404, "Такого запроса нет")
 		return
 	}

@@ -20,9 +20,12 @@ import (
 	"aa-server/internal/postgres"
 	"aa-server/internal/pulse"
 	"aa-server/internal/schedule"
+	"aa-server/internal/security"
 )
 
 type Config struct {
+	MetricsFile                              string
+	RequireIdentityState                     bool
 	Vault                                    *postgres.Vault
 	MasterKey                                string
 	AAIDURL                                  string
@@ -46,6 +49,8 @@ type Pulse interface {
 	Logout(context.Context, string) error
 }
 type Server struct {
+	admission       security.Gate
+	activeEvents    map[string]int
 	site            *siteService
 	diagnostics     diagnosticState
 	config          Config
@@ -116,6 +121,7 @@ func New(ctx context.Context, config Config) (*Server, error) {
 	}
 	s := &Server{config: config, mux: http.NewServeMux(), attempts: map[string][]time.Time{}, signal: make(chan struct{}), done: make(chan struct{})}
 	s.attemptWindows = map[string]time.Duration{}
+	s.activeEvents = map[string]int{}
 	s.maintenanceDone = make(chan struct{})
 	if s.config.Pulse == nil {
 		s.ownedPulse = pulse.NewTransport(nil)
@@ -495,6 +501,7 @@ func (s *Server) routes() {
 	s.handle("GET /panel/api/debug/requests", s.debugRequests)
 	s.handle("GET /panel/api/debug/logs", s.debugLogs)
 	s.handle("GET /panel/api/debug/system", s.debugSystem)
+	s.handle("GET /panel/api/debug/metrics", s.debugMetrics)
 	s.handle("GET /panel/api/debug/tables", s.debugTables)
 	s.handle("GET /panel/api/debug/tables/{name}", s.debugTables)
 	s.handle("GET /panel/api/debug/audit", s.debugAudit)

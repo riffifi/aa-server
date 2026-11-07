@@ -14,7 +14,7 @@ func (s *Store) ExactPerson(ctx context.Context, query, exclude string) ([]map[s
 	if !shareUsername.MatchString(query) {
 		return []map[string]any{}, nil
 	}
-	rows, err := s.Pool.Query(ctx, "SELECT id,username,label,group_name FROM aa.accounts WHERE username=$1 AND id<>$2 LIMIT 1", query, exclude)
+	rows, err := s.Pool.Query(ctx, "SELECT id,pulse_id,group_id,username,label,group_name FROM aa.accounts WHERE username=$1 AND id<>$2 LIMIT 1", query, exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (v *Vault) VisiblePassNumbers(ctx context.Context, mirea string, ids []stri
 }
 func (s *Store) VisibleEvents(ctx context.Context, mirea string, after int64, group *int64) ([]map[string]any, int64, error) {
 	rows, err := s.Pool.Query(ctx, `WITH batch AS (SELECT * FROM aa.events WHERE id>$2 ORDER BY id LIMIT 1000)
- SELECT e.*,(e.audience_mirea=$1 OR EXISTS(SELECT 1 FROM aa.accounts a WHERE a.id=e.account_id AND `+visibleAccount+`)) IS TRUE AS visible FROM batch e ORDER BY id`, mirea, after)
+ SELECT e.*,(e.audience_mirea=$1 OR EXISTS(SELECT 1 FROM aa.accounts a WHERE a.id=e.account_id AND a.pulse_id=$1)) IS TRUE AS visible FROM batch e ORDER BY id`, mirea, after)
 	if err != nil {
 		return nil, after, err
 	}

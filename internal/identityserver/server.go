@@ -22,6 +22,7 @@ import (
 	"aa-server/internal/httpserver"
 	"aa-server/internal/postgres"
 	"aa-server/internal/schedule"
+	"aa-server/internal/security"
 )
 
 type Config struct {
@@ -40,23 +41,25 @@ type Config struct {
 	WebTTL    int64
 }
 type code struct {
-	Expires time.Time
-	UserID  string
+	Expires   time.Time
+	UserID    string
+	SessionID string
 }
 type bucket struct {
 	Times  []time.Time
 	Window time.Duration
 }
 type Server struct {
-	config   Config
-	mux      *http.ServeMux
-	public   ed25519.PublicKey
-	kid      string
-	mu       sync.Mutex
-	attempts map[string]bucket
-	codes    map[string]code
-	cancel   context.CancelFunc
-	done     chan struct{}
+	admission security.Gate
+	config    Config
+	mux       *http.ServeMux
+	public    ed25519.PublicKey
+	kid       string
+	mu        sync.Mutex
+	attempts  map[string]bucket
+	codes     map[string]code
+	cancel    context.CancelFunc
+	done      chan struct{}
 
 	registered    []httpserver.Route
 	ownedHTTP     bool
@@ -194,8 +197,10 @@ func (s *Server) limit(w http.ResponseWriter, r *http.Request, key string, count
 	if err != nil {
 		address = r.RemoteAddr
 	}
-	if s.config.TrustProxy && r.Header.Get("X-Real-IP") != "" {
-		address = r.Header.Get("X-Real-IP")
+	if s.config.TrustProxy {
+		if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
+			address = ip.String()
+		}
 	}
 	key += "|" + address
 	s.mu.Lock()
@@ -203,6 +208,17 @@ func (s *Server) limit(w http.ResponseWriter, r *http.Request, key string, count
 	b := s.attempts[key]
 	b.Window = window
 	now := s.config.Store.Now()
+	if _, exists := s.attempts[key]; !exists && len(s.attempts) >= 8192 {
+		for candidate, value := range s.attempts {
+			if len(value.Times) == 0 || value.Times[len(value.Times)-1].Before(now.Add(-value.Window)) {
+				delete(s.attempts, candidate)
+			}
+		}
+		if len(s.attempts) >= 8192 {
+			detail(w, 429, "Server is busy; retry later")
+			return true
+		}
+	}
 	for len(b.Times) > 0 && b.Times[0].Before(now.Add(-window)) {
 		b.Times = b.Times[1:]
 	}
@@ -216,6 +232,12 @@ func (s *Server) limit(w http.ResponseWriter, r *http.Request, key string, count
 	return false
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !s.admission.Try() {
+		w.Header().Set("Retry-After", "1")
+		detail(w, 429, "Server is busy; retry shortly")
+		return
+	}
+	defer s.admission.Leave()
 	if r.ContentLength > 100000 {
 		detail(w, 413, "Request too large")
 		return
@@ -294,7 +316,7 @@ func (s *Server) caller(w http.ResponseWriter, r *http.Request) (map[string]any,
 			failure(w, err)
 			return nil, nil, false
 		}
-		if session == nil {
+		if session == nil || session["user_id"] != claims["sub"] {
 			claims = nil
 		}
 	}

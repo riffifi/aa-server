@@ -24,6 +24,12 @@ func TestOwnerRequestsSharingAndRevocationPreservePersonBoundAccess(t *testing.T
 	guest := account(t, v, uids["guest"])
 	_ = account(t, v, uids["other"])
 	ownerID, guestID := owner["id"].(string), guest["id"].(string)
+	group := int64(5330)
+	for _, row := range []map[string]any{owner, guest} {
+		if _, err := v.UpdateGroup(context.Background(), row["id"].(string), &group, nil, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := v.SavePass(context.Background(), ownerID, "987654321", nil); err != nil {
 		t.Fatal(err)
 	}

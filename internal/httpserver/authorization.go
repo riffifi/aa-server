@@ -60,10 +60,25 @@ func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if session != nil {
-				claims = map[string]any{"sub": session["aaid_id"], "mirea": session["mirea"], "grp": session["group_id"], "group_name": session["group_name"]}
+				claims = map[string]any{"sub": session["aaid_id"], "mirea": session["mirea"], "grp": session["group_id"], "group_name": session["group_name"], "sid": session["aaid_session_id"]}
 			}
 		}
 		mirea, _ := claims["mirea"].(string)
+		if mirea != "" && s.config.RequireIdentityState {
+			sub, _ := claims["sub"].(string)
+			sid, _ := claims["sid"].(string)
+			current, err := s.config.Vault.VerifiedIdentity(r.Context(), sub, mirea, sid)
+			if err != nil {
+				s.failure(w, err)
+				return
+			}
+			if current == nil {
+				mirea = ""
+			} else {
+				claims["grp"] = current["group_id"]
+				claims["group_name"] = current["group_name"]
+			}
+		}
 		if mirea == "" {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			w.Header().Set("X-AAID-Required", "1")

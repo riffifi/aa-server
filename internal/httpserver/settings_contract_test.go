@@ -39,8 +39,9 @@ func TestCapturedPythonSharingConversation(t *testing.T) {
 		}
 	})
 	aliases := map[string]string{}
+	group := int64(5330)
 	for _, person := range []string{"owner", "guest", "other"} {
-		row, err := v.Upsert(context.Background(), postgres.Upsert{PulseID: prefix + person, Label: strings.ToUpper(person[:1]) + person[1:], Credentials: map[string]any{"cookie": "session=" + person}})
+		row, err := v.Upsert(context.Background(), postgres.Upsert{PulseID: prefix + person, Label: strings.ToUpper(person[:1]) + person[1:], GroupID: &group, Credentials: map[string]any{"cookie": "session=" + person}})
 		if err != nil {
 			t.Fatal(err)
 		}

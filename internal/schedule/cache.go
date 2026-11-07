@@ -34,11 +34,12 @@ type Cache struct {
 	wg                   sync.WaitGroup
 	closed               bool
 	client               *http.Client
+	slots                chan struct{}
 }
 
 func NewCache(ctx context.Context, fetch Fetch) *Cache {
 	root, cancel := context.WithCancel(ctx)
-	cache := &Cache{Fetch: fetch, Now: time.Now, TTL: 15 * time.Minute, Retry: time.Minute, MaxBytes: 32 << 20, MaxEntries: 512, entries: map[int64]cacheEntry{}, flights: map[int64]*flight{}, ctx: root, cancel: cancel}
+	cache := &Cache{Fetch: fetch, Now: time.Now, TTL: 15 * time.Minute, Retry: time.Minute, MaxBytes: 32 << 20, MaxEntries: 512, entries: map[int64]cacheEntry{}, flights: map[int64]*flight{}, ctx: root, cancel: cancel, slots: make(chan struct{}, 16)}
 	if fetch == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxConnsPerHost = 16
@@ -130,7 +131,10 @@ func (c *Cache) put(id int64, entry cacheEntry) {
 }
 func (c *Cache) load(id int64, work *flight, previous cacheEntry) {
 	defer c.wg.Done()
-	text, err := c.Fetch(c.ctx, ICALURL(id))
+	defer func() { <-c.slots }()
+	ctx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
+	defer cancel()
+	text, err := c.Fetch(ctx, ICALURL(id))
 	now := c.Now()
 	entry := previous
 	if err != nil || text == "" || len(text) > 2<<20 || !strings.Contains(text, "BEGIN:VCALENDAR") {
@@ -175,6 +179,12 @@ func (c *Cache) source(ctx context.Context, id int64, wait bool) (string, time.T
 	}
 	work := c.flights[id]
 	if work == nil {
+		select {
+		case c.slots <- struct{}{}:
+		default:
+			c.mu.Unlock()
+			return entry.Text, entry.Fetched
+		}
 		work = &flight{Done: make(chan struct{})}
 		c.flights[id] = work
 		c.wg.Add(1)
@@ -198,6 +208,15 @@ func (c *Cache) Lessons(ctx context.Context, id int64, day time.Time) ([]Lesson,
 		return nil, false
 	}
 	return On(source, day), true
+}
+
+// Authorization never falls back to an expired timetable during an outage.
+func (c *Cache) FreshLessons(ctx context.Context, id int64, day time.Time) ([]Lesson, bool) {
+	text, at := c.SourceWait(ctx, id)
+	if text == "" || at.IsZero() || c.Now().Sub(at) > c.TTL {
+		return nil, false
+	}
+	return On(text, day), true
 }
 func (c *Cache) Week(ctx context.Context, id int64, monday time.Time) (map[string][]Lesson, bool) {
 	source, _ := c.Source(ctx, id)

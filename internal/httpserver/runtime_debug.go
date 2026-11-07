@@ -63,6 +63,12 @@ func (w *statusWriter) Write(body []byte) (int, error) {
 }
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !s.admission.Try() {
+		w.Header().Set("Retry-After", "1")
+		detail(w, 429, "Server is busy; retry shortly")
+		return
+	}
+	defer s.admission.Leave()
 	started := time.Now()
 	wrapped := &statusWriter{ResponseWriter: w}
 	defer func() {

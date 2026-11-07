@@ -205,3 +205,4 @@ button:disabled { cursor: default; color: var(--disabled); border-color: var(--l
 .slot-body .meta { font-size: 12px; line-height: 16px; color: var(--secondary); overflow-wrap: anywhere; }
 .slot.past { opacity: .55; }
 .slot.now { box-shadow: inset 3px 0 0 var(--accent); padding-left: 12px; }
+#tab-system canvas { display: block; width: 100%; max-width: 900px; height: 120px; border-bottom: 1px solid var(--line); }

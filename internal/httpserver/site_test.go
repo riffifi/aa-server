@@ -34,7 +34,7 @@ func TestSiteClassScopeMarkAndToday(t *testing.T) {
 		if strings.Contains(url, "/Group/900003?") {
 			room = "Б-202"
 		}
-		return "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20261106T090000\nDTEND:20261106T103000\nSUMMARY:Физика\nLOCATION:" + room + "\nEND:VEVENT\nEND:VCALENDAR", nil
+		return "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20261106T090000\nDTEND:20261106T103000\nSUMMARY:Физика\nLOCATION:" + room + "\nX-META-TEACHER:Shared teacher\nEND:VEVENT\nEND:VCALENDAR", nil
 	})
 	defer calendars.Close()
 	var ownerUID string

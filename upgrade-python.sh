@@ -11,6 +11,7 @@ python_dir=$PWD python_project=antiattendance-sessions
 env_file=.env.go project=antiattendance-go project_explicit=0 timeout=600
 stop_python=0 interactive=auto build=1 pull=1 prepare_only=0 install_deps=0
 configure_nginx=0 tls=0 mode=migration
+metrics=auto
 setup_args=()
 if (($#)) && [[ $1 != -* ]]; then shift; fi
 while (($#)); do
@@ -29,6 +30,8 @@ while (($#)); do
     --install-deps) install_deps=1; shift ;;
     --no-build) build=0; shift ;;
     --skip-pull) pull=0; shift ;;
+    --metrics) metrics=1; setup_args+=(--metrics); shift ;;
+    --no-metrics) metrics=0; setup_args+=(--no-metrics); shift ;;
     --no-host-nginx|--no-tls) shift ;;
     --site-url|--public-url|--url|--aaid-url|--site-port|--port|--aaid-port|--panel-port)
       ui_value "$@"; setup_args+=("$1" "$2"); shift 2 ;;
@@ -73,7 +76,19 @@ fi
 if ((EUID != 0 && install_deps)) && command -v sudo >/dev/null; then
   if [[ -t 0 ]]; then sudo -v; else sudo -n true || ui_die "Rerun the command with sudo."; fi
 fi
-total=8
+if [[ $metrics == auto && -f $env_file ]]; then metrics=$(installer_env_value "$env_file" GO_INSTALL_METRICS); metrics=${metrics:-auto}; fi
+if [[ $metrics == auto ]]; then
+  metrics=0
+  if [[ $(uname -s) == Linux && -d /run/systemd/system ]]; then metrics=1; fi
+fi
+[[ $metrics == 0 || $metrics == 1 ]] || ui_die "GO_INSTALL_METRICS must be 0 or 1."
+if ((metrics && !prepare_only)); then
+  [[ $(uname -s) == Linux && -d /run/systemd/system ]] || ui_die "Metrics require Linux/systemd. Solution: add --no-metrics."
+  if ((EUID != 0)); then
+    if [[ -t 0 ]]; then sudo -v; else sudo -n true || ui_die "Metrics require root. Solution: rerun migration with sudo or --no-metrics."; fi
+  fi
+fi
+total=$((8 + metrics))
 if ((prepare_only)); then total=3; fi
 ui_init "$total" 'Upgrading Python to Go'
 python_stopped=0
@@ -166,6 +181,7 @@ ui_run 'Validating and exporting a consistent SQLite snapshot' python3 scripts/e
 ui_run 'Importing and checking Go services on new ports' bash migrate-go.sh \
   --snapshot "$backup_dir/snapshot.jsonl" --master-key "$backup_dir/sessions/master.key" --signing-key "$backup_dir/aaid/signing.key" \
   --env-file "$env_file" --project "$project" --timeout "$timeout" --no-build --no-install-deps --plain --log-level "$UI_LOG_LEVEL"
+if ((metrics)); then ui_run 'Enabling resource and durable traffic counters' privileged python3 scripts/install_metrics.py --project "$project"; fi
 "${helper[@]}" mark-pending "${helper_options[@]}" --env-file "$env_file" --pending 0
 python_stopped=0
 ui_finish 'Python upgraded to Go; data, keys and panel password preserved'

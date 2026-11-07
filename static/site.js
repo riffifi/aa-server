@@ -1,6 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let state = null;
+let chosenLesson = null;
+let loadSequence = 0;
 const selected = new Set();
 let touched = false; // the person changed the selection by hand
 
@@ -37,11 +39,17 @@ function reconnect() {
 }
 
 async function load() {
+  const sequence = ++loadSequence;
   try {
-    state = await api('/site/state');
+    const result = await api('/site/state' + (chosenLesson === null ? '' : '?lesson_start=' + encodeURIComponent(chosenLesson)));
+    if (sequence !== loadSequence) return;
+    state = result;
+    chosenLesson = state.selected_lesson ? state.selected_lesson.lesson_start : null;
     showError('');
     render();
   } catch (error) {
+    if (sequence !== loadSequence) return;
+    if (error.status === 409 && chosenLesson !== null) { chosenLesson = null; await load(); return; }
     if (error.status === 401 && autoSignIn()) return;
     if (error.status === 401) { $('app').hidden = true; $('signin').hidden = false; $('logout').hidden = true; $('aaid-link').hidden = true; $('who').textContent = ''; return; }
     showError(error.message);
@@ -65,7 +73,7 @@ function render() {
   $('mark-group').hidden = $('mark-group-note').hidden = !(me.group_id && state.own_group_size > 0);
 
   $('groups-block').hidden = $('people-block').hidden = !state.active;
-  $('people-heading').textContent = state.active === 'soon' ? 'Люди на следующей паре' : 'Люди на паре';
+  $('people-heading').textContent = 'Люди на выбранной паре';
   $('groups').replaceChildren(...state.groups.map(group => {
     const chip = el('span', group.name || 'Группа ' + group.id, 'chip' + (group.own ? ' own' : ''));
     if (group.own) chip.append(el('span', 'ваша', 'badge'));
@@ -89,33 +97,45 @@ const describe = lesson => [lesson.type, lesson.location, lesson.teacher].filter
 
 // The current lesson, or during a break the next one with a countdown to it.
 function renderLesson() {
-  const { lesson, next, me } = state;
+  const { next, me } = state;
+  const lesson = state.selected_lesson;
   const now = Date.now() / 1000;
-  let countdown = '';
+  const choices = state.available_lessons || [];
+  const index = choices.findIndex(item => item.lesson_start === chosenLesson);
+  $('lesson-prev').disabled = index <= 0;
+  $('lesson-next-button').disabled = index < 0 || index >= choices.length - 1;
   if (lesson) {
-    $('lesson-label').textContent = 'Сейчас · ' + lesson.start + '–' + lesson.end;
+    $('lesson-label').textContent = 'Выбранная пара · ' + lesson.start + '–' + lesson.end;
     $('lesson-title').textContent = lesson.subject;
     $('lesson-meta').textContent = describe(lesson);
-    countdown = 'До конца ' + inMinutes(lesson.ends_at - now);
-    $('lesson-next').textContent = next ? 'Далее ' + next.start + '–' + next.end + ': ' + next.subject + (next.location ? ' · ' + next.location : '') : 'Это последняя пара сегодня';
-  } else if (next) {
-    $('lesson-label').textContent = (state.had_lessons ? 'Перерыв · ' : 'Следующая пара · ') + next.start + '–' + next.end;
-    $('lesson-title').textContent = next.subject;
-    $('lesson-meta').textContent = describe(next);
-    countdown = 'Начнётся через ' + inMinutes(next.starts_at - now);
     $('lesson-next').textContent = '';
+    $('lesson-countdown').hidden = false;
+    $('lesson-countdown').textContent = now < lesson.starts_at
+      ? 'До начала ' + inMinutes(lesson.starts_at - now)
+      : now < lesson.ends_at ? 'До конца ' + inMinutes(lesson.ends_at - now)
+      : 'Пара закончилась · доступ ещё ' + inMinutes(lesson.ends_at + 1800 - now);
+    if (now > lesson.ends_at + 1800 && $('scanner').hidden) { chosenLesson = null; load(); }
   } else {
     $('lesson-label').textContent = 'Сейчас';
-    $('lesson-title').textContent = state.schedule_error || (me.group_id ? 'Сегодня пар больше нет' : 'Группа не определена');
+    $('lesson-title').textContent = state.schedule_error || (next ? 'Следующая пара: ' + next.start + ' · ' + next.subject : me.group_id ? 'Нет доступной пары' : 'Группа не определена');
     $('lesson-meta').textContent = '';
     $('lesson-next').textContent = '';
+    $('lesson-countdown').hidden = true;
   }
-  $('lesson-countdown').textContent = countdown;
-  $('lesson-countdown').hidden = !countdown;
-  // A lesson just started or ended: ask the server for the new state.
-  const edge = lesson ? lesson.ends_at : next ? next.starts_at - 15 * 60 : null;
-  if (edge && now >= edge && now - edge < 60 && $('scanner').hidden) load();
 }
+
+async function moveLesson(direction) {
+  const choices = state && state.available_lessons || [];
+  const index = choices.findIndex(item => item.lesson_start === chosenLesson);
+  const item = choices[index + direction];
+  if (!item || sending) return;
+  if (!$('scanner').hidden) closeScanner();
+  chosenLesson = item.lesson_start;
+  selected.clear(); touched = false;
+  await load();
+}
+$('lesson-prev').addEventListener('click', () => moveLesson(-1));
+$('lesson-next-button').addEventListener('click', () => moveLesson(1));
 
 function markable(person) { return person.session === 'valid' && person.mirea !== 'present' && (!person.mark || person.mark.state !== 'approved'); }
 
@@ -329,6 +349,7 @@ async function submit(text) {
   try { navigator.vibrate && navigator.vibrate(40); } catch (_) { /* no vibration */ }
   try {
     const body = mode === 'group' ? { qr: text, own_group: true, ...(ids ? { account_ids: ids } : {}) } : { qr: text, account_ids: ids };
+    if (chosenLesson !== null) body.lesson_start = chosenLesson;
     const result = await api('/site/mark', json(body));
     for (const item of result.results) {
       if (item.state === 'expired') gaveUp.add(item.id);

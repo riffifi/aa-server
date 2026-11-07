@@ -38,6 +38,14 @@ func runtimeRoles(ctx context.Context, store *postgres.Store) error {
 				return err
 			}
 		}
+		if item.role == "sessions" {
+			if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.identity_active(TEXT,TEXT,TEXT) TO "+role); err != nil {
+				return err
+			}
+			if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.identity_context(TEXT,TEXT,TEXT) TO "+role); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

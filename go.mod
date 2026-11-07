@@ -7,7 +7,7 @@ require (
 	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/teambition/rrule-go v1.8.2
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/text v0.43.0
 )
 

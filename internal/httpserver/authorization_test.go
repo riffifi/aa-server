@@ -77,6 +77,10 @@ func TestStrictSnapshotsEventsAndRPCEnforceOwnerAndExplicitPassShare(t *testing.
 	other := account(t, v, otherUID)
 	ownerID, guestID, otherID := owner["id"].(string), guest["id"].(string), other["id"].(string)
 	for _, id := range []string{ownerID, guestID, otherID} {
+		group := int64(5330)
+		if _, err := v.UpdateGroup(context.Background(), id, &group, nil, 1); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := v.SetPassAllowed(context.Background(), id, true, nil); err != nil {
 			t.Fatal(err)
 		}

@@ -1,4 +1,26 @@
-# Current verification note: 2.1.0
+# Current verification note: 2.2.0
+
+The local security regression suite covers live identity revocation and current
+group checks, whole-day foreign names with per-class attendance masking,
+conservative shared-class matching, inclusive ±30 minute lesson selection,
+early marks, QR result expiration/cancellation and bounded HTTP/calendar work.
+Host resource monitoring includes every process in the Compose service cgroups;
+counter persistence is tested across restarts, container recreation and resets.
+See [security-audit.md](security-audit.md) and [API.md](API.md).
+Production was not accessed; external MIREA authentication was not exercised.
+
+2.2.0 checks: full `go test -race ./...` against four isolated local PostgreSQL
+databases passed, followed by focused race checks after the final changes.
+Installer/nginx checks: 23 tests and 16 subtests passed; Python migration and
+counter persistence checks: 12 tests and 3 subtests passed. Linux collector
+checks passed (4 tests), including real Unix-socket HTTP against a fake daemon.
+Real Chromium passed lesson navigation and metrics rendering, QR/consent/cookie
+capture, repeated context cleanup and browser recycling, entirely offline.
+Linux sessions/AA ID binaries compile; JS and Bash syntax checks and the API
+reference checker pass (92 retained legacy routes, 8 additions, 44 JSON examples).
+The builder is pinned to Go 1.26.10. After updating x/crypto to
+v0.58.1-0.20261009181718-2f1f834330b2, the full PostgreSQL race suite passed
+again on Go 1.26.10; govulncheck v1.9.0 on that toolchain reports no vulnerabilities.
 
 The application now uses website operations. Client-authored pass numbers,
 raw Pulse RPCs, cookie imports and daily pass testing were retired deliberately.
@@ -7,7 +29,7 @@ operations and main site operations accept either their web session or an app
 Bearer. See [client-api-migration.md](client-api-migration.md).
 
 Current route coverage is 92/92 retained legacy routes (8 exclusions) plus
-7 native additions. The API reference validates 43 JSON examples. Historical
+8 native additions. The API reference validates 44 JSON examples. Historical
 parity counts below describe the original migration, not compatibility with
 retired endpoints. Local PostgreSQL integration tests cover website/app result
 parity, class-scope authorization, one-shot QR claiming, token refresh/revocation,

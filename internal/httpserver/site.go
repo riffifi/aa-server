@@ -5,6 +5,7 @@ import (
 	"aa-server/internal/schedule"
 	"context"
 	"fmt"
+	"golang.org/x/text/cases"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,9 +15,11 @@ import (
 )
 
 type journalLesson struct {
-	ID     string
-	Start  float64
-	Status map[string]string
+	ID      string
+	Start   float64
+	End     float64
+	Subject string
+	Status  map[string]string
 }
 type journalDay struct {
 	Fetched float64
@@ -130,13 +133,14 @@ func (s *siteService) readJournal(ctx context.Context, key string) journalDay {
 			old := known[lesson["id"].(string)]
 			if len(old.Status) > 0 && numberAny(lesson["end"]) < previous.Fetched-3600 {
 				status = old.Status
-			} else if start <= out.Fetched+900 {
+			} else if start <= out.Fetched+1800 {
 				reply, ok = rpc("lesson-attendance", pulse.LessonAttendanceRequest(lesson["id"].(string), journal["id"].(string)))
 				if ok {
 					status = pulse.LessonStatus(reply.Body, reply.Headers)
 				}
 			}
-			out.Lessons = append(out.Lessons, journalLesson{ID: lesson["id"].(string), Start: start, Status: status})
+			subject, _ := lesson["subject"].(string)
+			out.Lessons = append(out.Lessons, journalLesson{ID: lesson["id"].(string), Start: start, End: numberAny(lesson["end"]), Subject: subject, Status: status})
 		}
 		out.Error = nil
 		break
@@ -151,6 +155,7 @@ func numberAny(value any) float64 {
 }
 
 type siteContext struct {
+	authorizationFresh    bool
 	own                   map[string]any
 	group                 *int64
 	name                  any
@@ -170,10 +175,10 @@ func (s *Server) siteContext(ctx context.Context, session map[string]any) (*site
 		return nil, err
 	}
 	result := &siteContext{own: own, group: idValue(session["group_id"]), name: session["group_name"], now: v.Now().In(schedule.Moscow), known: map[int64]any{}, days: map[int64][]schedule.Lesson{}, rows: []map[string]any{}}
-	if result.group == nil && own != nil {
+	if result.group == nil && own != nil && session["group_authoritative"] != true {
 		result.group = idValue(own["group_id"])
 	}
-	if (result.name == nil || result.name == "") && own != nil {
+	if (result.name == nil || result.name == "") && own != nil && sameID(result.group, idValue(own["group_id"])) {
 		result.name = own["group_name"]
 	}
 	if result.group == nil {
@@ -189,10 +194,24 @@ func (s *Server) siteContext(ctx context.Context, session map[string]any) (*site
 		return result, nil
 	}
 	result.lessons = lessons
+	freshOwn, fresh := s.config.Calendars.FreshLessons(ctx, *result.group, result.now)
+	result.authorizationFresh = fresh
+	if fresh {
+		lessons = freshOwn
+		result.lessons = freshOwn
+	}
 	result.current, result.next = schedule.CurrentAndNext(lessons, result.now)
 	result.active = result.current
-	if result.active == nil && result.next != nil && result.next.Start.Sub(result.now) <= 15*time.Minute {
+	if result.active == nil && result.next != nil && result.next.Start.Sub(result.now) <= 30*time.Minute {
 		result.active = result.next
+	}
+	if result.active == nil {
+		for i := len(lessons) - 1; i >= 0; i-- {
+			if lessonWindow(lessons[i], result.now.Unix()) {
+				result.active = &result.lessons[i]
+				break
+			}
+		}
 	}
 	groups, err := v.Groups(ctx)
 	if err != nil {
@@ -213,9 +232,11 @@ func (s *Server) siteContext(ctx context.Context, session map[string]any) (*site
 		go func() {
 			defer workers.Done()
 			for gid := range jobs {
-				their, _ := s.config.Calendars.Lessons(ctx, gid, result.now)
+				their, fresh := s.config.Calendars.FreshLessons(ctx, gid, result.now)
 				dataMu.Lock()
-				result.days[gid] = their
+				if fresh {
+					result.days[gid] = their
+				}
 				dataMu.Unlock()
 			}
 		}()
@@ -247,13 +268,16 @@ func (c *siteContext) groups(lesson *schedule.Lesson) []int64 {
 		return out
 	}
 	out = append(out, *c.group)
+	if !c.authorizationFresh {
+		return out
+	}
 	other := []int64{}
 	for gid, lessons := range c.days {
 		if gid == *c.group {
 			continue
 		}
 		for _, their := range lessons {
-			if schedule.Same(*lesson, their) {
+			if schedule.SharedLesson(*lesson, their) {
 				other = append(other, gid)
 				break
 			}
@@ -304,14 +328,25 @@ func (s *Server) journalFor(ctx context.Context, c *siteContext, groups []int64)
 	return found
 }
 func journalStatus(found map[int64]journalDay, row map[string]any, lesson *schedule.Lesson) any {
+	return journalStatusFor(found, row, lesson, false)
+}
+
+func journalStatusFor(found map[int64]journalDay, row map[string]any, lesson *schedule.Lesson, strict bool) any {
 	gid, _ := row["group_id"].(int64)
 	for _, theirs := range found[gid].Lessons {
 		delta := theirs.Start - float64(lesson.Start.Unix())
-		if delta >= -600 && delta <= 600 {
+		if strict && (theirs.End != float64(lesson.End.Unix()) || normalizedSubject(theirs.Subject) == "" || normalizedSubject(theirs.Subject) != normalizedSubject(lesson.Subject)) {
+			continue
+		}
+		if (strict && delta == 0) || (!strict && delta >= -600 && delta <= 600) {
 			if value, ok := theirs.Status[row["pulse_id"].(string)]; ok {
 				return value
 			}
 		}
 	}
 	return nil
+}
+
+func normalizedSubject(subject string) string {
+	return strings.Join(strings.Fields(cases.Fold().String(subject)), " ")
 }

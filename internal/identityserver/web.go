@@ -84,7 +84,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, user, ok := s.webSession(w, r)
+	session, user, ok := s.webSession(w, r)
 	if !ok {
 		return
 	}
@@ -105,7 +105,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 			delete(s.codes, key)
 		}
 	}
-	s.codes[postgres.Digest(token)] = code{now.Add(time.Minute), user["id"].(string)}
+	s.codes[postgres.Digest(token)] = code{now.Add(time.Minute), user["id"].(string), session["id"].(string)}
 	s.mu.Unlock()
 	write(w, 200, map[string]any{"redirect": s.config.SiteURL + "/auth/callback?code=" + url.QueryEscape(token) + "&state=" + url.QueryEscape(body["state"].(string))})
 }
@@ -126,6 +126,15 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		detail(w, 400, "Код входа недействителен")
 		return
 	}
+	session, err := s.config.Store.ActiveSession(r.Context(), entry.SessionID)
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	if session == nil || session["user_id"] != entry.UserID {
+		detail(w, 401, "Identity session was revoked")
+		return
+	}
 	user, err := s.config.Store.User(r.Context(), entry.UserID)
 	if err != nil {
 		failure(w, err)
@@ -135,7 +144,7 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		detail(w, 403, "Этот AA ID заблокирован")
 		return
 	}
-	write(w, 200, map[string]any{"id": user["id"], "mirea": user["pulse_uid"], "group_id": user["group_id"], "group_name": user["group_name"]})
+	write(w, 200, map[string]any{"id": user["id"], "mirea": user["pulse_uid"], "group_id": user["group_id"], "group_name": user["group_name"], "session_id": entry.SessionID})
 }
 func (s *Server) webRevoke(w http.ResponseWriter, r *http.Request) {
 	_, user, ok := s.webSession(w, r)

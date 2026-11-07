@@ -125,13 +125,42 @@ func (v *Vault) CreateSiteSession(ctx context.Context, aaidID, mirea string, gro
 	if _, err = tx.Exec(ctx, "DELETE FROM aa.site_sessions WHERE expires<$1", v.now()); err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO aa.site_sessions VALUES($1,$2,$3,$4,$5,$6)", Digest(token), aaidID, mirea, groupID, groupName, v.now()+ttl); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO aa.site_sessions(key_hash,aaid_id,mirea,group_id,group_name,expires) VALUES($1,$2,$3,$4,$5,$6)", Digest(token), aaidID, mirea, groupID, groupName, v.now()+ttl); err != nil {
 		return "", err
 	}
 	if _, err = tx.Exec(ctx, "UPDATE aa.accounts SET page_seen_at=$1 WHERE pulse_id=$2", v.now(), mirea); err != nil {
 		return "", err
 	}
 	return token, tx.Commit(ctx)
+}
+
+func (v *Vault) BindSiteIdentity(ctx context.Context, token, sessionID string) error {
+	_, err := v.Pool.Exec(ctx, "UPDATE aa.site_sessions SET aaid_session_id=$1 WHERE key_hash=$2", sessionID, Digest(token))
+	return err
+}
+
+func (v *Vault) IdentityActive(ctx context.Context, user, mirea, session string) (bool, error) {
+	if user == "" || mirea == "" || session == "" {
+		return false, nil
+	}
+	var active bool
+	err := v.Pool.QueryRow(ctx, "SELECT aa.identity_active($1,$2,$3)", user, mirea, session).Scan(&active)
+	return active, err
+}
+
+func (v *Vault) VerifiedIdentity(ctx context.Context, user, mirea, session string) (map[string]any, error) {
+	if user == "" || mirea == "" || session == "" {
+		return nil, nil
+	}
+	rows, err := v.Pool.Query(ctx, "SELECT * FROM aa.identity_context($1,$2,$3)", user, mirea, session)
+	if err != nil {
+		return nil, err
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToMap)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return row, err
 }
 
 func (s *Store) AccountByPulse(ctx context.Context, pulseID string) (map[string]any, error) {

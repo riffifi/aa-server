@@ -16,6 +16,7 @@ site_port=18080 aaid_port=18091 panel_port=18092
 configure_nginx=0 tls=0 tls_email= nginx_config=
 interactive=auto start=1 build=1 pull=1 install_deps=1 deps_explicit=0
 show_password=0
+metrics=auto
 python_dir=$PWD python_project=antiattendance-sessions python_requested=0 stop_python=0
 original_args=("$@")
 declare -A updates=()
@@ -58,6 +59,8 @@ Operation:
   --timeout SECONDS     Service readiness timeout, default: 240
   --no-install-deps     Check dependencies without installing them
   --install-deps        Install missing dependencies (default)
+  --metrics             Enable CPU/RAM/disk/network collector (Linux/systemd)
+  --no-metrics          Disable the collector; durable counters are preserved
 
 Output:
   --plain               Plain text without animation or ANSI codes
@@ -101,6 +104,8 @@ while (($#)); do
     --skip-pull) pull=0; shift ;;
     --no-install-deps) install_deps=0; deps_explicit=1; shift ;;
     --install-deps) install_deps=1; deps_explicit=1; shift ;;
+    --metrics) metrics=1; updates[GO_INSTALL_METRICS]=1; shift ;;
+    --no-metrics) metrics=0; updates[GO_INSTALL_METRICS]=0; shift ;;
     --plain) UI_PLAIN=1; shift ;;
     --no-color) UI_NO_COLOR=1; shift ;;
     --log-level) ui_value "$@"; ui_set_log_level "$2"; shift 2 ;;
@@ -150,6 +155,16 @@ tls=$(load_setting GO_INSTALL_TLS "$tls")
 tls_email=$(load_setting GO_TLS_EMAIL "$tls_email")
 nginx_config=$(load_setting GO_NGINX_CONFIG "$nginx_config")
 project=$(load_setting GO_INSTALL_PROJECT "$project")
+metrics=$(load_setting GO_INSTALL_METRICS "$metrics")
+if [[ $metrics == auto ]]; then
+  metrics=0
+  if [[ $(uname -s) == Linux && -d /run/systemd/system ]]; then metrics=1; fi
+fi
+[[ $metrics == 0 || $metrics == 1 ]] || ui_die "GO_INSTALL_METRICS must be 0 or 1."
+if ((metrics)); then
+  [[ $(uname -s) == Linux && -d /run/systemd/system ]] || ui_die "Metrics require Linux/systemd. Solution: use --no-metrics or run scripts/collect_metrics.py with your service manager."
+  updates[GO_METRICS_DIR]="/var/lib/antiattendance-metrics/$project"
+fi
 if [[ $interactive == auto ]]; then
   interactive=0
   if ((fresh)) && [[ -t 0 && -t 1 ]]; then interactive=1; fi
@@ -216,6 +231,7 @@ fi
 # Authorize sudo visibly before any background stage can need it.
 need_privilege=0
 if ((configure_nginx && start)); then need_privilege=1; fi
+if ((metrics && start)) || [[ -n ${updates[GO_INSTALL_METRICS]+x} && $start == 1 && $(uname -s) == Linux && -d /run/systemd/system ]]; then need_privilege=1; fi
 if ((install_deps)); then
   for required_tool in docker python3 openssl curl; do
     if ! command -v "$required_tool" >/dev/null; then need_privilege=1; fi
@@ -229,7 +245,7 @@ if ((EUID != 0 && need_privilege)) && [[ $mode != check ]]; then
 fi
 total=4
 if [[ $mode != check ]] && ((start)); then
-  total=$((total + 3 + pull + build + configure_nginx + tls))
+  total=$((total + 3 + pull + build + configure_nginx + tls + metrics))
 fi
 ui_init "$total" "Go / PostgreSQL · $operation_title"
 ui_run 'Checking and preparing dependencies' installer_dependencies
@@ -259,6 +275,8 @@ write_settings() {
         printf 'GO_PORT=%s\nGO_AAID_PORT=%s\nGO_PANEL_PORT=%s\n' "$site_port" "$aaid_port" "$panel_port"
         printf 'GO_INSTALL_NGINX=%s\nGO_INSTALL_TLS=%s\nGO_TLS_EMAIL=%s\nGO_NGINX_CONFIG=%s\n' "$configure_nginx" "$tls" "$tls_email" "$nginx_config"
         printf 'GO_INSTALL_PROJECT=%s\n' "$project"
+        printf 'GO_INSTALL_METRICS=%s\n' "$metrics"
+        if ((metrics)); then printf 'GO_METRICS_DIR=/var/lib/antiattendance-metrics/%s\n' "$project"; fi
       } > "$env_file"
     ) || return
     chmod 600 -- "$env_file"
@@ -290,6 +308,11 @@ else
   if ((configure_nginx)); then ui_run 'Configuring host nginx server blocks' installer_nginx; fi
   if ((tls)); then ui_run 'Checking and configuring HTTPS' installer_tls; fi
   ui_run 'Checking site and AA ID HTTP responses' installer_health
+  if ((metrics)); then
+    ui_run 'Enabling resource and durable traffic counters' privileged python3 scripts/install_metrics.py --project "$project"
+  elif [[ -n ${updates[GO_INSTALL_METRICS]+x} && $(uname -s) == Linux && -d /run/systemd/system ]]; then
+    privileged python3 scripts/install_metrics.py --project "$project" --disable
+  fi
   ui_finish 'Server installed and verified'
 fi
 printf '\nInstallation details\n  Site: %s\n  AA ID: %s\n  Panel: http://127.0.0.1:%s/panel\n  Local upstreams: site %s, AA ID %s\n  Settings and passwords: %s\n  Log: %s\n' \

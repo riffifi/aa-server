@@ -16,7 +16,7 @@ func (s *Server) person(w http.ResponseWriter, r *http.Request) (map[string]any,
 		if group > 0 {
 			gid = int64(group)
 		}
-		return map[string]any{"mirea": identity(r), "aaid_id": claims["sub"], "group_id": gid, "group_name": claims["group_name"]}, true
+		return map[string]any{"mirea": identity(r), "aaid_id": claims["sub"], "group_id": gid, "group_name": claims["group_name"], "group_authoritative": s.config.RequireIdentityState}, true
 	}
 	session, err := s.config.Vault.Session(r.Context(), "site", cookie(r, "aa_site"))
 	if err != nil {
@@ -62,10 +62,10 @@ func (s *Server) weekSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	ownID := idValue(session["group_id"])
 	ownName := session["group_name"]
-	if ownID == nil && own != nil {
+	if ownID == nil && own != nil && session["group_authoritative"] != true {
 		ownID = idValue(own["group_id"])
 	}
-	if (ownName == nil || ownName == "") && own != nil {
+	if (ownName == nil || ownName == "") && own != nil && sameID(ownID, idValue(own["group_id"])) {
 		ownName = own["group_name"]
 	}
 	groupID := ownID

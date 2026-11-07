@@ -216,6 +216,26 @@ func Same(a, b Lesson) bool {
 	}
 	return fold.String(a.Subject) == fold.String(b.Subject) && fold.String(a.Teacher) == fold.String(b.Teacher)
 }
+
+// SharedLesson is deliberately stricter than display grouping: an auditorium
+// collision cannot grant access to another group's names or attendance.
+func SharedLesson(a, b Lesson) bool {
+	fold := cases.Fold()
+	norm := func(s string) string { return fold.String(strings.Join(strings.Fields(s), " ")) }
+	if norm(a.Subject) == "" || norm(a.Subject) != norm(b.Subject) {
+		return false
+	}
+	if norm(a.Type) != "" && norm(b.Type) != "" && norm(a.Type) != norm(b.Type) {
+		return false
+	}
+	if norm(a.Teacher) == "" || norm(b.Teacher) == "" || norm(a.Teacher) != norm(b.Teacher) {
+		return false
+	}
+	if norm(a.Location) == "" && (norm(a.Teacher) == "" || norm(b.Teacher) == "") {
+		return false
+	}
+	return Same(a, b)
+}
 func Shown(lesson *Lesson) any {
 	if lesson == nil {
 		return nil

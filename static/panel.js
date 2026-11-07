@@ -212,8 +212,8 @@ async function loadSystem() {
     fact('Запущен', stamp(s.started)),
     fact('Память процесса', p.memory_kb ? (p.memory_kb / 1024).toFixed(0) + ' МБ' : '—'),
     fact('Нагрузка (1/5/15 мин)', p.load ? p.load.map(v => v.toFixed(2)).join(' / ') : '—'),
-    fact('Python / PID', p.python + ' / ' + p.pid),
-    fact('База', bytes(s.files['sessions.sqlite3']) + ' + WAL ' + bytes(s.files['sessions.sqlite3-wal'])),
+    fact('Go / PID', p.go + ' / ' + p.pid),
+    fact('PostgreSQL', bytes(s.files.postgresql_bytes)),
     fact('Проверка сессий', { running: 'работает', stopped: 'остановлена', off: 'выключена' }[s.background.refresh_loop]),
     fact('Браузер входа', s.browser.running ? 'запущен' : 'не запущен'),
     fact('Свободно слотов входа / продления', s.browser.login_slots_free + ' / ' + s.browser.renew_slots_free),
@@ -229,6 +229,50 @@ async function loadSystem() {
   grid($('jobs-table'), ['ID', 'Имя', 'Статус', 'Возраст', 'Ошибка', 'Диагностика'],
     s.browser.jobs.map(j => [j.id, j.label, j.status, ago(Date.now() / 1000 - j.age), j.error, j.diag]),
     i => s.browser.jobs[i].status === 'failed' ? 'bad' : '');
+  await loadMetrics();
+}
+
+function metricChart(id, history, keys, scale = 1) {
+  const canvas = $(id), ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (history.length < 2) return;
+  const max = Math.max(1, ...history.flatMap(row => keys.map(key => (row[key] || 0) / scale)));
+  const first = history[0].time, span = Math.max(1, history[history.length - 1].time - first);
+  keys.forEach((key, index) => {
+    ctx.strokeStyle = ['#4778df', '#d78b24'][index]; ctx.lineWidth = 2; ctx.beginPath();
+    let connected = false;
+    history.forEach(row => {
+      if (row[key] == null) { connected = false; return; }
+      const x = (row.time - first) / span * canvas.width, y = canvas.height - 6 - row[key] / scale / max * (canvas.height - 22);
+      if (connected) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      connected = true;
+    });
+    ctx.stroke();
+  });
+  ctx.fillStyle = '#777'; ctx.font = '12px sans-serif'; ctx.fillText(max.toFixed(1), 4, 12);
+  ctx.fillText(new Date(first * 1000).toLocaleTimeString(), 4, canvas.height - 2);
+}
+async function loadMetrics() {
+  const m = await api('debug/metrics');
+  $('metrics-status').textContent = !m.available ? 'Сбор статистики не включён. Установщик: --metrics (Linux/systemd).' :
+    `${m.stale ? 'Данные устарели. Проверьте службу сборщика. ' : ''}Обновлено: ${stamp(m.collected_at)}. Счётчики с ${stamp(m.since)}. Ошибок опроса: ${m.errors}.`;
+  if (!m.available) {
+    $('metrics-facts').replaceChildren(); $('metrics-table').replaceChildren();
+    ['metrics-cpu', 'metrics-memory', 'metrics-network'].forEach(id => metricChart(id, [], []));
+    return;
+  }
+  const t = m.total;
+  $('metrics-facts').replaceChildren(
+    fact('CPU', t.cpu_percent == null ? '—' : t.cpu_percent.toFixed(1) + '%'),
+    fact('ОЗУ всех сервисов', bytes(t.memory_bytes)), fact('Процессы и потоки', t.processes),
+    fact('Получено всего', bytes(t.rx_bytes)), fact('Отправлено всего', bytes(t.tx_bytes)),
+    fact('Диск: прочитано / записано', bytes(t.disk_read_bytes) + ' / ' + bytes(t.disk_write_bytes)),
+    fact('Свободно на диске сборщика', bytes(m.filesystem.available_bytes)));
+  grid($('metrics-table'), ['Сервис', 'Состояние', 'CPU', 'ОЗУ', 'Приём/с', 'Отправка/с', 'Получено всего', 'Отправлено всего', 'Диск: чтение / запись'],
+    m.components.map(c => [c.service, c.unavailable ? 'нет данных' : c.running ? 'работает' : 'остановлен', c.cpu_percent == null ? null : c.cpu_percent.toFixed(1) + '%', bytes(c.memory_bytes), bytes(c.rx_bytes_per_second), bytes(c.tx_bytes_per_second), bytes(c.rx_bytes), bytes(c.tx_bytes), bytes(c.disk_read_bytes) + ' / ' + bytes(c.disk_write_bytes)]));
+  metricChart('metrics-cpu', m.history, ['cpu_percent']);
+  metricChart('metrics-memory', m.history, ['memory_bytes'], 1048576);
+  metricChart('metrics-network', m.history, ['rx_bytes_per_second', 'tx_bytes_per_second'], 1024);
 }
 function fillRecordAccounts() {
   const select = $('record-account'), keep = select.value;

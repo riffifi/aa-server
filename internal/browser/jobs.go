@@ -78,6 +78,12 @@ func token(size int) (string, error) {
 }
 func (j *Jobs) pruneLocked() {
 	for id, entry := range j.entries {
+		if j.Now().Sub(entry.created) >= j.TTL && !entry.claimed {
+			entry.cancel()
+			entry.result = nil
+			entry.state.QR = nil
+			entry.state.Status = "expired"
+		}
 		retain := j.TTL + 300*time.Second
 		if j.Retain > retain {
 			retain = j.Retain
@@ -100,6 +106,9 @@ func (j *Jobs) StartWith(runner LoginRunner, label any, failureMessage string) (
 		return JobState{}, "", ErrClosed
 	}
 	j.pruneLocked()
+	if len(j.entries) >= 256 {
+		return JobState{}, "", ErrBusy
+	}
 	active := 0
 	for _, entry := range j.entries {
 		switch entry.state.Status {
@@ -131,6 +140,9 @@ func (j *Jobs) run(ctx context.Context, entry *job, runner LoginRunner, failureM
 	result, err := runner.Login(ctx, func(update Update) {
 		j.mu.Lock()
 		defer j.mu.Unlock()
+		if ctx.Err() != nil || entry.state.Status == "cancelled" || entry.state.Status == "expired" {
+			return
+		}
 		entry.state.Status = update.Status
 		entry.state.QR = nil
 		if update.QR != "" {
@@ -141,6 +153,9 @@ func (j *Jobs) run(ctx context.Context, entry *job, runner LoginRunner, failureM
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	entry.state.QR = nil
+	if entry.state.Status == "expired" {
+		return
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, ErrExpired) {
 		entry.state.Status = "expired"
 		return
@@ -182,9 +197,13 @@ func (j *Jobs) Cancel(id string) error {
 		return ErrMissing
 	}
 	entry.cancel()
+	entry.result = nil
+	entry.state.QR = nil
+	entry.state.Status = "cancelled"
 	return nil
 }
 func (j *Jobs) find(id, capability string) (*job, error) {
+	j.pruneLocked()
 	entry := j.entries[id]
 	digest := sha256.Sum256([]byte(capability))
 	if entry == nil || capability == "" || subtle.ConstantTimeCompare(digest[:], entry.digest[:]) != 1 {

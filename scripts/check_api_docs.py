@@ -26,7 +26,7 @@ def main():
         key = (route['service'], route['method'], canonical(route['path']))
         if key not in mentions:
             missing.append(' '.join((route['service'], route['method'], route['path'])))
-    for path in ('/panel/api/debug/browser', '/panel/api/pass-snapshot'):
+    for path in ('/panel/api/debug/browser', '/panel/api/pass-snapshot', '/panel/api/debug/metrics'):
         if ('sessions', 'GET', path) not in mentions:
             missing.append('sessions GET ' + path)
     for service in ('sessions', 'aaid'):
@@ -43,7 +43,7 @@ def main():
             json.loads(example)
         except ValueError as error:
             raise SystemExit(f'Invalid JSON example {index}: {error}') from error
-    print(f'API reference: {count} legacy in-scope routes, 7 additional native routes and {len(examples)} JSON examples checked.')
+    print(f'API reference: {count} legacy in-scope routes, 8 additional native routes and {len(examples)} JSON examples checked.')
 
 
 if __name__ == '__main__':

@@ -6,6 +6,10 @@ import (
 )
 
 func (v *Vault) RecordMark(ctx context.Context, id, state, message, source string) error {
+	return v.RecordLessonMark(ctx, id, state, message, source, nil)
+}
+
+func (v *Vault) RecordLessonMark(ctx context.Context, id, state, message, source string, lessonStart *float64) error {
 	runes := []rune(message)
 	if len(runes) > 200 {
 		message = string(runes[:200])
@@ -15,7 +19,7 @@ func (v *Vault) RecordMark(ctx context.Context, id, state, message, source strin
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "INSERT INTO aa.marks(account_id,state,message,source,created) VALUES($1,$2,$3,$4,$5)", id, state, message, source, v.now()); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO aa.marks(account_id,state,message,source,created,lesson_start) VALUES($1,$2,$3,$4,$5,$6)", id, state, message, source, v.now(), lessonStart); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM aa.marks WHERE created<$1", v.now()-30*86400); err != nil {

@@ -80,6 +80,14 @@
     <section id="tab-system" class="tab" role="tabpanel" hidden>
       <div class="block-head top"><h1 class="title tight">Система</h1></div>
       <div id="system-facts" class="facts"></div>
+      <h2 class="heading block-gap">Ресурсы приложения и трафик</h2>
+      <p id="metrics-status" class="note" role="status"></p>
+      <div id="metrics-facts" class="facts"></div>
+      <p class="note">Все процессы контейнеров, включая Chromium. Сеть включает внутренний обмен между сервисами; это не счётчик интернет-трафика провайдера. CPU: 100% = одно ядро. История — до 24 часов.</p>
+      <div class="table-wrap"><table id="metrics-table" class="grid"></table></div>
+      <p class="caption">CPU (%)</p><canvas id="metrics-cpu" width="900" height="120" aria-label="История CPU"></canvas>
+      <p class="caption">Память (МБ)</p><canvas id="metrics-memory" width="900" height="120" aria-label="История памяти"></canvas>
+      <p class="caption">Сеть: приём и отправка (КБ/с)</p><canvas id="metrics-network" width="900" height="120" aria-label="История сети"></canvas>
       <h2 class="heading block-gap">Расписания и журналы групп</h2>
       <div class="table-wrap"><table id="calendars-table" class="grid"></table></div>
       <h2 class="heading block-gap">Пульс: запись запросов</h2>

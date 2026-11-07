@@ -56,7 +56,13 @@ services:
       REFRESH_SECONDS: ${REFRESH_SECONDS:-180}
       LOGIN_SLOTS: ${LOGIN_SLOTS:-6}
       RENEW_SLOTS: ${RENEW_SLOTS:-2}
+      METRICS_FILE: /metrics/snapshot.json
     volumes:
+      - type: bind
+        source: ${GO_METRICS_DIR:-./.go-data/metrics}
+        target: /metrics
+        read_only: true
+        bind: {create_host_path: true}
       - type: volume
         source: keys
         target: /keys
