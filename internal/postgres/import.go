@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var importTables = []string{"aa.config", "aa.accounts", "aa.audit_events", "aa.panel_sessions", "aa.events", "aa.telegram_links", "aa.site_sessions", "aa.marks", "aa.pass_shares", "aa.telegram_users", "aa.telegram_codes", "aa.share_requests", "aa.pass_clients", "aa.pass_requests", "aa.pass_grants", "aaid.users", "aaid.mirea_links", "aaid.sessions", "aaid.refresh_tokens", "aaid.web_tokens", "aaid.audit"}
+var importTables = []string{"aa.config", "aa.accounts", "aa.audit_events", "aa.panel_sessions", "aa.events", "aa.telegram_links", "aa.site_sessions", "aa.marks", "aa.pass_shares", "aa.telegram_users", "aa.telegram_codes", "aa.share_requests", "aa.pass_clients", "aa.pass_requests", "aa.pass_grants", "aaid.users", "aaid.mirea_links", "aaid.sessions", "aaid.refresh_tokens", "aaid.web_tokens", "aaid.audit", "aa_legacy.devices"}
 
 type importRecord struct {
 	Type    string            `json:"type"`

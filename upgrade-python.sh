@@ -154,7 +154,7 @@ ids=$("${helper[@]}" ids "${helper_options[@]}" --running-only)
 ids=${ids//$'\r'/}
 if [[ -n $ids ]]; then mapfile -t running_ids <<< "$ids"; fi
 python_stopped=1
-if (("${#running_ids[@]}" > 0)); then ui_run 'Stopping Python for a consistent snapshot' "${DOCKER[@]}" stop --time 30 "${running_ids[@]}"; else ui_run 'Python is already stopped' true; fi
+if (("${#running_ids[@]}" > 0)); then ui_run 'Stopping Python for a consistent snapshot' "${DOCKER[@]}" stop -t 30 "${running_ids[@]}"; else ui_run 'Python is already stopped' true; fi
 backup_sources() {
   cp -p -- "$python_dir/.env" "$backup_dir/python.env"
   if [[ -f $python_dir/compose.yaml ]]; then cp -p -- "$python_dir/compose.yaml" "$backup_dir/compose.python.yaml"; fi

@@ -9,13 +9,14 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 
 
 TABLES = {
     'aa': ('config', 'accounts', 'audit_events', 'panel_sessions', 'events', 'telegram_links',
            'site_sessions', 'marks', 'pass_shares', 'telegram_users', 'telegram_codes',
-           'share_requests', 'pass_clients', 'pass_requests', 'pass_grants'),
+           'share_requests', 'pass_clients', 'pass_requests', 'pass_grants', 'devices'),
     'aaid': ('users', 'mirea_links', 'sessions', 'refresh_tokens', 'web_tokens', 'audit'),
 }
 REQUIRED = {'aa': {'config', 'accounts', 'events'}, 'aaid': {'users', 'mirea_links', 'sessions', 'refresh_tokens'}}
@@ -52,12 +53,16 @@ def export(sessions, aaid, output):
                                 if table not in existing:
                                     continue
                                 columns = [row[1] for row in snapshot.execute(f'PRAGMA table_info("{table}")')]
-                                emit({'type': 'table', 'schema': schema, 'name': table, 'columns': columns})
+                                # Early Python releases left this obsolete authorization
+                                # table behind. Preserve it outside both runtime schemas;
+                                # importing it must never reactivate legacy device keys.
+                                target_schema = 'aa_legacy' if schema == 'aa' and table == 'devices' else schema
+                                emit({'type': 'table', 'schema': target_schema, 'name': table, 'columns': columns})
                                 count = 0
                                 for row in snapshot.execute(f'SELECT * FROM "{table}"'):
                                     emit({'type': 'row', 'values': list(row)})
                                     count += 1
-                                counts[schema + '.' + table] = count
+                                counts[target_schema + '.' + table] = count
                         finally:
                             snapshot.close()
             emit({'type': 'summary', 'counts': counts, 'sha256': digest.hexdigest()}, hashed=False)
@@ -75,7 +80,14 @@ def main():
     parser.add_argument('--aaid', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    counts = export(args.sessions, args.aaid, args.output)
+    try:
+        counts = export(args.sessions, args.aaid, args.output)
+    except (ValueError, OSError, sqlite3.Error) as error:
+        print(f'Export failed: {error}. Source databases were not changed.', file=sys.stderr)
+        raise SystemExit(1) from None
+    archived = counts.get('aa_legacy.devices')
+    if archived is not None:
+        print(f'Legacy devices: {archived} rows archived as aa_legacy.devices; legacy device keys remain disabled.')
     print(json.dumps({'tables': len(counts), 'rows': sum(counts.values())}))
 
 

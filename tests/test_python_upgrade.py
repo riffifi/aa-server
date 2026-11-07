@@ -133,6 +133,7 @@ class PythonUpgradeFlowTests(unittest.TestCase):
             with sqlite3.connect(folder / ('sessions.sqlite3' if service == 'sessions' else 'aaid.sqlite3')) as db:
                 if service == 'sessions':
                     db.executescript('CREATE TABLE config(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE accounts(id TEXT PRIMARY KEY,secret TEXT); CREATE TABLE events(id INTEGER PRIMARY KEY);')
+                    db.executescript('CREATE TABLE devices(id TEXT PRIMARY KEY,name TEXT NOT NULL,key_hash TEXT UNIQUE NOT NULL,scopes TEXT NOT NULL,publisher INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,last_seen REAL NOT NULL); INSERT INTO devices VALUES(\'old-device\',\'Phone\',\'synthetic-hash\',\'["*"]\',1,0,1234.5);')
                     db.execute('INSERT INTO config VALUES(?,?)', ('admin_password', 'preserved-hash'))
                 else:
                     db.executescript('CREATE TABLE users(id TEXT); CREATE TABLE mirea_links(user_id TEXT); CREATE TABLE sessions(id TEXT); CREATE TABLE refresh_tokens(hash TEXT);')
@@ -202,6 +203,8 @@ esac
         backups = list((self.root / '.go-data').glob('python-backup-*'))
         self.assertEqual(len(backups), 1)
         self.assertTrue((backups[0] / 'snapshot.jsonl').exists())
+        records = [json.loads(line) for line in (backups[0] / 'snapshot.jsonl').read_text().splitlines()]
+        self.assertEqual(records[-1]['counts']['aa_legacy.devices'], 1)
         self.assertEqual((backups[0] / 'sessions/master.key').read_bytes(), base64.urlsafe_b64encode(bytes(32)))
         self.assertEqual((backups[0] / 'aaid/signing.key').read_bytes(), bytes(32))
         self.assertNotIn('preserved-not-printed', result.stdout + result.stderr)

@@ -53,3 +53,27 @@ def test_export_refuses_unknown_tables_instead_of_silently_dropping_data(tmp_pat
         assert all(json.loads(line)['type'] != 'summary' for line in output.read_bytes().splitlines())
     finally:
         db.close()
+
+
+@pytest.mark.parametrize('populated', [False, True])
+def test_obsolete_devices_are_archived_without_dropping_rows_or_reactivating_keys(tmp_path, populated):
+    main, aaid, db = source_databases(tmp_path)
+    try:
+        db.execute('CREATE TABLE devices(id TEXT PRIMARY KEY,name TEXT NOT NULL,key_hash TEXT UNIQUE NOT NULL,scopes TEXT NOT NULL,publisher INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,last_seen REAL NOT NULL)')
+        row = ('old-device', 'Old phone', 'synthetic-key-hash', '["*"]', 1, 0, 1234.5)
+        if populated:
+            db.execute('INSERT INTO devices VALUES(?,?,?,?,?,?,?)', row)
+        db.commit()
+        output = tmp_path / 'archived.jsonl'
+        counts = exporter.export(main, aaid, output)
+        records = [json.loads(line) for line in output.read_bytes().splitlines()]
+        assert counts['aa_legacy.devices'] == int(populated)
+        assert not any(record.get('schema') == 'aa' and record.get('name') == 'devices' for record in records)
+        index = next(i for i,record in enumerate(records) if record.get('schema') == 'aa_legacy' and record.get('name') == 'devices')
+        assert records[index]['columns'] == ['id','name','key_hash','scopes','publisher','revoked','last_seen']
+        if populated:
+            assert records[index + 1]['values'] == list(row)
+        assert db.execute('SELECT * FROM devices').fetchall() == ([row] if populated else [])
+        assert counts['aa.accounts'] == 1
+    finally:
+        db.close()

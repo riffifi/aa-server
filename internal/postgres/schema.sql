@@ -2,6 +2,14 @@
 -- Flags remain BIGINT (0/1) so legacy imports need no lossy conversion.
 CREATE SCHEMA IF NOT EXISTS aa;
 CREATE SCHEMA IF NOT EXISTS aaid;
+-- Historical Python device keys are retained for archival purposes only.
+-- Runtime roles receive grants on aa/aaid, never on this schema.
+CREATE SCHEMA IF NOT EXISTS aa_legacy;
+REVOKE ALL ON SCHEMA aa_legacy FROM PUBLIC;
+CREATE TABLE IF NOT EXISTS aa_legacy.devices(
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT UNIQUE NOT NULL,
+ scopes TEXT NOT NULL, publisher BIGINT NOT NULL,
+ revoked BIGINT NOT NULL DEFAULT 0, last_seen DOUBLE PRECISION NOT NULL);
 CREATE TABLE IF NOT EXISTS aa.config(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS aa.accounts(
  id TEXT PRIMARY KEY, pulse_id TEXT UNIQUE NOT NULL, label TEXT NOT NULL,

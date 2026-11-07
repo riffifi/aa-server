@@ -38,6 +38,7 @@ func syntheticSnapshot(t *testing.T, secret string, corrupt bool) []byte {
 	table("aa", "config", []string{"key", "value"}, [][]any{{"admin_password", "synthetic-hash"}})
 	table("aa", "accounts", []string{"id", "pulse_id", "label", "secret", "state", "checked_at", "version", "updated_at"}, [][]any{{"synthetic-import", "synthetic-pulse", "Imported", secret, "valid", 1000, 1, 1000}})
 	table("aa", "events", []string{"id", "account_id", "version", "kind", "created"}, [][]any{{7, "synthetic-import", 1, "session", 1000}})
+	table("aa_legacy", "devices", []string{"id", "name", "key_hash", "scopes", "publisher", "revoked", "last_seen"}, [][]any{{"synthetic-legacy-device", "Old phone", "synthetic-key-hash", `["*"]`, 1, 0, 1234.5}})
 	table("aaid", "users", []string{"id", "status", "created"}, nil)
 	table("aaid", "mirea_links", []string{"user_id", "pulse_uid", "linked_at", "verified_at"}, nil)
 	table("aaid", "sessions", []string{"id", "user_id", "device", "created", "last_used", "expires"}, nil)
@@ -85,15 +86,24 @@ func TestSnapshotImportIsAtomicPreservesSecretsAndResumesSequences(t *testing.T)
 	if err = store.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM aa.accounts").Scan(&count); err != nil || count != 0 {
 		t.Fatal("failed import left rows behind")
 	}
+	if err = store.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM aa_legacy.devices").Scan(&count); err != nil || count != 0 {
+		t.Fatal("failed import left archived device rows behind")
+	}
 	counts, err := store.ImportSnapshot(ctx, bytes.NewReader(syntheticSnapshot(t, encrypted, false)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		_, _ = store.Pool.Exec(ctx, "DELETE FROM aa.events WHERE account_id='synthetic-import'; DELETE FROM aa.accounts WHERE id='synthetic-import'; DELETE FROM aa.config WHERE key='admin_password'")
+		_, _ = store.Pool.Exec(ctx, "DELETE FROM aa.events WHERE account_id='synthetic-import'; DELETE FROM aa.accounts WHERE id='synthetic-import'; DELETE FROM aa.config WHERE key='admin_password'; DELETE FROM aa_legacy.devices WHERE id='synthetic-legacy-device'")
 	}()
 	if counts["aa.accounts"] != 1 || counts["aa.events"] != 1 {
 		t.Fatal("row counts changed")
+	}
+	var keyHash, scopes string
+	var revoked int64
+	var lastSeen float64
+	if err = store.Pool.QueryRow(ctx, "SELECT key_hash,scopes,revoked,last_seen FROM aa_legacy.devices WHERE id='synthetic-legacy-device'").Scan(&keyHash, &scopes, &revoked, &lastSeen); err != nil || keyHash != "synthetic-key-hash" || scopes != `["*"]` || revoked != 0 || lastSeen != 1234.5 {
+		t.Fatalf("legacy device archive changed: %v", err)
 	}
 	vault, err := NewVault(store, key)
 	if err != nil {
