@@ -80,6 +80,13 @@
     <section id="tab-system" class="tab" role="tabpanel" hidden>
       <div class="block-head top"><h1 class="title tight">Система</h1></div>
       <div id="system-facts" class="facts"></div>
+      <h2 class="heading block-gap">Эффективность автопродления</h2>
+      <p id="renewal-statistics-status" class="note"></p>
+      <div id="renewal-facts" class="facts"></div>
+      <p class="note">Успех: Pulse подтвердил сессию и сервер сохранил данные входа. Подтверждённый эффект: восстановлена истёкшая сессия или вырос срок cookie. Одно продление считается один раз, даже если помогло обоими способами. При неизвестном сроке его увеличение не считается доказанным. Обычные QR-входы в эти успехи не входят.</p>
+      <div class="table-wrap"><table id="renewal-table" class="grid"></table></div>
+      <div class="field"><label for="renewal-account">Последние 20 попыток:</label><select id="renewal-account" class="input select" aria-label="История автопродления"><option value="">Выберите аккаунт</option></select></div>
+      <div class="table-wrap"><table id="renewal-history" class="grid"></table></div>
       <h2 class="heading block-gap">Ресурсы приложения и трафик</h2>
       <p id="metrics-status" class="note" role="status"></p>
       <div id="metrics-facts" class="facts"></div>
@@ -88,6 +95,9 @@
       <p class="caption">CPU (%)</p><canvas id="metrics-cpu" width="900" height="120" aria-label="История CPU"></canvas>
       <p class="caption">Память (МБ)</p><canvas id="metrics-memory" width="900" height="120" aria-label="История памяти"></canvas>
       <p class="caption">Сеть: приём и отправка (КБ/с)</p><canvas id="metrics-network" width="900" height="120" aria-label="История сети"></canvas>
+      <h2 class="heading block-gap">Загрузки браузера</h2>
+      <p id="browser-network-status" class="note"></p>
+      <div class="table-wrap"><table id="browser-network-table" class="grid"></table></div>
       <h2 class="heading block-gap">Расписания и журналы групп</h2>
       <div class="table-wrap"><table id="calendars-table" class="grid"></table></div>
       <h2 class="heading block-gap">Пульс: запись запросов</h2>

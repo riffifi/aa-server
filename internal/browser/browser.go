@@ -24,6 +24,7 @@ var qrScript string
 var ErrClosed = errors.New("browser is closed")
 var ErrExpired = errors.New("login expired")
 var ErrNotAuthenticated = errors.New("Pulse session is not authenticated")
+var ErrReauthenticationRequired = errors.New("SSO requires a new interactive sign-in")
 var authCookie = regexp.MustCompile(`^\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?$`)
 
 const loginURL = "https://pulse.mirea.ru/api/auth/login?redirectUri=https%3A%2F%2Fpulse.mirea.ru%2Fservices&rememberMe="
@@ -127,7 +128,14 @@ func (e *Engine) newContext(state map[string]any, lifetime ...context.Context) (
 		e.launched = time.Now()
 		e.completed = 0
 	}
+	work := e.root
+	if len(lifetime) > 0 {
+		work = lifetime[0]
+	}
 	options := pw.BrowserNewContextOptions{Viewport: &pw.Size{Width: 900, Height: 900}}
+	if diagnostic, _ := work.Value(diagnosticKey{}).(bool); !diagnostic {
+		options.ServiceWorkers = pw.ServiceWorkerPolicyBlock
+	}
 	if state != nil {
 		data, err := json.Marshal(state)
 		if err != nil {
@@ -145,14 +153,15 @@ func (e *Engine) newContext(state map[string]any, lifetime ...context.Context) (
 	}
 	browserContext.SetDefaultTimeout(5000)
 	browserContext.SetDefaultNavigationTimeout(30000)
-	work := e.root
-	if len(lifetime) > 0 {
-		work = lifetime[0]
-	}
 	mark, stop := e.traffic.track(work, browserContext)
 	e.metricsWG.Add(1)
 	browserContext.OnClose(func(pw.BrowserContext) { stop(); e.metricsWG.Done() })
 	if err = browserContext.Route("**/*", func(route pw.Route) {
+		if blockedAuthResource(work, route.Request().URL(), route.Request().ResourceType()) {
+			e.traffic.blocked()
+			_ = route.Abort()
+			return
+		}
 		if blockedDiagnostic(work, route.Request().URL()) {
 			_ = route.Abort()
 			return
@@ -358,9 +367,6 @@ func (e *Engine) run(parent context.Context, state map[string]any, renew bool, u
 	}
 	update(Update{Status: "login"})
 	remember := "True"
-	if e.config.Identity {
-		remember = "False"
-	}
 	timeout := 45000.
 	if renew {
 		timeout = 30000
@@ -386,6 +392,9 @@ func (e *Engine) run(parent context.Context, state map[string]any, renew bool, u
 				}
 				advance(page, e.config.Identity)
 			case "sso.mirea.ru":
+				if renew && reauthenticationRequired(page) {
+					return nil, ErrReauthenticationRequired
+				}
 				if renew || submitted {
 					advance(page, e.config.Identity)
 				} else {

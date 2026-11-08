@@ -96,6 +96,7 @@ func (v *Vault) event(ctx context.Context, tx pgx.Tx, id string, version int64, 
 }
 
 type Upsert struct {
+	AutomaticRenewal                   bool
 	PulseID, Label, AccountID          string
 	Credentials                        map[string]any
 	Expected, SessionExpected, GroupID *int64
@@ -139,7 +140,23 @@ func (v *Vault) Upsert(ctx context.Context, in Upsert) (map[string]any, error) {
 			}
 		}
 		for key, value := range in.Credentials {
+			if key == "renewal_statistics" {
+				continue
+			}
 			secret[key] = value
+		}
+		if _, replacing := in.Credentials["cookie"]; replacing {
+			if in.AutomaticRenewal {
+				finishRenewal(secret, "succeeded", v.now(), in.Credentials["expires_at"])
+			} else {
+				finishRenewal(secret, "interrupted", v.now(), nil)
+			}
+			delete(secret, "renewal_status")
+			delete(secret, "renewal_attempted_at")
+			if in.AutomaticRenewal {
+				secret["renewal_status"] = "succeeded"
+				secret["renewal_attempted_at"] = renewalStatistics(secret).LastAttempt
+			}
 		}
 		sealed, err := v.seal(secret)
 		if err != nil {
@@ -301,7 +318,8 @@ func (v *Vault) EndSession(ctx context.Context, id string) (map[string]any, erro
 		if err != nil {
 			return err
 		}
-		for _, key := range []string{"cookie", "storage_state", "expires_at", "renewed_at"} {
+		finishRenewal(secret, "interrupted", v.now(), nil)
+		for _, key := range []string{"cookie", "storage_state", "expires_at", "renewed_at", "renewal_status", "renewal_attempted_at"} {
 			delete(secret, key)
 		}
 		sealed, err := v.seal(secret)

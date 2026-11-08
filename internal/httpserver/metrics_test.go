@@ -27,6 +27,16 @@ func TestMetricsRequirePrivatePanelAndExposeStaleness(t *testing.T) {
 	if w.Code != 200 || data["available"] != false {
 		t.Fatal(w.Body.String())
 	}
+	if data["reason_code"] != "missing" {
+		t.Fatal("missing collector misdiagnosed", w.Body.String())
+	}
+	w, runtime := secureRequest(t, s, "GET", "/panel/api/debug/system", "", headers)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if _, ok := runtime["browser"].(map[string]any)["jobs"].([]any); !ok {
+		t.Fatal("real runtime response omits jobs", w.Body.String())
+	}
 	if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"version":1,"collected_at":%d,"total":{"rx_bytes":123}}`, time.Now().Unix()-120)), 0600); err != nil {
 		t.Fatal(err)
 	}

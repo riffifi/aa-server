@@ -247,3 +247,15 @@ func (j *Jobs) Close() {
 	clear(j.entries)
 	j.mu.Unlock()
 }
+
+// AdminJobs never includes capability tokens, QR URLs or credentials.
+func (j *Jobs) AdminJobs() []map[string]any {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.pruneLocked()
+	rows := []map[string]any{}
+	for _, entry := range j.entries {
+		rows = append(rows, map[string]any{"id": entry.state.ID, "label": entry.state.Label, "status": entry.state.Status, "age": j.Now().Sub(entry.created).Seconds(), "error": entry.state.Error, "diag": nil})
+	}
+	return rows
+}

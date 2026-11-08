@@ -59,7 +59,8 @@ func TestSiteAndMetricsUIInChromium(t *testing.T) {
 		case "/panel/api/state":
 			data = map[string]any{"csrf": "synthetic", "accounts": []any{}, "cursor": 1}
 		case "/panel/api/debug/system":
-			data = map[string]any{"now": now, "started": now - 60, "process": map[string]any{"go": "go1.26", "pid": 1}, "files": map[string]any{"postgresql_bytes": 1024}, "background": map[string]any{"refresh_loop": "off"}, "browser": map[string]any{"running": false, "jobs": []any{}}, "presence": map[string]any{"cached": 0, "checking": 0, "ttl": 60}, "calendars": []any{}}
+			// Older real Go responses omitted jobs; resource graphs must still load.
+			data = map[string]any{"now": now, "started": now - 60, "process": map[string]any{"go": "go1.26", "pid": 1}, "files": map[string]any{"postgresql_bytes": 1024}, "background": map[string]any{"refresh_loop": "off"}, "browser": map[string]any{"running": false}, "presence": map[string]any{"cached": 0, "checking": 0, "ttl": 60}, "calendars": []any{}}
 		case "/panel/api/debug/metrics":
 			data = map[string]any{"available": true, "stale": false, "collected_at": now, "since": now - 60, "errors": 0, "filesystem": map[string]any{"available_bytes": 1024}, "total": map[string]any{"cpu_percent": 2, "memory_bytes": 1024, "rx_bytes": 100, "tx_bytes": 200}, "components": []any{map[string]any{"service": "sessions", "running": true, "cpu_percent": 2, "memory_bytes": 1024, "rx_bytes": 100, "tx_bytes": 200}}, "history": []any{map[string]any{"time": now - 60, "cpu_percent": 1, "memory_bytes": 500}, map[string]any{"time": now, "cpu_percent": 2, "memory_bytes": 1024}}}
 		default:

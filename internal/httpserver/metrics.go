@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -21,14 +22,20 @@ func (s *Server) debugMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		write(w, 200, map[string]any{"available": false, "reason": "Resource collector is not available"})
+		code := "io"
+		if errors.Is(err, os.ErrNotExist) {
+			code = "missing"
+		} else if errors.Is(err, os.ErrPermission) {
+			code = "permission"
+		}
+		write(w, 200, map[string]any{"available": false, "reason": "Resource collector is not available", "reason_code": code})
 		return
 	}
 	defer file.Close()
 	body, err := io.ReadAll(io.LimitReader(file, (8<<20)+1))
 	var data map[string]any
 	if err != nil || len(body) > 8<<20 || json.Unmarshal(body, &data) != nil || numberAny(data["version"]) != 1 {
-		write(w, 200, map[string]any{"available": false, "reason": "Resource collector snapshot is invalid"})
+		write(w, 200, map[string]any{"available": false, "reason": "Resource collector snapshot is invalid", "reason_code": "invalid"})
 		return
 	}
 	data["available"] = true

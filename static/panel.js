@@ -33,7 +33,13 @@ function renderAccount(account) {
   if (account.username) meta.append(el('span', '@' + account.username), document.createTextNode(' · '));
   meta.append(el('span', account.group_name || (account.group_id ? 'Группа ' + account.group_id : 'без группы')), document.createTextNode(' · '), el('span', stateText, 'mark ' + tone));
   detail.append(meta);
-  detail.append(el('span', `Проверена ${date(account.checked_at)} · ${account.automatic_renewal ? 'продлевается сама, последний раз ' + date(account.renewed_at) : 'без автопродления'} · ${account.page_seen_at ? 'на сайте ' + date(account.page_seen_at) : 'на сайт не входил'}`, 'meta'));
+  const renewal = account.renewal || {};
+  const statistics = renewal.statistics || {};
+  const renewalText = renewal.status === 'requires_login' ? 'SSO требует новый QR-вход; повторные попытки остановлены' :
+    renewal.status === 'failed' ? 'не удалось продлить, попытка ' + date(renewal.last_attempt) :
+    renewal.status === 'running' ? (Date.now() / 1000 - (renewal.last_attempt || 0) > 120 ? 'прошлая попытка не завершена' : 'идёт продление') : account.automatic_renewal ? 'автопродление настроено; последний успех ' + date(renewal.last_success) : 'без автопродления';
+  detail.append(el('span', `Проверена ${date(account.checked_at)} · ${renewalText} · ${account.page_seen_at ? 'на сайте ' + date(account.page_seen_at) : 'на сайт не входил'}`, 'meta'));
+  if (statistics.attempts) detail.append(el('span', `Авто: ${statistics.succeeded || 0} из ${statistics.attempts}; восстановлено ${statistics.recovered || 0}; срок вырос ${statistics.expiry_extended || 0}`, 'meta'));
   actions.append(action('Группа', async () => { editingGroup = account; $('group-account').textContent = account.label; $('group-id').value = account.group_id || ''; $('group-name').value = account.group_name || ''; $('group-dialog').showModal(); }));
   actions.append(action('Имя', async () => { const label = prompt('Новое имя', account.label); if (label && label.trim()) { await api('accounts/' + account.id + '/label', 'PUT', { label: label.trim(), expected_version: account.version }); await refresh(); } }));
   actions.append(action('Проверить', async () => { await api('accounts/' + account.id + '/refresh', 'POST'); await refresh(); }));
@@ -203,7 +209,7 @@ async function loadTables() {
   $('table-next').disabled = tableOffset + data.rows.length >= data.total;
 }
 function fact(label, value) { const box = el('div'); box.append(el('span', label), el('span', value === null || value === undefined ? '—' : String(value))); return box; }
-async function loadSystem() {
+async function loadRuntimeSystem() {
   const s = await api('debug/system');
   fillRecordAccounts();
   const p = s.process, up = Math.round(s.now - s.started);
@@ -227,15 +233,63 @@ async function loadSystem() {
       !c.journal ? null : c.journal.error ? c.journal.error + ', ' + ago(c.journal.fetched) : `${c.journal.lessons} пар, ${c.journal.statuses} отметок, ${ago(c.journal.fetched)}`]),
     i => s.calendars[i].failed ? 'bad' : '');
   grid($('jobs-table'), ['ID', 'Имя', 'Статус', 'Возраст', 'Ошибка', 'Диагностика'],
-    s.browser.jobs.map(j => [j.id, j.label, j.status, ago(Date.now() / 1000 - j.age), j.error, j.diag]),
-    i => s.browser.jobs[i].status === 'failed' ? 'bad' : '');
-  await loadMetrics();
+    (s.browser.jobs || []).map(j => [j.id, j.label, j.status, ago(Date.now() / 1000 - j.age), j.error, j.diag]),
+    i => (s.browser.jobs || [])[i].status === 'failed' ? 'bad' : '');
+  const traffic = s.browser.traffic || {}, assets = s.browser.asset_cache || {};
+  $('browser-network-status').textContent = `С момента запуска сервиса. Заблокировано ресурсов интерфейса Pulse: ${traffic.blocked_auth_resources || 0}. Прямые запросы браузера к API: ${traffic.api_requests || 0}, получено ${bytes(traffic.api_decoded_bytes)}. Загрузки статических файлов: ${assets.fetches || 0}, Content-Length ${bytes(assets.content_length_bytes)}. Явная запись диагностики может загружать интерфейс Pulse.`;
+  grid($('browser-network-table'), ['Источник / тип', 'Запросы', 'Получено', 'Ошибки'],
+    Object.entries(traffic.page_network || {}).map(([key, value]) => [key, value.requests, bytes(value.encoded_response_bytes), value.failures]));
 }
+async function loadSystem() {
+  // Runtime diagnostics and resource collection fail independently.
+  const results = await Promise.allSettled([loadRuntimeSystem(), loadMetrics(), loadRenewalStatistics()]);
+  results.filter(result => result.status === 'rejected').forEach(result => notice(result.reason.message));
+}
+
+const RENEWAL_RESULT = { running: 'Выполняется', succeeded: 'Успех', failed: 'Ошибка', requires_login: 'Нужен QR', interrupted: 'Прервана' };
+let renewalSequence = 0;
+async function loadRenewalStatistics() {
+  const sequence = ++renewalSequence;
+  const selected = $('renewal-account').value;
+  const data = await api('state' + (selected ? '?renewal_history=' + encodeURIComponent(selected) : ''));
+  if (sequence !== renewalSequence || $('renewal-account').value !== selected) return;
+  accounts = data.accounts; csrf = data.csrf;
+  const totals = {}, keys = ['attempts', 'succeeded', 'failed', 'requires_login', 'interrupted', 'recovered', 'confirmed_benefit', 'expiry_extended', 'expiry_unchanged', 'expiry_unknown'];
+  keys.forEach(key => { totals[key] = accounts.reduce((sum, a) => sum + (Number(((a.renewal || {}).statistics || {})[key]) || 0), 0); });
+  const since = accounts.map(a => ((a.renewal || {}).statistics || {}).since).filter(value => value > 0);
+  $('renewal-statistics-status').textContent = since.length ? `Счётчики с ${stamp(since.reduce((first, value) => Math.min(first, value), Infinity))}; сохраняются при перезапуске. Учитываются аккаунты, которые есть на сервере.` : 'После обновления ещё не было попыток автопродления. Старые попытки и обычные входы не засчитываются задним числом.';
+  const completed = totals.succeeded + totals.failed + totals.requires_login + totals.interrupted;
+  $('renewal-facts').replaceChildren(
+    fact('Попыток', totals.attempts), fact('Успешно', totals.succeeded),
+    fact('Успех среди завершённых', completed ? (100 * totals.succeeded / completed).toFixed(1) + '%' : '—'),
+    fact('С подтверждённым эффектом', totals.confirmed_benefit),
+    fact('Аккаунтов с эффектом', accounts.filter(a => (((a.renewal || {}).statistics || {}).confirmed_benefit || 0) > 0).length),
+    fact('Сейчас нужен новый QR', accounts.filter(a => (a.renewal || {}).status === 'requires_login').length),
+    fact('Восстановлено истёкших', totals.recovered), fact('Срок cookie вырос', totals.expiry_extended),
+    fact('Срок не вырос', totals.expiry_unchanged), fact('Срок неизвестен', totals.expiry_unknown),
+    fact('Ошибки', totals.failed), fact('Требуется QR', totals.requires_login), fact('Прерваны', totals.interrupted),
+    fact('Не завершены', Math.max(0, totals.attempts - completed)));
+  grid($('renewal-table'), ['Аккаунт', 'Попытки', 'Успехи', 'Восстановлено', 'Срок вырос', 'Ошибки / QR', 'Последний успех', 'Последняя попытка'], accounts.map(a => {
+    const r = a.renewal || {}, s = r.statistics || {};
+    return [a.label, s.attempts || 0, s.succeeded || 0, s.recovered || 0, s.expiry_extended || 0, `${s.failed || 0} / ${s.requires_login || 0}`, stamp(r.last_success), stamp(r.last_attempt)];
+  }));
+  const placeholder = el('option', 'Выберите аккаунт'); placeholder.value = '';
+  $('renewal-account').replaceChildren(placeholder, ...accounts.map(a => { const option = el('option', a.label); option.value = a.id; return option; }));
+  if (accounts.some(a => a.id === selected)) $('renewal-account').value = selected;
+  const account = accounts.find(a => a.id === $('renewal-account').value);
+  const statistics = ((account || {}).renewal || {}).statistics || {};
+  const history = [...(statistics.history || [])].reverse();
+  if (statistics.active) history.unshift(statistics.active);
+  grid($('renewal-history'), ['Начало', 'Результат', 'До: срок cookie', 'После: срок cookie', 'Изменение срока', 'Длительность', 'Была истекшей'], history.map(h => [stamp(h.started), RENEWAL_RESULT[h.result] || h.result, stamp(h.before_expiry), stamp(h.after_expiry), h.expiry_delta_seconds == null ? 'неизвестно' : `${h.expiry_delta_seconds > 0 ? '+' : ''}${Math.round(h.expiry_delta_seconds)} с`, h.finished ? (h.duration_ms / 1000).toFixed(1) + ' с' : '—', h.previously_expired ? 'да' : 'нет']));
+  fillRecordAccounts();
+}
+$('renewal-account').addEventListener('change', () => loadRenewalStatistics().catch(error => notice(error.message)));
 
 function metricChart(id, history, keys, scale = 1) {
   const canvas = $(id), ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (history.length < 2) return;
+  history = (history || []).filter(row => Number.isFinite(row.time));
+  if (!history.length) { ctx.fillStyle = '#777'; ctx.font = '12px sans-serif'; ctx.fillText('Нет измерений', 8, 24); return; }
   const max = Math.max(1, ...history.flatMap(row => keys.map(key => (row[key] || 0) / scale)));
   const first = history[0].time, span = Math.max(1, history[history.length - 1].time - first);
   keys.forEach((key, index) => {
@@ -245,6 +299,7 @@ function metricChart(id, history, keys, scale = 1) {
       if (row[key] == null) { connected = false; return; }
       const x = (row.time - first) / span * canvas.width, y = canvas.height - 6 - row[key] / scale / max * (canvas.height - 22);
       if (connected) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      ctx.fillStyle = ctx.strokeStyle; ctx.fillRect(x - 1, y - 1, 3, 3);
       connected = true;
     });
     ctx.stroke();
@@ -254,7 +309,8 @@ function metricChart(id, history, keys, scale = 1) {
 }
 async function loadMetrics() {
   const m = await api('debug/metrics');
-  $('metrics-status').textContent = !m.available ? 'Сбор статистики не включён. Установщик: --metrics (Linux/systemd).' :
+  const missing = { missing: 'Файл статистики ещё не создан. Проверьте службу сборщика; установщик: --metrics.', permission: 'Сервер не может прочитать статистику. Проверьте права каталога сборщика.', invalid: 'Повреждён файл статистики. Проверьте журнал службы сборщика.', io: 'Не удалось прочитать статистику. Проверьте службу сборщика и диск.' };
+  $('metrics-status').textContent = !m.available ? missing[m.reason_code] || 'Сборщик статистики недоступен. Проверьте службу; установщик: --metrics (Linux/systemd).' :
     `${m.stale ? 'Данные устарели. Проверьте службу сборщика. ' : ''}Обновлено: ${stamp(m.collected_at)}. Счётчики с ${stamp(m.since)}. Ошибок опроса: ${m.errors}.`;
   if (!m.available) {
     $('metrics-facts').replaceChildren(); $('metrics-table').replaceChildren();
@@ -270,9 +326,10 @@ async function loadMetrics() {
     fact('Свободно на диске сборщика', bytes(m.filesystem.available_bytes)));
   grid($('metrics-table'), ['Сервис', 'Состояние', 'CPU', 'ОЗУ', 'Приём/с', 'Отправка/с', 'Получено всего', 'Отправлено всего', 'Диск: чтение / запись'],
     m.components.map(c => [c.service, c.unavailable ? 'нет данных' : c.running ? 'работает' : 'остановлен', c.cpu_percent == null ? null : c.cpu_percent.toFixed(1) + '%', bytes(c.memory_bytes), bytes(c.rx_bytes_per_second), bytes(c.tx_bytes_per_second), bytes(c.rx_bytes), bytes(c.tx_bytes), bytes(c.disk_read_bytes) + ' / ' + bytes(c.disk_write_bytes)]));
-  metricChart('metrics-cpu', m.history, ['cpu_percent']);
-  metricChart('metrics-memory', m.history, ['memory_bytes'], 1048576);
-  metricChart('metrics-network', m.history, ['rx_bytes_per_second', 'tx_bytes_per_second'], 1024);
+  const history = [...(m.history || []).filter(point => point.time < m.collected_at), { ...t, time: m.collected_at }];
+  metricChart('metrics-cpu', history, ['cpu_percent']);
+  metricChart('metrics-memory', history, ['memory_bytes'], 1048576);
+  metricChart('metrics-network', history, ['rx_bytes_per_second', 'tx_bytes_per_second'], 1024);
 }
 function fillRecordAccounts() {
   const select = $('record-account'), keep = select.value;

@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +21,10 @@ type Traffic struct {
 	buckets            map[string]TrafficBucket
 	dropped            uint64
 	apiBytes, apiCalls uint64
+	blockedRequests    uint64
 }
+
+func (t *Traffic) blocked() { t.mu.Lock(); defer t.mu.Unlock(); t.blockedRequests++ }
 
 func newTraffic() *Traffic { return &Traffic{started: time.Now(), buckets: map[string]TrafficBucket{}} }
 func (t *Traffic) add(key string, bytes int, failed bool) {
@@ -51,7 +55,7 @@ func (t *Traffic) Snapshot() map[string]any {
 	for key, value := range t.buckets {
 		copy[key] = value
 	}
-	return map[string]any{"started": t.started.UTC().Format(time.RFC3339), "page_network": copy, "dropped_measurements": t.dropped, "api_requests": t.apiCalls, "api_decoded_bytes": t.apiBytes, "note": "Page bytes use browser request sizes; static fetch/cache bytes are reported separately. API bytes are decoded payloads. These are response measurements, not host/interface accounting; no URLs, tokens or bodies are retained."}
+	return map[string]any{"started": t.started.UTC().Format(time.RFC3339), "page_network": copy, "dropped_measurements": t.dropped, "blocked_auth_resources": t.blockedRequests, "api_requests": t.apiCalls, "api_decoded_bytes": t.apiBytes, "note": "Page bytes use browser request sizes; static fetch/cache bytes are reported separately. API bytes are decoded payloads. These are response measurements, not host/interface accounting; no URLs, tokens or bodies are retained."}
 }
 
 func (e *Engine) Stats() map[string]any {
@@ -74,8 +78,12 @@ func trafficKey(r pw.Request) string {
 			host = "pulse"
 		case "sso.mirea.ru":
 			host = "sso"
+		case "attendance-app.mirea.ru":
+			host = "attendance_app"
 		default:
-			host = "ddos_guard"
+			if name := strings.ToLower(u.Hostname()); name == "ddos-guard.net" || strings.HasSuffix(name, ".ddos-guard.net") {
+				host = "ddos_guard"
+			}
 		}
 	}
 	kind := r.ResourceType()

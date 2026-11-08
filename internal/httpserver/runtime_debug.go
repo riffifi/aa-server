@@ -209,6 +209,7 @@ func (s *Server) debugSystem(w http.ResponseWriter, r *http.Request) {
 		browser = map[string]any{}
 	}
 	data := browser.(map[string]any)
+	data["jobs"] = s.config.Logins.AdminJobs()
 	loop := "off"
 	if s.config.RefreshEvery > 0 {
 		loop = "running"

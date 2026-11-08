@@ -16,6 +16,23 @@ var accept = regexp.MustCompile(`(?i)продолж|подтверд|разре�
 var reject = regexp.MustCompile(`(?i)отмен|отклон|запрет|назад|cancel|deny|reject|decline|\bback\b|logout|выход|выйти`)
 var skip = regexp.MustCompile(`(?i)пропуст|не сейчас|позже|skip|later|not now`)
 
+func reauthenticationRequired(page pw.Page) bool {
+	raw, err := page.Evaluate(qrScript)
+	if err != nil {
+		return false
+	}
+	data, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	switch data["pageId"] {
+	case "login.ftl", "login-password.ftl", "login-username.ftl", "login-otp.ftl":
+		return true
+	}
+	qr, _ := data["qr"].(string)
+	return qr != ""
+}
+
 func click(target pw.Locator) bool {
 	count, err := target.Count()
 	if err != nil || count == 0 {

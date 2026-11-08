@@ -1,4 +1,27 @@
-# Current verification note: 2.2.0
+# Current verification note: 2.2.2
+
+Renewal observations persist inside the encrypted account record. PostgreSQL
+tests verify automatic success, recovered expiry, known/unknown/unchanged cookie
+deadlines, no double-counting, manual login exclusion, reopening the vault,
+history capped at 20 and rejection of stale callbacks. Chromium with the real
+API verifies the summary counters and selecting an account's deadline history.
+The site's CSP remains strict; the browser test uses normal locators/actions.
+Statistics retrieval reads saved data and does not trigger upstream renewal.
+
+## Previous verification: 2.2.1
+
+The metrics regression is covered with a real Go HTTP server, PostgreSQL panel
+login and real Chromium, including a collector with no minute history and a
+runtime-diagnostics failure. A separate compatibility fixture omits jobs, as
+older Go responses did. Chromium also verifies Pulse runtime requests are
+blocked before transfer and an interactive SSO page is detected promptly.
+Renewal tests cover known/unknown deadlines, short cookie lifetimes, durable
+requires-login state, fresh-login reset and rejection of stale renewal writes.
+Collector installer tests cover stop-before-probe, preservation of counters and
+rollback of the prior code/service on probe failure. See performance-update.md
+for the distinction between confirmed code defects and production attribution.
+
+## Previous verification: 2.2.0
 
 The local security regression suite covers live identity revocation and current
 group checks, whole-day foreign names with per-class attendance masking,

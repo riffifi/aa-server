@@ -184,6 +184,11 @@ func (s *Server) panelState(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.config.Vault
 	metadata := make([]map[string]any, 0)
+	historyAccount := r.URL.Query().Get("renewal_history")
+	if len(historyAccount) > 200 {
+		detail(w, 422, "Invalid renewal history account")
+		return
+	}
 	err := v.EachAccount(r.Context(), func(row map[string]any) error {
 		data := postgres.Public(row)
 		secret, err := v.Secret(row)
@@ -199,6 +204,16 @@ func (s *Server) panelState(w http.ResponseWriter, r *http.Request) {
 			hasState = len(value) > 0
 		}
 		data["automatic_renewal"] = hasState
+		data["renewal"] = postgres.RenewalView(secret)
+		if row["id"] != historyAccount {
+			view := data["renewal"].(map[string]any)
+			stats := view["statistics"].(postgres.RenewalStatistics)
+			stats.History = []postgres.RenewalAttempt{}
+			view["statistics"] = stats
+		}
+		if secret["renewal_status"] == "requires_login" {
+			data["automatic_renewal"] = false
+		}
 		data["renewed_at"] = secret["renewed_at"]
 		data["page_seen_at"] = row["page_seen_at"]
 		metadata = append(metadata, data)

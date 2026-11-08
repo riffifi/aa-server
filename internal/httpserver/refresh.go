@@ -82,7 +82,7 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 		}
 	}
 	now := v.Now()
-	due := cookie != "" && (state == "expired" || (state == "valid" && ((row["expires_at"] != nil && numberFloat(row["expires_at"]) <= float64(now.Unix())+s.config.RenewBefore.Seconds()) || float64(now.Unix())-numberFloat(secret["renewed_at"]) >= s.config.RenewInterval.Seconds())))
+	due := cookie != "" && secret["renewal_status"] != "requires_login" && renewalDue(state, now, row["expires_at"], secret["renewed_at"], s.config.RenewBefore, s.config.RenewInterval)
 	storage, _ := secret["storage_state"].(map[string]any)
 	if renewer, ok := s.config.Browser.(interface {
 		Renew(context.Context, map[string]any) (*browser.Result, error)
@@ -95,10 +95,13 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 		}
 		s.refreshMu.Unlock()
 		if retry {
+			if err := v.NoteRenewal(ctx, id, row["session_version"].(int64), "running", state); err != nil {
+				return nil, err
+			}
 			result, renewErr := renewer.Renew(ctx, storage)
 			if renewErr == nil && result != nil && result.UID == row["pulse_id"] && len(result.Credentials) > 0 {
 				expected := row["session_version"].(int64)
-				fresh, writeErr := v.Upsert(ctx, postgres.Upsert{PulseID: result.UID, AccountID: id, Credentials: result.Credentials, SessionExpected: &expected})
+				fresh, writeErr := v.Upsert(ctx, postgres.Upsert{PulseID: result.UID, AccountID: id, Credentials: result.Credentials, SessionExpected: &expected, AutomaticRenewal: true})
 				result.Credentials = nil
 				if writeErr == nil {
 					row = fresh
@@ -109,6 +112,17 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 						return nil, writeErr
 					}
 				}
+			} else {
+				status := "failed"
+				if errors.Is(renewErr, browser.ErrReauthenticationRequired) {
+					status = "requires_login"
+				}
+				if err := v.NoteRenewal(ctx, id, row["session_version"].(int64), status); err != nil {
+					return nil, err
+				}
+			}
+			if result != nil {
+				result.Credentials = nil
 			}
 		}
 	}
@@ -132,6 +146,29 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 		}
 	}
 	return v.Account(ctx, id)
+}
+
+func renewalDue(state string, now time.Time, expires, renewed any, before, interval time.Duration) bool {
+	if state == "expired" {
+		return true
+	}
+	if state != "valid" {
+		return false
+	}
+	expiry, last := numberFloat(expires), numberFloat(renewed)
+	heartbeat := float64(now.Unix())-last >= interval.Seconds()
+	if expiry > 0 {
+		margin := before.Seconds()
+		// A 15m margin must not renew a fresh 10m cookie on every background scan.
+		if lifetime := expiry - last; last > 0 && lifetime > 0 {
+			margin = min(margin, lifetime/5)
+		}
+		// Keep the SSO heartbeat even for long-lived Pulse cookies: an upstream
+		// SSO idle timeout can be shorter than the Pulse cookie lifetime.
+		return heartbeat || expiry <= float64(now.Unix())+margin
+	}
+	// Session cookies have no visible deadline; keep the existing SSO heartbeat.
+	return heartbeat
 }
 func (s *Server) refreshLoop() {
 	defer s.refreshWG.Done()
