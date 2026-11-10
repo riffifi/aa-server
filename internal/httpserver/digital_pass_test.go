@@ -135,6 +135,15 @@ func TestServerOwnedPassEnrollmentAndPermissionRevocation(t *testing.T) {
 	if w.Code != 200 || result["number"] != "9223372036854775807" {
 		t.Fatal(w.Body.String())
 	}
+	for _, action := range []string{"code", "issue"} {
+		w, result = secureRequest(t, s, "POST", "/site/passes/"+id+"/"+action, `{"code":"012345"}`, guestHeaders)
+		if w.Code != 200 {
+			t.Fatal("shared enrollment", action, w.Body.String())
+		}
+		if action == "issue" && result["account_id"] != id {
+			t.Fatal("enrolled wrong owner")
+		}
+	}
 	before := len(upstream.methods)
 	// Even a pass grant never authorizes the old arbitrary enrollment proxy.
 	w, _ = secureRequest(t, s, "POST", "/api/accounts/"+id+"/rpc/pass-issue", `{}`, guestHeaders)
@@ -165,6 +174,13 @@ func TestServerOwnedPassEnrollmentAndPermissionRevocation(t *testing.T) {
 	w, _ = secureRequest(t, s, "GET", "/site/passes/"+id, "", guestHeaders)
 	if w.Code != 404 {
 		t.Fatal("revoked share leaked pass")
+	}
+	for _, action := range []string{"code", "issue"} {
+		before := len(upstream.methods)
+		w, _ = secureRequest(t, s, "POST", "/site/passes/"+id+"/"+action, `{"code":"012345"}`, guestHeaders)
+		if w.Code != 404 || len(upstream.methods) != before {
+			t.Fatal("revoked share allowed enrollment")
+		}
 	}
 	// A grant outside today's roster scope must not reveal names or numbers.
 	foreign := int64(999999)

@@ -8,16 +8,20 @@ import (
 	"aa-server/internal/pulse"
 )
 
-// Enrollment is owner-only. Sharing permits reading a stored pass, never
-// requesting verification messages or replacing another person's credential.
+// Targeted enrollment requires a live pass grant and the owner verification code.
 func (s *Server) passEnrollment(w http.ResponseWriter, r *http.Request, method string, body []byte) (map[string]any, pulse.Reply, func(), bool) {
-	own, ok := s.ownAccount(w, r, true)
-	if !ok {
-		return nil, pulse.Reply{}, nil, false
-	}
-	id := own["id"].(string)
-	if own["pass_allowed"] == int64(0) {
-		detail(w, 403, "Enable your pass in AA ID settings first")
+	id := r.PathValue("id")
+	if id == "" {
+		own, ok := s.ownAccount(w, r, true)
+		if !ok {
+			return nil, pulse.Reply{}, nil, false
+		}
+		id = own["id"].(string)
+		if own["pass_allowed"] == int64(0) {
+			detail(w, 403, "Enable your pass in AA ID settings first")
+			return nil, pulse.Reply{}, nil, false
+		}
+	} else if !s.canEnrollPass(w, r, id) {
 		return nil, pulse.Reply{}, nil, false
 	}
 	count := 20
@@ -47,7 +51,7 @@ func (s *Server) passEnrollment(w http.ResponseWriter, r *http.Request, method s
 		s.failure(w, err)
 		return nil, pulse.Reply{}, nil, false
 	}
-	if row == nil || row["pulse_id"] != identity(r) {
+	if row == nil || (r.PathValue("id") == "" && row["pulse_id"] != identity(r)) {
 		done()
 		detail(w, 404, "Account not found")
 		return nil, pulse.Reply{}, nil, false
@@ -55,6 +59,10 @@ func (s *Server) passEnrollment(w http.ResponseWriter, r *http.Request, method s
 	if row["pass_allowed"] == int64(0) {
 		done()
 		detail(w, 403, "Enable your pass in AA ID settings first")
+		return nil, pulse.Reply{}, nil, false
+	}
+	if r.PathValue("id") != "" && !s.canEnrollPass(w, r, id) {
+		done()
 		return nil, pulse.Reply{}, nil, false
 	}
 	secret, err := s.config.Vault.Secret(row)
@@ -175,6 +183,9 @@ func (s *Server) digitalPassIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := row["id"].(string)
+	if r.PathValue("id") != "" && !s.canEnrollPass(w, r, id) {
+		return
+	}
 	if _, err = s.config.Vault.SaveIssuedPass(r.Context(), id, number, row["pass_version"].(int64), row["session_version"].(int64)); err != nil {
 		s.failure(w, err)
 		return
@@ -246,4 +257,22 @@ func (s *Server) digitalPass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detail(w, 404, "Pass not found")
+}
+
+// Recheck SQL authorization, including revoked, disabled and out-of-scope shares.
+func (s *Server) canEnrollPass(w http.ResponseWriter, r *http.Request, id string) bool {
+	scope, ok := s.rosterScope(w, r)
+	if !ok {
+		return false
+	}
+	numbers, err := s.config.Vault.VisiblePassNumbers(r.Context(), identity(r), []string{id}, scope.groups)
+	if err != nil {
+		s.failure(w, err)
+		return false
+	}
+	if _, present := numbers[id]; !present {
+		detail(w, 404, "Pass not found")
+		return false
+	}
+	return true
 }

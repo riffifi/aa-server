@@ -535,6 +535,8 @@ func (s *Server) routes() {
 	s.handle("POST /api/me/pass/requests/{request}/{decision}", s.answerPass)
 	s.handle("GET /site/passes", s.digitalPasses)
 	s.handle("GET /site/passes/{id}", s.digitalPass)
+	s.handle("POST /site/passes/{id}/code", s.digitalPassCode)
+	s.handle("POST /site/passes/{id}/issue", s.digitalPassIssue)
 	s.handle("POST /site/pass/code", s.digitalPassCode)
 	s.handle("POST /site/pass/issue", s.digitalPassIssue)
 	if s.config.StaticDir != "" {
