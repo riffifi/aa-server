@@ -32,12 +32,12 @@ func (s *Store) VisibleMetadata(ctx context.Context, mirea string) ([]map[string
 	}
 	return pgx.CollectRows(rows, pgx.RowToMap)
 }
-func (v *Vault) VisiblePassNumbers(ctx context.Context, mirea string, ids []string) (map[string]any, error) {
+func (v *Vault) VisiblePassNumbers(ctx context.Context, mirea string, ids []string, groups []int64) (map[string]any, error) {
 	out := map[string]any{}
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := v.Pool.Query(ctx, "SELECT id,secret FROM aa.accounts a WHERE a.id=ANY($2::text[]) AND a.pass_allowed=1 AND "+visibleAccount, mirea, ids)
+	rows, err := v.Pool.Query(ctx, "SELECT id,secret FROM aa.accounts a WHERE a.id=ANY($2::text[]) AND a.pass_allowed=1 AND "+visibleAccount+" AND (a.pulse_id=$1 OR a.group_id=ANY($3::bigint[]))", mirea, ids, groups)
 	if err != nil {
 		return nil, err
 	}

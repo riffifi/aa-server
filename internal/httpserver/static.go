@@ -89,7 +89,7 @@ func ServeAsset(w http.ResponseWriter, r *http.Request, directory, name string, 
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 func (s *Server) staticRoutes() {
-	for path, file := range map[string]string{"/": "index.html", "/today": "today.html", "/schedule": "schedule.html", "/panel": "panel.html"} {
+	for path, file := range map[string]string{"/": "index.html", "/today": "today.html", "/schedule": "schedule.html", "/passes": "passes.html", "/panel": "panel.html"} {
 		s.handle("GET "+path, func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != path {
 				detail(w, 404, "Not Found")

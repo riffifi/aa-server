@@ -49,6 +49,8 @@ type Pulse interface {
 	Logout(context.Context, string) error
 }
 type Server struct {
+	passMu          sync.Mutex
+	passBusy        map[string]bool
 	admission       security.Gate
 	activeEvents    map[string]int
 	site            *siteService
@@ -531,6 +533,10 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/me/pass/people/{kind}/{grant}", s.unshare)
 	s.handle("POST /api/me/pass/requests", s.askPass)
 	s.handle("POST /api/me/pass/requests/{request}/{decision}", s.answerPass)
+	s.handle("GET /site/passes", s.digitalPasses)
+	s.handle("GET /site/passes/{id}", s.digitalPass)
+	s.handle("POST /site/pass/code", s.digitalPassCode)
+	s.handle("POST /site/pass/issue", s.digitalPassIssue)
 	if s.config.StaticDir != "" {
 		s.staticRoutes()
 	}

@@ -1,4 +1,25 @@
-# Current verification note: 2.2.2
+# Current verification note: 2.3.0
+
+Digital passes use server-owned JSON operations shared by the website and app.
+The full Go race suite passed against four isolated local PostgreSQL databases;
+after the final pass-switch changes the HTTP, PostgreSQL and Pulse race suites
+passed again, including real Chromium with the actual Go API and PostgreSQL.
+The university transport in those tests is synthetic. Cases cover anonymous
+access, explicit shares, revocation, disabled passes including the owner,
+foreign groups, wrong codes, malformed responses, rate limits, concurrent
+operations, logout/disable during enrollment and int64 precision. The browser
+test exercises code request, enrollment, number retrieval, clearing displayed
+credentials and absence of local/session storage writes. Existing client RPC
+and number publication endpoints stay retired.
+
+Both Linux service binaries compile with Go 1.26.10. JavaScript syntax and the
+API documentation checker pass (92 retained legacy routes, 13 additions and
+48 JSON examples). Existing app builds need the JSON integration described in
+client-api-migration.md; the Flutter application was not modified here.
+Production was not accessed. Live university pass issuance, remote device
+binding/revocation and actual NFC gate acceptance were not exercised.
+
+## Previous verification: 2.2.2
 
 Renewal observations persist inside the encrypted account record. PostgreSQL
 tests verify automatic success, recovered expiry, known/unknown/unchanged cookie

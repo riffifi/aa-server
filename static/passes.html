@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>Пропуска · AntiAttendance</title><link rel="stylesheet" href="/static/site.css"><script src="/static/passes.js" defer></script></head>
+<body><main class="page">
+  <header class="masthead"><a class="text-button" href="/">← На главную</a><h1 class="heading">Цифровые пропуска</h1></header>
+  <p id="pass-error" class="banner" role="alert" hidden></p>
+  <p id="pass-signin" class="banner info" hidden>Для работы с пропусками <a href="/auth/aaid">войдите через AA ID</a>.</p>
+  <section id="pass-app" hidden>
+    <section class="block"><h2 class="heading">Доступные пропуска</h2><p class="caption">Ваш пропуск и пропуска, к которым владельцы предоставили доступ. Разрешения можно изменить в настройках AA ID. Номер запрашивается отдельно и скрывается через 30 секунд.</p><div id="pass-list" class="list"></div><button id="pass-refresh" class="secondary" type="button">Обновить список</button></section>
+    <section id="pass-enroll" class="block" hidden><h2 class="heading">Подключить свой пропуск</h2><p class="caption">Запросите код способом подтверждения, настроенным в МИРЭА, и введите его здесь. Сервер сохранит выданный МИРЭА пропуск. Повторный выпуск может заменить предыдущую привязку устройства. Сайт показывает номер; для прохода по NFC нужно приложение с поддержкой этого API.</p><button id="pass-code" class="secondary" type="button">Получить код МИРЭА</button><p id="pass-status" class="status" role="status"></p><form id="pass-form" class="field"><label for="pass-input">Код подтверждения</label><input id="pass-input" class="input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="6 цифр"><button id="pass-issue" class="primary" type="submit">Подключить пропуск</button></form></section>
+  </section>
+</main></body></html>

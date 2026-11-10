@@ -276,6 +276,16 @@ func (v *Vault) SetPassAllowed(ctx context.Context, id string, allowed bool, exp
 }
 
 func (v *Vault) SavePass(ctx context.Context, id, number string, expected *int64) (map[string]any, error) {
+	return v.savePass(ctx, id, number, expected, nil)
+}
+
+// SaveIssuedPass rejects an enrollment result if login/logout or another pass
+// changed the account while the university request was in flight.
+func (v *Vault) SaveIssuedPass(ctx context.Context, id, number string, expected, sessionExpected int64) (map[string]any, error) {
+	return v.savePass(ctx, id, number, &expected, &sessionExpected)
+}
+
+func (v *Vault) savePass(ctx context.Context, id, number string, expected, sessionExpected *int64) (map[string]any, error) {
 	if number == "" || number[0] < '1' || number[0] > '9' {
 		return nil, errors.New("Invalid pass identifier")
 	}
@@ -289,6 +299,12 @@ func (v *Vault) SavePass(ctx context.Context, id, number string, expected *int64
 		return nil, errors.New("Invalid pass identifier")
 	}
 	return v.mutate(ctx, id, func(tx pgx.Tx, row map[string]any) error {
+		if sessionExpected != nil && row["pass_allowed"] == int64(0) {
+			return &Conflict{"The pass was disabled during enrollment"}
+		}
+		if sessionExpected != nil && *sessionExpected != row["session_version"] {
+			return &Conflict{"The session changed; retry pass enrollment"}
+		}
 		if expected != nil && *expected != row["pass_version"] {
 			return &Conflict{"A newer pass is already stored"}
 		}

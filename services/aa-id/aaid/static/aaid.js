@@ -201,6 +201,8 @@ function render(me) {
   $('signin').hidden = true; $('account').hidden = false;
   showWho();
   if (me.site_url) { $('site-link').href = me.site_url; $('site-link').hidden = false; }
+  $('pass-open').hidden = !me.site_url;
+  if (me.site_url) $('pass-open').href = new URL('/passes', me.site_url).href;
   if (first) loadSettings();
   // Signed in already: go straight back to AntiAttendance, no extra click.
   if (handoff && first) { continueToSite(); }
