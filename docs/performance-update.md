@@ -1,5 +1,50 @@
 # Performance update
 
+## 2.4.0 — preserve native-style sliding sessions and fill missing names
+
+The supplied `ru.mirea.pulse-173.apk` has SHA-256
+`61b89c1833279e4f0e12b0be8dfaf3b0199b67887ae353f5d5349921736b1ecc`.
+Static DEX inspection shows a WebView loading `https://pulse.mirea.ru/pwa`.
+`m6.c.onPageFinished` saves CookieManager's Cookie header to `cookie_key` in
+SharedPreferences and flushes the cookie store; `G5.c.k` restores the saved
+header when creating the WebView. `d6.i`'s stored access token and expiry belong
+to DigitalPassRepository, not evidence of an eternal general login. The APK
+alone does not establish the identity provider's absolute/idle session limits.
+
+The public PWA inspected on 2026-11-11 requests GetMeInfo with rememberMe=true.
+Its [generated profile codec](https://pulse.mirea.ru/assets/shared-D8skLCdC.js)
+identifies the authenticated user's first/last names as fields 2/3 and middle
+name as a StringValue in field 4. No credentials or private profiles were used
+for this inspection. Only the HTML, small entry bundle and first 4 MiB of the
+shared bundle were fetched; no framework/runtime download was needed.
+
+Confirmed server defect: ordinary Pulse RPC responses contained headers, but
+the application discarded Set-Cookie instead of persisting ticket rotation.
+Now every account RPC uses one wrapper that saves cookie updates into encrypted
+PostgreSQL credentials and Playwright state. CAS against both sent cookie and
+session revision rejects out-of-order responses, logout and fresh-login races.
+Chunk replacement, expiry, deletion and cookie-domain/path boundaries are
+handled explicitly. Upstream cookies never become client Set-Cookie headers.
+
+The production profile probe now supplies its verified identity, name and
+cookie updates in one request. A confirmed live ticket suppresses unnecessary
+timer-driven SSO navigation; an actual authentication rejection retains bounded
+SSO fallback and requires-login handling. The existing background profile check
+is reused, so this adds no periodic network requests and no downloads of the PWA.
+Private renewal statistics show cookie_refreshes/last_cookie_refresh separately
+from SSO attempts. These are observed cookie updates, not proof of infinite TTL.
+
+Missing display labels are filled from the authenticated profile, including
+existing accounts on their next successful refresh. Custom labels are preserved
+under a row lock; identity, groups and visibility rules are unchanged. New login
+capture and the internal AA ID handoff also use the profile's verified name.
+No database schema or client API migration is needed for these two changes.
+
+Local tests simulate 48 hours of short-lived, rotating tickets and verify that
+the server retains each new ticket without opening SSO. This proves handling
+of that contract, not the real provider's lifetime policy. Production was not
+accessed and no live MIREA login was performed.
+
 ## 2.2.2 — measuring whether renewal helps
 
 Private panel → System → renewal effectiveness shows lifetime per-account

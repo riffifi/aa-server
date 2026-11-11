@@ -49,7 +49,7 @@ func (s *Server) initSite(ctx context.Context) {
 			return nil
 		}
 		start := schedule.Day(s.config.Vault.Now()).Unix()
-		reply, err := s.config.Pulse.RPC(ctx, cookie, "acs-timeline", pulse.ACSTimelineRequest(row["pulse_id"].(string), uint64(start), uint64(start+86399)), "")
+		reply, err := s.pulseRPC(ctx, row, "acs-timeline", pulse.ACSTimelineRequest(row["pulse_id"].(string), uint64(start), uint64(start+86399)), "")
 		if err != nil || reply.Status != 200 {
 			return nil
 		}
@@ -97,7 +97,7 @@ func (s *siteService) readJournal(ctx context.Context, key string) journalDay {
 			continue
 		}
 		rpc := func(method string, body []byte) (pulse.Reply, bool) {
-			reply, err := s.s.config.Pulse.RPC(ctx, cookie, method, body, "")
+			reply, err := s.s.pulseRPC(ctx, row, method, body, "")
 			return reply, err == nil && reply.Status == 200
 		}
 		reply, ok := rpc("visiting-logs", pulse.Frame(nil, 0))

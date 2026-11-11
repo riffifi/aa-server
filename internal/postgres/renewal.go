@@ -20,21 +20,23 @@ type RenewalAttempt struct {
 }
 
 type RenewalStatistics struct {
-	Since            float64          `json:"since"`
-	Attempts         int64            `json:"attempts"`
-	Succeeded        int64            `json:"succeeded"`
-	Failed           int64            `json:"failed"`
-	RequiresLogin    int64            `json:"requires_login"`
-	Interrupted      int64            `json:"interrupted"`
-	Recovered        int64            `json:"recovered"`
-	ConfirmedBenefit int64            `json:"confirmed_benefit"`
-	ExpiryExtended   int64            `json:"expiry_extended"`
-	ExpiryUnchanged  int64            `json:"expiry_unchanged"`
-	ExpiryUnknown    int64            `json:"expiry_unknown"`
-	LastAttempt      float64          `json:"last_attempt"`
-	LastSuccess      float64          `json:"last_success"`
-	Active           *RenewalAttempt  `json:"active"`
-	History          []RenewalAttempt `json:"history"`
+	CookieRefreshes   int64            `json:"cookie_refreshes"`
+	LastCookieRefresh float64          `json:"last_cookie_refresh"`
+	Since             float64          `json:"since"`
+	Attempts          int64            `json:"attempts"`
+	Succeeded         int64            `json:"succeeded"`
+	Failed            int64            `json:"failed"`
+	RequiresLogin     int64            `json:"requires_login"`
+	Interrupted       int64            `json:"interrupted"`
+	Recovered         int64            `json:"recovered"`
+	ConfirmedBenefit  int64            `json:"confirmed_benefit"`
+	ExpiryExtended    int64            `json:"expiry_extended"`
+	ExpiryUnchanged   int64            `json:"expiry_unchanged"`
+	ExpiryUnknown     int64            `json:"expiry_unknown"`
+	LastAttempt       float64          `json:"last_attempt"`
+	LastSuccess       float64          `json:"last_success"`
+	Active            *RenewalAttempt  `json:"active"`
+	History           []RenewalAttempt `json:"history"`
 }
 
 func renewalStatistics(secret map[string]any) RenewalStatistics {

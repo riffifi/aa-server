@@ -30,6 +30,7 @@ var authCookie = regexp.MustCompile(`^\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?$`)
 const loginURL = "https://pulse.mirea.ru/api/auth/login?redirectUri=https%3A%2F%2Fpulse.mirea.ru%2Fservices&rememberMe="
 
 type Result struct {
+	ProfileName string
 	AccountID   string
 	UID         string
 	GroupID     *int64
@@ -279,6 +280,7 @@ func (e *Engine) capture(c pw.BrowserContext) (*Result, error) {
 		return nil, ErrNotAuthenticated
 	}
 	result := &Result{UID: uid}
+	result.ProfileName = pulse.ProfileName(reply.Body, reply.Headers, uid)
 	if e.config.Identity {
 		group, err := call(c, "schedules")
 		if err == nil {

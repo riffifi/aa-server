@@ -254,12 +254,13 @@ async function loadRenewalStatistics() {
   const data = await api('state' + (selected ? '?renewal_history=' + encodeURIComponent(selected) : ''));
   if (sequence !== renewalSequence || $('renewal-account').value !== selected) return;
   accounts = data.accounts; csrf = data.csrf;
-  const totals = {}, keys = ['attempts', 'succeeded', 'failed', 'requires_login', 'interrupted', 'recovered', 'confirmed_benefit', 'expiry_extended', 'expiry_unchanged', 'expiry_unknown'];
+  const totals = {}, keys = ['cookie_refreshes', 'attempts', 'succeeded', 'failed', 'requires_login', 'interrupted', 'recovered', 'confirmed_benefit', 'expiry_extended', 'expiry_unchanged', 'expiry_unknown'];
   keys.forEach(key => { totals[key] = accounts.reduce((sum, a) => sum + (Number(((a.renewal || {}).statistics || {})[key]) || 0), 0); });
   const since = accounts.map(a => ((a.renewal || {}).statistics || {}).since).filter(value => value > 0);
   $('renewal-statistics-status').textContent = since.length ? `Счётчики с ${stamp(since.reduce((first, value) => Math.min(first, value), Infinity))}; сохраняются при перезапуске. Учитываются аккаунты, которые есть на сервере.` : 'После обновления ещё не было попыток автопродления. Старые попытки и обычные входы не засчитываются задним числом.';
   const completed = totals.succeeded + totals.failed + totals.requires_login + totals.interrupted;
   $('renewal-facts').replaceChildren(
+    fact('Обновления cookie из ответов МИРЭА', totals.cookie_refreshes),
     fact('Попыток', totals.attempts), fact('Успешно', totals.succeeded),
     fact('Успех среди завершённых', completed ? (100 * totals.succeeded / completed).toFixed(1) + '%' : '—'),
     fact('С подтверждённым эффектом', totals.confirmed_benefit),
@@ -269,9 +270,9 @@ async function loadRenewalStatistics() {
     fact('Срок не вырос', totals.expiry_unchanged), fact('Срок неизвестен', totals.expiry_unknown),
     fact('Ошибки', totals.failed), fact('Требуется QR', totals.requires_login), fact('Прерваны', totals.interrupted),
     fact('Не завершены', Math.max(0, totals.attempts - completed)));
-  grid($('renewal-table'), ['Аккаунт', 'Попытки', 'Успехи', 'Восстановлено', 'Срок вырос', 'Ошибки / QR', 'Последний успех', 'Последняя попытка'], accounts.map(a => {
+  grid($('renewal-table'), ['Аккаунт', 'Cookie МИРЭА', 'Последняя cookie', 'Попытки SSO', 'Успехи SSO', 'Восстановлено', 'Срок вырос', 'Ошибки / QR', 'Последний успех SSO', 'Последняя попытка SSO'], accounts.map(a => {
     const r = a.renewal || {}, s = r.statistics || {};
-    return [a.label, s.attempts || 0, s.succeeded || 0, s.recovered || 0, s.expiry_extended || 0, `${s.failed || 0} / ${s.requires_login || 0}`, stamp(r.last_success), stamp(r.last_attempt)];
+    return [a.label, s.cookie_refreshes || 0, stamp(s.last_cookie_refresh), s.attempts || 0, s.succeeded || 0, s.recovered || 0, s.expiry_extended || 0, `${s.failed || 0} / ${s.requires_login || 0}`, stamp(r.last_success), stamp(r.last_attempt)];
   }));
   const placeholder = el('option', 'Выберите аккаунт'); placeholder.value = '';
   $('renewal-account').replaceChildren(placeholder, ...accounts.map(a => { const option = el('option', a.label); option.value = a.id; return option; }));

@@ -74,15 +74,40 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	}
 	cookie, _ := secret["cookie"].(string)
 	state := "expired"
+	detailed := false
 	if cookie != "" {
-		var uid string
-		state, uid = s.config.Pulse.Identity(ctx, cookie)
+		var uid, name string
+		state, uid, name, detailed, err = s.probeProfile(ctx, row, cookie)
+		if err != nil {
+			return nil, err
+		}
 		if state == "valid" && uid != row["pulse_id"] {
 			state = "forbidden"
 		}
+		if state == "valid" && name != "" && postgres.MissingLabel(row["label"].(string)) {
+			var named map[string]any
+			if named, err = v.FillProfileName(ctx, id, name, row["session_version"].(int64)); err != nil {
+				return nil, err
+			}
+			if named != nil {
+				row = named
+			}
+		}
+		secret, err = v.Secret(row)
+		if err != nil {
+			return nil, err
+		}
+		cookie, _ = secret["cookie"].(string)
 	}
 	now := v.Now()
 	due := cookie != "" && secret["renewal_status"] != "requires_login" && renewalDue(state, now, row["expires_at"], secret["renewed_at"], s.config.RenewBefore, s.config.RenewInterval)
+	// Like the official WebView, a confirmed live ticket is kept alive by its
+	// normal profile request and Set-Cookie. Do not replace it with an SSO flow
+	// merely because a local heartbeat timer elapsed. SSO remains a fallback
+	// after an actual upstream authentication rejection.
+	if detailed && state == "valid" {
+		due = false
+	}
 	storage, _ := secret["storage_state"].(map[string]any)
 	if renewer, ok := s.config.Browser.(interface {
 		Renew(context.Context, map[string]any) (*browser.Result, error)
@@ -101,7 +126,7 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 			result, renewErr := renewer.Renew(ctx, storage)
 			if renewErr == nil && result != nil && result.UID == row["pulse_id"] && len(result.Credentials) > 0 {
 				expected := row["session_version"].(int64)
-				fresh, writeErr := v.Upsert(ctx, postgres.Upsert{PulseID: result.UID, AccountID: id, Credentials: result.Credentials, SessionExpected: &expected, AutomaticRenewal: true})
+				fresh, writeErr := v.Upsert(ctx, postgres.Upsert{PulseID: result.UID, ProfileName: result.ProfileName, AccountID: id, Credentials: result.Credentials, SessionExpected: &expected, AutomaticRenewal: true})
 				result.Credentials = nil
 				if writeErr == nil {
 					row = fresh
@@ -137,7 +162,7 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 		cookie, _ = updated["cookie"].(string)
 	}
 	if fresh["group_id"] == nil && state == "valid" && cookie != "" {
-		reply, callErr := s.config.Pulse.RPC(ctx, cookie, "schedules", pulse.Frame(nil, 0), "")
+		reply, callErr := s.pulseRPC(ctx, fresh, "schedules", pulse.Frame(nil, 0), "")
 		if callErr == nil && reply.Status == 200 {
 			group, name := pulse.DecodeGroup(reply.Headers, reply.Body)
 			if group != nil {

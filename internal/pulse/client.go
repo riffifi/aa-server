@@ -96,6 +96,11 @@ func (t *Transport) Identity(ctx context.Context, cookie string) (string, string
 	}
 	return AuthenticationState(reply.Status, reply.Headers, reply.Body)
 }
+
+// Profile preserves response headers for server-side sliding session renewal.
+func (t *Transport) Profile(ctx context.Context, cookie string) (Reply, error) {
+	return t.RPC(ctx, cookie, "profile", ProfileRequest(), "")
+}
 func (t *Transport) Logout(ctx context.Context, cookie string) error {
 	if err := ValidateCookie(cookie); err != nil {
 		return err

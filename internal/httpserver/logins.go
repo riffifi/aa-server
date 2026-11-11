@@ -53,7 +53,7 @@ func (l accountLogin) Login(ctx context.Context, update func(browser.Update)) (*
 		return nil, errors.New("missing login result")
 	}
 	defer func() { result.Credentials = nil }()
-	row, err := l.vault.Upsert(ctx, postgres.Upsert{PulseID: result.UID, Label: l.label, AccountID: l.accountID, Credentials: result.Credentials, SessionExpected: l.sessionExpected})
+	row, err := l.vault.Upsert(ctx, postgres.Upsert{PulseID: result.UID, Label: l.label, ProfileName: result.ProfileName, AccountID: l.accountID, Credentials: result.Credentials, SessionExpected: l.sessionExpected})
 	if err != nil {
 		var conflict *postgres.Conflict
 		if errors.As(err, &conflict) {

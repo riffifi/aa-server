@@ -96,11 +96,11 @@ func (v *Vault) event(ctx context.Context, tx pgx.Tx, id string, version int64, 
 }
 
 type Upsert struct {
-	AutomaticRenewal                   bool
-	PulseID, Label, AccountID          string
-	Credentials                        map[string]any
-	Expected, SessionExpected, GroupID *int64
-	GroupName                          *string
+	AutomaticRenewal                       bool
+	PulseID, Label, AccountID, ProfileName string
+	Credentials                            map[string]any
+	Expected, SessionExpected, GroupID     *int64
+	GroupName                              *string
 }
 
 func (v *Vault) Upsert(ctx context.Context, in Upsert) (map[string]any, error) {
@@ -175,6 +175,9 @@ func (v *Vault) Upsert(ctx context.Context, in Upsert) (map[string]any, error) {
 			if label == "" {
 				label = row["label"].(string)
 			}
+			if MissingLabel(label) && validProfileName(in.ProfileName) {
+				label = in.ProfileName
+			}
 			if in.GroupID == nil {
 				groupID = row["group_id"]
 			}
@@ -187,6 +190,9 @@ func (v *Vault) Upsert(ctx context.Context, in Upsert) (map[string]any, error) {
 			_, err = tx.Exec(ctx, `UPDATE aa.accounts SET label=$1,group_id=$2,group_name=$3,secret=$4,state='valid',expires_at=$5,
     checked_at=$6,version=$7,session_version=session_version+1,updated_at=$6 WHERE id=$8`, label, groupID, groupName, sealed, expiry, v.now(), version, id)
 		} else {
+			if MissingLabel(label) && validProfileName(in.ProfileName) {
+				label = in.ProfileName
+			}
 			if label == "" {
 				label = "Account"
 			}

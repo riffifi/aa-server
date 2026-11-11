@@ -372,7 +372,7 @@ func (s *Server) siteMark(w http.ResponseWriter, r *http.Request) {
 					if err == nil {
 						cookie, _ := secret["cookie"].(string)
 						if cookie != "" {
-							reply, err := s.config.Pulse.RPC(r.Context(), cookie, "attendance", pulse.Frame(pulse.Field(1, []byte(token)), 0), "")
+							reply, err := s.pulseRPC(r.Context(), row, "attendance", pulse.Frame(pulse.Field(1, []byte(token)), 0), "")
 							if err != nil {
 								state, message = "error", "Пульс недоступен"
 							} else {

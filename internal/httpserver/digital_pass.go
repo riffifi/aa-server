@@ -78,7 +78,7 @@ func (s *Server) passEnrollment(w http.ResponseWriter, r *http.Request, method s
 		return nil, pulse.Reply{}, nil, false
 	}
 	// Fetch a fresh token for this account, never accept or expose a client token.
-	tokenReply, err := s.config.Pulse.RPC(ctx, cookie, "pass-token", pulse.Frame(nil, 0), "")
+	tokenReply, err := s.pulseRPC(ctx, row, "pass-token", pulse.Frame(nil, 0), "")
 	if !s.passUpstream(w, tokenReply, err) {
 		done()
 		return nil, pulse.Reply{}, nil, false
@@ -89,7 +89,7 @@ func (s *Server) passEnrollment(w http.ResponseWriter, r *http.Request, method s
 		detail(w, 502, "Invalid pass token response from MIREA")
 		return nil, pulse.Reply{}, nil, false
 	}
-	reply, err := s.config.Pulse.RPC(ctx, cookie, method, body, token)
+	reply, err := s.pulseRPC(ctx, row, method, body, token)
 	if !s.passUpstream(w, reply, err) {
 		done()
 		return nil, pulse.Reply{}, nil, false

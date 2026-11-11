@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -27,7 +28,23 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request) {
 		detail(w, 400, "Invalid cookie")
 		return
 	}
-	state, uid := s.config.Pulse.Identity(r.Context(), cookie)
+	state, uid := "", ""
+	name := ""
+	var profile *pulse.Reply
+	if p, ok := s.config.Pulse.(interface {
+		Profile(context.Context, string) (pulse.Reply, error)
+	}); ok {
+		reply, err := p.Profile(r.Context(), cookie)
+		if err == nil {
+			state, uid = pulse.AuthenticationState(reply.Status, reply.Headers, reply.Body)
+			profile = &reply
+		}
+		if state == "valid" {
+			name = pulse.ProfileName(reply.Body, reply.Headers, uid)
+		}
+	} else {
+		state, uid = s.config.Pulse.Identity(r.Context(), cookie)
+	}
 	if state != "valid" || uid != claims["mirea"] {
 		detail(w, 422, "Pulse did not confirm this session")
 		return
@@ -40,6 +57,16 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request) {
 	credentials := map[string]any{"cookie": cookie, "expires_at": body["expires_at"], "renewed_at": renewed}
 	if storage, ok := body["storage_state"].(map[string]any); ok && len(storage) > 0 {
 		credentials["storage_state"] = storage
+	}
+	if profile != nil {
+		patch, _, err := pulse.MergeSessionCookies(credentials, profile.Headers, v.Now())
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+		for key, value := range patch {
+			credentials[key] = value
+		}
 	}
 	existing, err := v.MetadataByPulse(r.Context(), uid)
 	if err != nil {
@@ -62,7 +89,7 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request) {
 	if existing != nil && existing["group_id"] != nil {
 		groupID, groupName = nil, nil
 	}
-	row, err := v.Upsert(r.Context(), postgres.Upsert{PulseID: uid, Label: label, Credentials: credentials, GroupID: groupID, GroupName: groupName})
+	row, err := v.Upsert(r.Context(), postgres.Upsert{PulseID: uid, Label: label, ProfileName: name, Credentials: credentials, GroupID: groupID, GroupName: groupName})
 	if err != nil {
 		s.failure(w, err)
 		return

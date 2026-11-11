@@ -72,7 +72,7 @@ func (s *Server) attendance(w http.ResponseWriter, r *http.Request) {
 	successful := 0
 	for day := int64(0); day < days; day++ {
 		start := today - day*86400
-		reply, err := s.config.Pulse.RPC(r.Context(), cookie, "acs-timeline", pulse.ACSTimelineRequest(row["pulse_id"].(string), uint64(start), uint64(start+86399)), "")
+		reply, err := s.pulseRPC(r.Context(), row, "acs-timeline", pulse.ACSTimelineRequest(row["pulse_id"].(string), uint64(start), uint64(start+86399)), "")
 		if err != nil || reply.Status != 200 {
 			continue
 		}
@@ -129,7 +129,7 @@ func (s *Server) profileFields(w http.ResponseWriter, r *http.Request) {
 		detail(w, 409, "The session was ended; sign in again")
 		return
 	}
-	reply, err := s.config.Pulse.RPC(r.Context(), cookie, "profile", pulse.ProfileRequest(), "")
+	reply, err := s.pulseRPC(r.Context(), row, "profile", pulse.ProfileRequest(), "")
 	if err != nil {
 		detail(w, 503, "Pulse is unavailable")
 		return

@@ -1,4 +1,25 @@
-# Current verification note: 2.3.0
+# Current verification note: 2.4.0
+
+The full Go race suite passed with four isolated local PostgreSQL databases and
+real Chromium enabled. A bounded fake university transport models 48 hours of
+one-hour sliding tickets: every rotated cookie is stored and used on the next
+probe, no SSO browser is opened for a valid profile, and a real authentication
+rejection invokes the existing bounded SSO fallback. Name extraction uses the
+authenticated UID and the official PWA's protobuf field layout. PostgreSQL
+tests cover preserving custom labels and pass numbers, cookie counters and
+stale responses after logout; a concurrent logout cannot fill a name or revive
+the account. Pass enrollment is tested with cookie rotation between token and
+issuance, without exposing Set-Cookie to the client.
+
+Chromium verifies restoration of rotated Pulse cookies while preserving SSO
+state. Existing website, pass, metrics and QR tests also passed. Focused race
+checks were repeated after final cookie attribute/expiry handling adjustments.
+Both Linux service binaries compile with Go 1.26.10; JavaScript syntax and API
+reference checks pass. The APK/PWA findings and their limits are recorded in
+performance-update.md. Production was not accessed; no live MIREA login or
+real-world multi-day lifetime guarantee was tested.
+
+## Previous verification: 2.3.0
 
 Digital passes use server-owned JSON operations shared by the website and app.
 The full Go race suite passed against four isolated local PostgreSQL databases;
