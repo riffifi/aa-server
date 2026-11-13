@@ -1,5 +1,36 @@
 # Performance update
 
+## 2.4.2 — test the nativeApp login parameter
+
+Both production browser runners (AA ID QR login and sessions login/renewal)
+now add nativeApp=true to the Pulse login entry URL. rememberMe=True and the
+existing HTTPS redirect are retained. Compose forwards MIREA_NATIVE_APP_AUTH
+to both services, default 1; set it to 0 in .env.go and recreate the containers
+to compare the previous mode. Changing this flag does not rewrite saved tickets.
+
+A public unauthenticated request on 2026-11-13 returned HTTP 302 to the HTTPS
+SSO OpenID Connect authorization endpoint with a request_uri. The redirect was
+not followed and no account was used. Chromium tests with an offline fixture
+verify transmission of the nativeApp/rememberMe query parameters. This does
+not verify completion of a real native login, its eventual callback scheme
+or any difference in session lifetime. Existing HTTPS navigation guards remain
+enforced. A fresh real QR sign-in and observation beyond 24 hours are needed
+to test the provider's actual behavior. Production was not accessed.
+
+## 2.4.1 — restore proactive SSO renewal
+
+The 2.4.0 optimization incorrectly cancelled every SSO renewal while GetMeInfo
+was valid. A valid profile does not prove that an upstream SSO/refresh session
+was renewed, and a provider need not issue a sliding cookie on every request.
+Proactive renewal is restored. Its separate encrypted sso_renewed_at timestamp
+is set on login/browser renewal and is not moved by ordinary Set-Cookie updates.
+Logout removes it. Legacy credentials fall back to their prior renewal time.
+Runtime download blocking, cookie persistence, CAS guards and bounded QR-required
+handling stay enabled. The 48-hour model now verifies proactive SSO even when
+the profile stays valid and cookies rotate. This fixes a confirmed scheduling
+defect; the cause of the reported production-wide daily logout still requires
+the installed version and renewal status. Production was not accessed.
+
 ## 2.4.0 — preserve native-style sliding sessions and fill missing names
 
 The supplied `ru.mirea.pulse-173.apk` has SHA-256

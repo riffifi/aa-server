@@ -1,4 +1,24 @@
-# Current verification note: 2.4.0
+# Current verification note: 2.4.2
+
+The nativeApp=true/false URL construction preserves the HTTPS destination,
+redirect and rememberMe=True. An offline Chromium navigation test verifies
+the actual outgoing query. Browser tests and builds of both services pass.
+A public unauthenticated nativeApp login request returned 302 to HTTPS SSO;
+no redirect, live sign-in or production access was performed. Real callback
+compatibility and longer session lifetime remain unverified.
+
+## Previous verification: 2.4.1
+
+The production profile adapter no longer suppresses proactive SSO renewal.
+The 48-hour model now asserts that a valid profile and rotating cookies do not
+postpone the separate SSO heartbeat; authentication rejection still respects
+retry backoff and requires-login handling. HTTP/PostgreSQL race suites pass;
+other packages passed during the full race run. Both Linux services compile.
+No production connection or live university authentication was performed.
+The reported simultaneous website logout still requires checking the deployed
+version and AA ID session state; its validity is independent of Pulse state.
+
+## Previous verification: 2.4.0
 
 The full Go race suite passed with four isolated local PostgreSQL databases and
 real Chromium enabled. A bounded fake university transport models 48 hours of

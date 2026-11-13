@@ -27,7 +27,13 @@ var ErrNotAuthenticated = errors.New("Pulse session is not authenticated")
 var ErrReauthenticationRequired = errors.New("SSO requires a new interactive sign-in")
 var authCookie = regexp.MustCompile(`^\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?$`)
 
-const loginURL = "https://pulse.mirea.ru/api/auth/login?redirectUri=https%3A%2F%2Fpulse.mirea.ru%2Fservices&rememberMe="
+func loginURL(nativeApp bool) string {
+	query := url.Values{"redirectUri": {pulse.Host + "/services"}, "rememberMe": {"True"}}
+	if nativeApp {
+		query.Set("nativeApp", "true")
+	}
+	return pulse.Host + "/api/auth/login?" + query.Encode()
+}
 
 type Result struct {
 	ProfileName string
@@ -39,6 +45,7 @@ type Result struct {
 }
 type Update struct{ Status, QR string }
 type Config struct {
+	NativeAppAuth          bool
 	DriverDirectory        string
 	LoginSlots, RenewSlots int
 	Identity               bool
@@ -368,12 +375,11 @@ func (e *Engine) run(parent context.Context, state map[string]any, renew bool, u
 		}
 	}
 	update(Update{Status: "login"})
-	remember := "True"
 	timeout := 45000.
 	if renew {
 		timeout = 30000
 	}
-	if _, err = page.Goto(loginURL+remember, pw.PageGotoOptions{WaitUntil: pw.WaitUntilStateDomcontentloaded, Timeout: &timeout}); err != nil {
+	if _, err = page.Goto(loginURL(e.config.NativeAppAuth), pw.PageGotoOptions{WaitUntil: pw.WaitUntilStateDomcontentloaded, Timeout: &timeout}); err != nil {
 		return nil, err
 	}
 	approved := time.Time{}

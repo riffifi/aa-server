@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"aa-server/internal/browser"
 	"aa-server/internal/postgres"
 	"aa-server/internal/pulse"
 )
@@ -17,6 +18,19 @@ import (
 type profileRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f profileRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type sessionModelBrowser struct {
+	calls int
+	renew func() (*browser.Result, error)
+}
+
+func (b *sessionModelBrowser) Login(context.Context, func(browser.Update)) (*browser.Result, error) {
+	return nil, nil
+}
+func (b *sessionModelBrowser) Renew(context.Context, map[string]any) (*browser.Result, error) {
+	b.calls++
+	return b.renew()
+}
 
 func TestOfficialStyleSlidingCookiesKeepWorkingAcrossTwoDays(t *testing.T) {
 	ctx := context.Background()
@@ -49,7 +63,12 @@ func TestOfficialStyleSlidingCookiesKeepWorkingAcrossTwoDays(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: reply.Headers, Body: io.NopCloser(bytes.NewReader(reply.Body))}, nil
 	}))
 	defer upstream.Close()
-	b := &expiredSSOBrowser{}
+	b := &sessionModelBrowser{renew: func() (*browser.Result, error) {
+		if rejected {
+			return nil, browser.ErrReauthenticationRequired
+		}
+		return &browser.Result{UID: uid, Credentials: map[string]any{"cookie": current, "renewed_at": float64(now.Unix()), "expires_at": float64(validUntil.Unix()), "storage_state": map[string]any{"cookies": []any{}, "origins": []any{}}}}, nil
+	}}
 	s, v := setup(t, func(c *Config) { c.Pulse = upstream; c.Browser = b })
 	v.Now = func() time.Time { return now }
 	group := int64(5330)
@@ -70,12 +89,12 @@ func TestOfficialStyleSlidingCookiesKeepWorkingAcrossTwoDays(t *testing.T) {
 			t.Fatalf("step %d lost sliding ticket: %v", i, err)
 		}
 	}
-	if b.calls != 0 || calls != 64 || row["label"] != "Иванов Иван" {
+	if b.calls != 64 || calls != 64 || row["label"] != "Иванов Иван" {
 		t.Fatal("extra browser/query or missing automatic name", b.calls, calls, row["label"])
 	}
 	secret, _ := v.Secret(row)
 	stats := postgres.RenewalView(secret)["statistics"].(postgres.RenewalStatistics)
-	if stats.CookieRefreshes != 64 || stats.Attempts != 0 {
+	if stats.CookieRefreshes != 64 || stats.Attempts != 64 {
 		t.Fatal("cookie refresh counters", stats)
 	}
 	if _, err = v.Rename(ctx, id, "Моё имя", nil); err != nil {
@@ -86,12 +105,13 @@ func TestOfficialStyleSlidingCookiesKeepWorkingAcrossTwoDays(t *testing.T) {
 		t.Fatal("manual name overwritten", err)
 	}
 	// A real authentication rejection still attempts SSO once, then asks for QR.
+	now = now.Add(6 * time.Minute) // The last heartbeat's retry backoff has elapsed.
 	rejected = true
 	row, err = s.refresh(ctx, id)
-	if err != nil || b.calls != 1 || row["state"] != "expired" {
+	if err != nil || b.calls != 65 || row["state"] != "expired" {
 		t.Fatal("upstream rejection ignored", err, b.calls)
 	}
-	if _, err = s.refresh(ctx, id); err != nil || b.calls != 1 {
+	if _, err = s.refresh(ctx, id); err != nil || b.calls != 65 {
 		t.Fatal("rejected SSO retried indefinitely", err, b.calls)
 	}
 }

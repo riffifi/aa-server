@@ -146,6 +146,10 @@ func (v *Vault) Upsert(ctx context.Context, in Upsert) (map[string]any, error) {
 			secret[key] = value
 		}
 		if _, replacing := in.Credentials["cookie"]; replacing {
+			secret["sso_renewed_at"] = in.Credentials["renewed_at"]
+			if secret["sso_renewed_at"] == nil {
+				secret["sso_renewed_at"] = v.now()
+			}
 			if in.AutomaticRenewal {
 				finishRenewal(secret, "succeeded", v.now(), in.Credentials["expires_at"])
 			} else {
@@ -341,7 +345,7 @@ func (v *Vault) EndSession(ctx context.Context, id string) (map[string]any, erro
 			return err
 		}
 		finishRenewal(secret, "interrupted", v.now(), nil)
-		for _, key := range []string{"cookie", "storage_state", "expires_at", "renewed_at", "renewal_status", "renewal_attempted_at"} {
+		for _, key := range []string{"cookie", "storage_state", "expires_at", "renewed_at", "sso_renewed_at", "renewal_status", "renewal_attempted_at"} {
 			delete(secret, key)
 		}
 		sealed, err := v.seal(secret)

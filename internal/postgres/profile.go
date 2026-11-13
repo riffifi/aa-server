@@ -86,6 +86,9 @@ func (v *Vault) SavePulseCookies(ctx context.Context, id, sent string, sessionVe
 		if patch == nil {
 			return nil
 		}
+		if secret["sso_renewed_at"] == nil {
+			secret["sso_renewed_at"] = secret["renewed_at"]
+		}
 		for key, value := range patch {
 			secret[key] = value
 		}

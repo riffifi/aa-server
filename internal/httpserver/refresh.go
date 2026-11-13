@@ -74,10 +74,9 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	}
 	cookie, _ := secret["cookie"].(string)
 	state := "expired"
-	detailed := false
 	if cookie != "" {
 		var uid, name string
-		state, uid, name, detailed, err = s.probeProfile(ctx, row, cookie)
+		state, uid, name, _, err = s.probeProfile(ctx, row, cookie)
 		if err != nil {
 			return nil, err
 		}
@@ -100,14 +99,13 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 		cookie, _ = secret["cookie"].(string)
 	}
 	now := v.Now()
-	due := cookie != "" && secret["renewal_status"] != "requires_login" && renewalDue(state, now, row["expires_at"], secret["renewed_at"], s.config.RenewBefore, s.config.RenewInterval)
-	// Like the official WebView, a confirmed live ticket is kept alive by its
-	// normal profile request and Set-Cookie. Do not replace it with an SSO flow
-	// merely because a local heartbeat timer elapsed. SSO remains a fallback
-	// after an actual upstream authentication rejection.
-	if detailed && state == "valid" {
-		due = false
+	ssoRenewed := secret["sso_renewed_at"]
+	if ssoRenewed == nil {
+		ssoRenewed = secret["renewed_at"]
 	}
+	// A successful profile is not proof that the SSO session or its refresh
+	// credentials were renewed. Cookie rotation must not postpone this timer.
+	due := cookie != "" && secret["renewal_status"] != "requires_login" && renewalDue(state, now, row["expires_at"], ssoRenewed, s.config.RenewBefore, s.config.RenewInterval)
 	storage, _ := secret["storage_state"].(map[string]any)
 	if renewer, ok := s.config.Browser.(interface {
 		Renew(context.Context, map[string]any) (*browser.Result, error)

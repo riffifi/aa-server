@@ -55,6 +55,7 @@ services:
       PANEL_LOCAL_ONLY: '1'
       REFRESH_SECONDS: ${REFRESH_SECONDS:-180}
       LOGIN_SLOTS: ${LOGIN_SLOTS:-6}
+      MIREA_NATIVE_APP_AUTH: ${MIREA_NATIVE_APP_AUTH:-1}
       RENEW_SLOTS: ${RENEW_SLOTS:-2}
       METRICS_FILE: /metrics/snapshot.json
     volumes:
@@ -93,6 +94,7 @@ services:
       AA_SITE_URL: ${GO_PUBLIC_URL:-https://aa.ytc-srv.org}
       SESSIONS_URL: http://sessions:8080
       TRUST_PROXY_IP: '1'
+      MIREA_NATIVE_APP_AUTH: ${MIREA_NATIVE_APP_AUTH:-1}
     ports: ['127.0.0.1:${GO_AAID_PORT:-18091}:8090']
     volumes:
       - type: volume
