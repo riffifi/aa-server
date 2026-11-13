@@ -13,6 +13,8 @@
     <nav class="tabs" role="tablist" aria-label="Разделы панели">
       <button role="tab" data-tab="people">Люди</button>
       <button role="tab" data-tab="audit">Аудит</button>
+      <button role="tab" data-tab="usage">Использование</button>
+      <button role="tab" data-tab="bans">Блокировки</button>
       <button role="tab" data-tab="logs">Логи</button>
       <button role="tab" data-tab="requests">Запросы</button>
       <button role="tab" data-tab="tables">Таблицы</button>
@@ -42,6 +44,18 @@
 
     </section>
 
+    <section id="tab-usage" class="tab" role="tabpanel" hidden>
+      <h1 class="title tight">Статистика использования</h1>
+      <p class="caption">Выдача номера пропуска — запрос к серверу, а не доказательство прохода. Переходы 1 (в вузе) ↔ 2 (не в вузе) подтверждены МИРЭА. Время события и время его обнаружения могут различаться.</p>
+      <div class="field"><input id="usage-person" class="input" placeholder="Точный ID МИРЭА участника или владельца"><select id="usage-kind" class="input"><option value="">Все действия</option><option value="attendance">Отметки по QR</option><option value="login">Входы</option><option value="pass_number_read">Выдача пропуска</option><option value="pass_enrolled">Выпуск пропуска</option><option value="presence_transition">В вузе / не в вузе</option><option value="moderation">Блокировки</option></select><button id="usage-reload" class="secondary">Обновить</button></div>
+      <p id="usage-count" class="caption"></p><div class="table-wrap"><table id="usage-table" class="grid"></table></div><button id="usage-next" class="secondary" hidden>Следующие 200</button>
+    </section>
+    <section id="tab-bans" class="tab" role="tabpanel" hidden>
+      <h1 class="title tight">Блокировка по ID МИРЭА</h1>
+      <p class="caption">Блокировка отзывает входы AA ID и сайта, запрещает API и фоновые действия. После разблокировки нужен новый вход. Бан можно поставить до первого входа человека.</p>
+      <form id="ban-form"><label for="ban-mirea">ID аккаунта МИРЭА</label><input id="ban-mirea" class="input" required maxlength="256"><label for="ban-reason">Причина</label><input id="ban-reason" class="input" maxlength="500"><div class="actions"><button class="primary" type="submit">Заблокировать</button><button id="ban-unblock" class="secondary" type="button">Разблокировать</button></div></form>
+      <div class="table-wrap"><table id="ban-table" class="grid"></table></div>
+    </section>
     <section id="tab-audit" class="tab" role="tabpanel" hidden>
       <div class="block-head top"><h1 class="title tight">Аудит</h1></div>
       <p class="note">Действия с аккаунтами и пропусками: кто, что и когда. Хранится 30 дней.</p>

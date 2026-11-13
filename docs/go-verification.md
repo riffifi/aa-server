@@ -1,4 +1,20 @@
-# Current verification note: 2.4.2
+# Current verification note: 2.5.0
+
+Full Go race tests passed with four isolated PostgreSQL databases and real
+Chromium, including the new usage/ban panel. Tests cover: anonymous and missing
+CSRF rejection, old token/site-cookie revocation, ban before registration,
+blocking background renewal and stale credential writes, unban without token
+resurrection, actor/target/lesson attendance records, successful login records,
+provider presence transition deduplication, and restricted SQL function roles.
+Private usage logs contain no QR payload, cookie, token or pass number.
+
+Normal SSO is again the default; native mode requires explicit opt-in.
+Renewal falls back once from a failed native flow and respects cancellation;
+old requires-login state receives one recovery attempt with the new flow tag.
+Actual university authentication and the reported login timeout were not
+reproduced with a live account. Production was not accessed.
+
+## Previous verification: 2.4.2
 
 The nativeApp=true/false URL construction preserves the HTTPS destination,
 redirect and rememberMe=True. An offline Chromium navigation test verifies

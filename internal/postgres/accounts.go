@@ -106,6 +106,13 @@ type Upsert struct {
 func (v *Vault) Upsert(ctx context.Context, in Upsert) (map[string]any, error) {
 	var id string
 	err := v.Write(ctx, func(tx pgx.Tx) error {
+		var blocked bool
+		if err := tx.QueryRow(ctx, "SELECT aa.mirea_blocked($1)", in.PulseID).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return ErrBlocked
+		}
 		row, err := one(ctx, tx, "SELECT * FROM aa.accounts WHERE pulse_id=$1 FOR UPDATE", in.PulseID)
 		if err != nil {
 			return err
@@ -223,6 +230,13 @@ func (v *Vault) mutate(ctx context.Context, id string, change func(pgx.Tx, map[s
 		}
 		if row == nil {
 			return ErrNotFound
+		}
+		var blocked bool
+		if err := tx.QueryRow(ctx, "SELECT aa.mirea_blocked($1)", row["pulse_id"]).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return ErrBlocked
 		}
 		return change(tx, row)
 	})

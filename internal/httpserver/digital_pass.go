@@ -191,6 +191,10 @@ func (s *Server) digitalPassIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.changed()
+	if err := s.config.Vault.Usage(r.Context(), "pass_enrolled", identity(r), row["pulse_id"].(string), id, map[string]any{"result": "saved"}); err != nil {
+		s.failure(w, err)
+		return
+	}
 	write(w, 200, map[string]any{"account_id": id, "number": number})
 }
 
@@ -252,6 +256,20 @@ func (s *Server) digitalPass(w http.ResponseWriter, r *http.Request) {
 		number, present := numbers[id]
 		if !present {
 			break
+		}
+		result := "available"
+		if number == nil {
+			result = "not_enrolled"
+		}
+		if err := s.config.Vault.Usage(r.Context(), "pass_number_read", identity(r), row["pulse_id"].(string), id, map[string]any{"result": result}); err != nil {
+			s.failure(w, err)
+			return
+		}
+		if number != nil {
+			if _, err := s.config.Vault.Pool.Exec(r.Context(), `INSERT INTO aa.presence_watch(pulse_uid,until_time) VALUES($1,$2) ON CONFLICT(pulse_uid) DO UPDATE SET until_time=EXCLUDED.until_time`, row["pulse_id"], float64(s.config.Vault.Now().Unix()+3600)); err != nil {
+				s.failure(w, err)
+				return
+			}
 		}
 		write(w, 200, map[string]any{"account_id": id, "number": number})
 		return

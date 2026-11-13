@@ -26,6 +26,16 @@ func (s *Server) rememberPulseResponse(ctx context.Context, row map[string]any, 
 }
 
 func (s *Server) pulseRPC(ctx context.Context, row map[string]any, method string, body []byte, token string) (pulse.Reply, error) {
+	if err := s.config.Vault.RequireUnblocked(ctx, row["pulse_id"].(string)); err != nil {
+		return pulse.Reply{}, err
+	}
+	if claims, ok := ctx.Value(principalKey{}).(map[string]any); ok {
+		if uid, ok := claims["mirea"].(string); ok {
+			if err := s.config.Vault.RequireUnblocked(ctx, uid); err != nil {
+				return pulse.Reply{}, err
+			}
+		}
+	}
 	secret, err := s.config.Vault.Secret(row)
 	if err != nil {
 		return pulse.Reply{}, err
@@ -40,6 +50,10 @@ func (s *Server) pulseRPC(ctx context.Context, row map[string]any, method string
 	}
 	if err == nil {
 		err = s.rememberPulseResponse(ctx, row, cookie, reply)
+		if err == nil && method == "acs-timeline" && reply.Status == 200 {
+			events, _ := pulse.ACSEvents(reply.Body, reply.Headers)
+			err = s.config.Vault.ObservePresence(ctx, row["pulse_id"].(string), row["id"].(string), events)
+		}
 	}
 	return reply, err
 }

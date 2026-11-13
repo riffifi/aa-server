@@ -23,6 +23,12 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request) {
 		detail(w, 401, "Invalid AA ID link")
 		return
 	}
+	if uid, ok := claims["mirea"].(string); ok {
+		if err := s.config.Vault.RequireUnblocked(r.Context(), uid); err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
 	cookie := body["cookie"].(string)
 	if pulse.ValidateCookie(cookie) != nil {
 		detail(w, 400, "Invalid cookie")

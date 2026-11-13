@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let csrf = '', currentJob = null, accounts = [], syncing = false, editingGroup = null;
-const STATE = { valid: ['Сессия работает', 'ok'], expired: ['Сессия истекла', 'bad'], forbidden: ['Доступ запрещён', 'bad'], unavailable: ['Пульс недоступен', 'wait'], invalidResponse: ['Непонятный ответ Пульса', 'wait'] };
+const STATE = { blocked:['Аккаунт заморожен','bad'], valid: ['Сессия работает', 'ok'], expired: ['Сессия истекла', 'bad'], forbidden: ['Доступ запрещён', 'bad'], unavailable: ['Пульс недоступен', 'wait'], invalidResponse: ['Непонятный ответ Пульса', 'wait'] };
 
 function notice(message) { $('notice').textContent = message || ''; $('notice').hidden = !message; }
 async function api(path, method = 'GET', body) {
@@ -125,7 +125,7 @@ $('sign-out').onclick = async () => { try { await api('logout', 'POST'); $('pane
 document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => button.closest('dialog').close(); });
 
 // ---- Debug tabs -----------------------------------------------------------
-const TABS = ['people', 'audit', 'logs', 'requests', 'tables', 'system'];
+const TABS = ['people', 'audit', 'usage', 'bans', 'logs', 'requests', 'tables', 'system'];
 let tab = 'people', logs = [], lastLog = 0, tableName = 'accounts', tableOffset = 0;
 const TABLE_PAGE = 100;
 function currentTab() { const wanted = location.hash.slice(1); if (TABS.includes(wanted)) return wanted; try { return localStorage.getItem('panel-tab') || 'people'; } catch (_) { return 'people'; } }
@@ -138,13 +138,37 @@ function showTab(name) {
   loadTab().catch(error => notice(error.message));
 }
 async function loadTab() {
+	if(tab==='usage') {usageBefore=0;await loadUsage();return;}
+	if(tab==='bans') {await loadBans();return;}
   if (tab === 'audit') await loadAudit();
   else if (tab === 'logs') await loadLogs();
   else if (tab === 'requests') await loadRequests();
   else if (tab === 'tables') await loadTables();
   else if (tab === 'system') await loadSystem();
 }
-function stamp(value) { return value ? new Date(value * 1000).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'; }
+let usageBefore=0,usageNext=0,usageSequence=0;
+async function loadUsage(){
+ const sequence=++usageSequence;
+ const q=new URLSearchParams({before:String(usageBefore),mirea_id:$('usage-person').value.trim(),kind:$('usage-kind').value});
+ const data=await api('usage?'+q);if(sequence!==usageSequence)return;
+ usageNext=data.next_before;$('usage-next').hidden=!usageNext;
+ $('usage-count').textContent=`Показано событий: ${data.events.length}. За 24 часа: ${(data.summary_24h||[]).map(s=>s.kind+': '+s.count).join('; ')||'нет событий'}. Время — Москва.`;
+ grid($('usage-table'),['Обнаружено','Действие','Кто (ID МИРЭА)','Чей аккаунт (ID МИРЭА)','Аккаунт','Время пары / события','Пара','Результат / переход'],data.events.map(e=>{
+  const d=e.details||{};
+  const transition=d.new_state===undefined?'':`${d.previous_state??'неизвестно'} → ${d.new_state}`;
+  return [stamp(e.created),e.kind,(e.actor_mirea ? ((e.actor_label || '') + ' · ' + e.actor_mirea) : null)||'не установлен',e.target_mirea||'—',e.target_label||e.account_id||'—',d.event_time?stamp(d.event_time):d.lesson_start?`${stamp(d.lesson_start)} — ${stamp(d.lesson_end)}`:'—',d.subject||'—',transition||d.result||d.channel||(d.blocked===undefined?'':d.blocked?'заблокирован':'разблокирован')];
+ }));
+}
+async function loadBans(){const data=await api('bans');grid($('ban-table'),['ID МИРЭА','Статус','Причина','Изменено'],data.bans.map(b=>[b.pulse_uid,b.blocked?'Заблокирован':'Разблокирован',b.reason,stamp(b.updated_at)]));}
+async function changeBan(blocked){
+ const id=$('ban-mirea').value.trim();if(!id){notice('Введите ID МИРЭА');return;}
+ await api('bans','PUT',{mirea_id:id,blocked,reason:$('ban-reason').value});await loadBans();notice(blocked?'Аккаунт заблокирован':'Аккаунт разблокирован; требуется новый вход');
+}
+$('usage-reload').onclick=()=>{usageBefore=0;loadUsage().catch(e=>notice(e.message));};
+$('usage-next').onclick=()=>{usageBefore=usageNext;loadUsage().catch(e=>notice(e.message));};
+$('ban-form').onsubmit=event=>{event.preventDefault();changeBan(true).catch(e=>notice(e.message));};
+$('ban-unblock').onclick=()=>changeBan(false).catch(e=>notice(e.message));
+function stamp(value) { return value ? new Date(value * 1000).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', year: 'numeric', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'; }
 function ago(value) {
   if (!value) return '—';
   const s = Math.max(0, Math.round(Date.now() / 1000 - value));

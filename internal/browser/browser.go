@@ -322,9 +322,16 @@ func (e *Engine) Renew(ctx context.Context, state map[string]any) (*Result, erro
 	if len(state) == 0 {
 		return nil, ErrNotAuthenticated
 	}
-	return e.run(ctx, state, true, func(Update) {})
+	return renewModes(e.config.NativeAppAuth, func(native bool) (*Result, error) { return e.run(ctx, state, true, func(Update) {}, native) })
 }
-func (e *Engine) run(parent context.Context, state map[string]any, renew bool, update func(Update)) (*Result, error) {
+func renewModes(native bool, run func(bool) (*Result, error)) (*Result, error) {
+	result, err := run(native)
+	if native && err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrClosed) {
+		return run(false)
+	}
+	return result, err
+}
+func (e *Engine) run(parent context.Context, state map[string]any, renew bool, update func(Update), nativeOverride ...bool) (*Result, error) {
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
@@ -379,7 +386,11 @@ func (e *Engine) run(parent context.Context, state map[string]any, renew bool, u
 	if renew {
 		timeout = 30000
 	}
-	if _, err = page.Goto(loginURL(e.config.NativeAppAuth), pw.PageGotoOptions{WaitUntil: pw.WaitUntilStateDomcontentloaded, Timeout: &timeout}); err != nil {
+	native := e.config.NativeAppAuth
+	if len(nativeOverride) > 0 {
+		native = nativeOverride[0]
+	}
+	if _, err = page.Goto(loginURL(native), pw.PageGotoOptions{WaitUntil: pw.WaitUntilStateDomcontentloaded, Timeout: &timeout}); err != nil {
 		return nil, err
 	}
 	approved := time.Time{}
@@ -387,6 +398,12 @@ func (e *Engine) run(parent context.Context, state map[string]any, renew bool, u
 	for attempt := 0; !renew || attempt < 10; attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if native && submitted && !approved.IsZero() && time.Since(approved) > 10*time.Second {
+			native = false
+			if _, err = page.Goto(loginURL(false), pw.PageGotoOptions{WaitUntil: pw.WaitUntilStateDomcontentloaded, Timeout: pw.Float(30000)}); err != nil {
+				return nil, err
+			}
 		}
 		if !approved.IsZero() && time.Since(approved) > 90*time.Second {
 			return nil, &UserError{"Пульс не подтвердил вход. Начните заново."}

@@ -19,6 +19,24 @@ func (v *Vault) RecordLessonMark(ctx context.Context, id, state, message, source
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(6067702)"); err != nil {
+		return err
+	}
+	var blocked bool
+	if err = tx.QueryRow(ctx, "SELECT aa.mirea_blocked(pulse_id) FROM aa.accounts WHERE id=$1", id).Scan(&blocked); err != nil {
+		return err
+	}
+	if blocked {
+		return ErrBlocked
+	}
+	if actor, _ := ctx.Value(actorContextKey{}).(string); actor != "" {
+		if err = tx.QueryRow(ctx, "SELECT aa.mirea_blocked($1)", actor).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return ErrBlocked
+		}
+	}
 	if _, err = tx.Exec(ctx, "INSERT INTO aa.marks(account_id,state,message,source,created,lesson_start) VALUES($1,$2,$3,$4,$5,$6)", id, state, message, source, v.now(), lessonStart); err != nil {
 		return err
 	}

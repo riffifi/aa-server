@@ -64,6 +64,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	defer deadline.Stop()
 	for {
 		signal := s.subscription()
+		if scoped(r) {
+			if err := s.config.Vault.RequireUnblocked(r.Context(), identity(r)); err != nil {
+				s.failure(w, err)
+				return
+			}
+		}
 		var values []map[string]any
 		var cursor int64
 		var err error

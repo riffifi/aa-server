@@ -21,7 +21,7 @@ func (s *Store) ExactPerson(ctx context.Context, query, exclude string) ([]map[s
 	return pgx.CollectRows(rows, pgx.RowToMap)
 }
 
-const visibleAccount = `(a.pulse_id=$1 OR (a.pass_allowed=1 AND EXISTS(SELECT 1 FROM aa.pass_shares p JOIN aa.accounts own ON own.id=p.grantee_id WHERE p.account_id=a.id AND own.pulse_id=$1)))`
+const visibleAccount = `(NOT aa.mirea_blocked(a.pulse_id) AND (a.pulse_id=$1 OR (a.pass_allowed=1 AND EXISTS(SELECT 1 FROM aa.pass_shares p JOIN aa.accounts own ON own.id=p.grantee_id WHERE p.account_id=a.id AND own.pulse_id=$1))))`
 
 // VisibleMetadata applies the permission in SQL before any account data is read.
 // Group IDs are display filters, never an authorization credential.

@@ -68,6 +68,9 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	if err != nil || row == nil {
 		return row, err
 	}
+	if err := v.RequireUnblocked(ctx, row["pulse_id"].(string)); err != nil {
+		return row, err
+	}
 	secret, err := v.Secret(row)
 	if err != nil {
 		return nil, err
@@ -105,7 +108,8 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	}
 	// A successful profile is not proof that the SSO session or its refresh
 	// credentials were renewed. Cookie rotation must not postpone this timer.
-	due := cookie != "" && secret["renewal_status"] != "requires_login" && renewalDue(state, now, row["expires_at"], ssoRenewed, s.config.RenewBefore, s.config.RenewInterval)
+	paused := secret["renewal_status"] == "requires_login" && secret["renewal_flow_version"] == "classic-fallback-v1"
+	due := cookie != "" && !paused && renewalDue(state, now, row["expires_at"], ssoRenewed, s.config.RenewBefore, s.config.RenewInterval)
 	storage, _ := secret["storage_state"].(map[string]any)
 	if renewer, ok := s.config.Browser.(interface {
 		Renew(context.Context, map[string]any) (*browser.Result, error)
@@ -121,7 +125,10 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 			if err := v.NoteRenewal(ctx, id, row["session_version"].(int64), "running", state); err != nil {
 				return nil, err
 			}
-			result, renewErr := renewer.Renew(ctx, storage)
+			result, renewErr := s.guardedRenew(ctx, row["pulse_id"].(string), renewer, storage)
+			if blockedErr := v.RequireUnblocked(ctx, row["pulse_id"].(string)); blockedErr != nil {
+				return nil, blockedErr
+			}
 			if renewErr == nil && result != nil && result.UID == row["pulse_id"] && len(result.Credentials) > 0 {
 				expected := row["session_version"].(int64)
 				fresh, writeErr := v.Upsert(ctx, postgres.Upsert{PulseID: result.UID, ProfileName: result.ProfileName, AccountID: id, Credentials: result.Credentials, SessionExpected: &expected, AutomaticRenewal: true})
@@ -159,6 +166,15 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	if updated, readErr := v.Secret(fresh); readErr == nil {
 		cookie, _ = updated["cookie"].(string)
 	}
+	if state == "valid" && cookie != "" {
+		result, watchErr := v.Pool.Exec(ctx, "UPDATE aa.presence_watch SET next_probe=$1 WHERE pulse_uid=$2 AND until_time>$3 AND next_probe<=$3", float64(now.Unix()+300), fresh["pulse_id"], float64(now.Unix()))
+		if watchErr != nil {
+			return nil, watchErr
+		}
+		if result.RowsAffected() > 0 {
+			_, _ = s.pulseRPC(ctx, fresh, "acs-timeline", pulse.ACSTimelineRequest(fresh["pulse_id"].(string), uint64(now.Add(-24*time.Hour).Unix()), uint64(now.Unix())), "")
+		}
+	}
 	if fresh["group_id"] == nil && state == "valid" && cookie != "" {
 		reply, callErr := s.pulseRPC(ctx, fresh, "schedules", pulse.Frame(nil, 0), "")
 		if callErr == nil && reply.Status == 200 {
@@ -169,6 +185,38 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 		}
 	}
 	return v.Account(ctx, id)
+}
+
+// Cancel active browser renewal after a ban in any server instance. Requests
+// already accepted by the provider cannot be recalled, but no result is stored.
+func (s *Server) guardedRenew(ctx context.Context, uid string, runner interface {
+	Renew(context.Context, map[string]any) (*browser.Result, error)
+}, storage map[string]any) (*browser.Result, error) {
+	if err := s.config.Vault.RequireUnblocked(ctx, uid); err != nil {
+		return nil, err
+	}
+	work, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-work.Done():
+				return
+			case <-ticker.C:
+				if err := s.config.Vault.RequireUnblocked(work, uid); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	result, err := runner.Renew(work, storage)
+	cancel()
+	<-done
+	return result, err
 }
 
 func renewalDue(state string, now time.Time, expires, renewed any, before, interval time.Duration) bool {

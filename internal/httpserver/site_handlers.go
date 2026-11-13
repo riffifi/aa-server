@@ -343,6 +343,12 @@ func (s *Server) siteMark(w http.ResponseWriter, r *http.Request) {
 	unique := []string{}
 	seen := map[string]bool{}
 	for _, id := range chosen {
+		if row := allowed[id]; row != nil {
+			if err := s.config.Vault.RequireUnblocked(r.Context(), row["pulse_id"].(string)); err != nil {
+				s.failure(w, err)
+				return
+			}
+		}
 		if allowed[id] == nil {
 			message := "Отмечать можно только людей на вашей паре"
 			if own {
@@ -392,6 +398,17 @@ func (s *Server) siteMark(w http.ResponseWriter, r *http.Request) {
 	workers.Wait()
 	actor, _ := session["aaid_id"].(string)
 	for _, result := range results {
+		target := allowed[result["id"].(string)]
+		details := map[string]any{"result": result["state"], "lesson_start": nil, "lesson_end": nil, "subject": nil}
+		if c.active != nil {
+			details["lesson_start"] = c.active.Start.Unix()
+			details["lesson_end"] = c.active.End.Unix()
+			details["subject"] = c.active.Subject
+		}
+		if err := s.config.Vault.Usage(r.Context(), "attendance", session["mirea"].(string), target["pulse_id"].(string), result["id"].(string), details); err != nil {
+			s.failure(w, err)
+			return
+		}
 		var lessonStart *float64
 		if c.active != nil {
 			start := float64(c.active.Start.Unix())

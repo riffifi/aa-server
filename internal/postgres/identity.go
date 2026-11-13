@@ -29,6 +29,13 @@ func (s *Identity) User(ctx context.Context, id string) (map[string]any, error) 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
+	if err == nil && row != nil {
+		if blocked, e := s.MireaBlocked(ctx, row["pulse_uid"].(string)); e != nil {
+			return nil, e
+		} else if blocked {
+			row["status"] = "blocked"
+		}
+	}
 	return row, err
 }
 func (s *Identity) audit(ctx context.Context, tx pgx.Tx, action string, userID, sessionID *string) error {
@@ -43,6 +50,13 @@ func (s *Identity) BindMirea(ctx context.Context, pulseID string, groupID *int64
 	defer tx.Rollback(ctx)
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,6067703))", pulseID); err != nil {
 		return nil, err
+	}
+	var blocked bool
+	if err = tx.QueryRow(ctx, "SELECT aa.mirea_blocked($1)", pulseID).Scan(&blocked); err != nil {
+		return nil, err
+	}
+	if blocked {
+		return nil, ErrBlocked
 	}
 	row, err := one(ctx, tx, "SELECT user_id FROM aaid.mirea_links WHERE pulse_uid=$1", pulseID)
 	if err != nil {
@@ -147,12 +161,22 @@ func (s *Identity) CreateSession(ctx context.Context, userID, device string, ttl
 		return nil, "", err
 	}
 	defer tx.Rollback(ctx)
-	owner, err := one(ctx, tx, "SELECT id FROM aaid.users WHERE id=$1 FOR UPDATE", userID)
+	owner, err := one(ctx, tx, "SELECT id,status FROM aaid.users WHERE id=$1 FOR UPDATE", userID)
 	if err != nil {
 		return nil, "", err
 	}
 	if owner == nil {
 		return nil, "", ErrNotFound
+	}
+	if owner["status"] != "active" {
+		return nil, "", ErrBlocked
+	}
+	var blocked bool
+	if err = tx.QueryRow(ctx, "SELECT aa.mirea_blocked(pulse_uid) FROM aaid.mirea_links WHERE user_id=$1", userID).Scan(&blocked); err != nil {
+		return nil, "", err
+	}
+	if blocked {
+		return nil, "", ErrBlocked
 	}
 	now := s.now()
 	if _, err = tx.Exec(ctx, "INSERT INTO aaid.sessions(id,user_id,device,created,last_used,expires,kind) VALUES($1,$2,$3,$4,$4,$5,$6)", id, userID, device, now, now+ttl, kind); err != nil {
@@ -171,6 +195,9 @@ func (s *Identity) CreateSession(ctx context.Context, userID, device string, ttl
 		return nil, "", err
 	}
 	if err = s.audit(ctx, tx, "signed_in", &userID, &id); err != nil {
+		return nil, "", err
+	}
+	if _, err = tx.Exec(ctx, "SELECT aa.record_login($1,$2)", userID, kind); err != nil {
 		return nil, "", err
 	}
 	if err = tx.Commit(ctx); err != nil {

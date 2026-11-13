@@ -154,6 +154,7 @@ func (v *Vault) NoteRenewal(ctx context.Context, id string, version int64, statu
 		}
 		now := v.now()
 		if status == "running" {
+			secret["renewal_flow_version"] = "classic-fallback-v1"
 			finishRenewal(secret, "interrupted", now, nil)
 			stats := renewalStatistics(secret)
 			if stats.Since == 0 {

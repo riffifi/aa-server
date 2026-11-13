@@ -38,6 +38,9 @@ def main():
     for method, path in (('GET', '/passes'), ('GET', '/site/passes'), ('GET', '/site/passes/{}'), ('POST', '/site/pass/code'), ('POST', '/site/pass/issue')):
         if ('sessions', method, path) not in mentions:
             missing.append('sessions ' + method + ' ' + path)
+    for method,path in (('GET','/panel/api/usage'),('GET','/panel/api/bans'),('PUT','/panel/api/bans')):
+        if ('sessions',method,path) not in mentions:
+            missing.append('sessions '+method+' '+path)
     if missing:
         raise SystemExit('Undocumented API routes:\n' + '\n'.join(missing))
     examples = re.findall(r'~~~json\s*\n(.*?)\n~~~', document, re.S)
@@ -46,7 +49,7 @@ def main():
             json.loads(example)
         except ValueError as error:
             raise SystemExit(f'Invalid JSON example {index}: {error}') from error
-    print(f'API reference: {count} legacy in-scope routes, 13 additional native routes and {len(examples)} JSON examples checked.')
+    print(f'API reference: {count} legacy in-scope routes, 16 additional native routes and {len(examples)} JSON examples checked.')
 
 
 if __name__ == '__main__':

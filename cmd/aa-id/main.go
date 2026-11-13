@@ -71,7 +71,7 @@ func run() error {
 	if err = store.Pool.QueryRow(ctx, "SELECT to_regclass('aaid.users') IS NOT NULL").Scan(&schema); err != nil || !schema {
 		return errors.New("PostgreSQL schema is missing; import data or explicitly initialize an empty development database")
 	}
-	engine := browser.New(ctx, browser.Config{NativeAppAuth: os.Getenv("MIREA_NATIVE_APP_AUTH") != "0", DriverDirectory: os.Getenv("PLAYWRIGHT_DRIVER_PATH"), Identity: true, LoginSlots: int(number("LOGIN_SLOTS", 4, 1))})
+	engine := browser.New(ctx, browser.Config{NativeAppAuth: os.Getenv("MIREA_NATIVE_APP_AUTH") == "1", DriverDirectory: os.Getenv("PLAYWRIGHT_DRIVER_PATH"), Identity: true, LoginSlots: int(number("LOGIN_SLOTS", 4, 1))})
 	defer engine.Close()
 	jobs := browser.NewJobs(ctx, engine)
 	defer jobs.Close()

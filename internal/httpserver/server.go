@@ -285,6 +285,8 @@ func cookie(r *http.Request, name string) string {
 func (s *Server) failure(w http.ResponseWriter, err error) {
 	var conflict *postgres.Conflict
 	switch {
+	case errors.Is(err, postgres.ErrBlocked):
+		detail(w, 403, "This MIREA account is blocked by the administrator")
 	case errors.As(err, &conflict):
 		detail(w, 409, conflict.Error())
 	case errors.Is(err, postgres.ErrNotFound):
@@ -507,6 +509,9 @@ func (s *Server) routes() {
 	s.handle("GET /panel/api/debug/tables", s.debugTables)
 	s.handle("GET /panel/api/debug/tables/{name}", s.debugTables)
 	s.handle("GET /panel/api/debug/audit", s.debugAudit)
+	s.handle("GET /panel/api/usage", s.usageStatistics)
+	s.handle("GET /panel/api/bans", s.banList)
+	s.handle("PUT /panel/api/bans", s.setBan)
 	s.handle("GET /api/me/attendance", s.attendance)
 	s.handle("GET /api/accounts/{id}/attendance", s.attendance)
 	s.handle("GET /panel/api/accounts/{id}/attendance", s.attendance)

@@ -60,6 +60,13 @@ func (v *Vault) FillProfileName(ctx context.Context, id, name string, sessionVer
 // credentials. Both the session revision and sent header must still match;
 // logout, fresh login and out-of-order responses cannot resurrect old tickets.
 func (v *Vault) SavePulseCookies(ctx context.Context, id, sent string, sessionVersion int64, headers http.Header) (map[string]any, error) {
+	var uid string
+	if err := v.Pool.QueryRow(ctx, "SELECT pulse_id FROM aa.accounts WHERE id=$1", id).Scan(&uid); err != nil {
+		return nil, err
+	}
+	if err := v.RequireUnblocked(ctx, uid); err != nil {
+		return nil, err
+	}
 	if len(headers.Values("Set-Cookie")) == 0 {
 		return nil, nil
 	}

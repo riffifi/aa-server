@@ -196,7 +196,7 @@ func TestMainAPIChecksLiveIdentityAndCurrentGroup(t *testing.T) {
 	}
 	for _, h := range []map[string]string{cookie, bearer} {
 		w, _ := secureRequest(t, s, "GET", "/api/accounts", "", h)
-		if w.Code != 401 {
+		if w.Code != 403 {
 			t.Fatal("blocked identity accepted", w.Body.String())
 		}
 	}

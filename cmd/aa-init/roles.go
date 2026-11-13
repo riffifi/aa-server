@@ -39,10 +39,24 @@ func runtimeRoles(ctx context.Context, store *postgres.Store) error {
 			}
 		}
 		if item.role == "sessions" {
+			if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.set_mirea_ban(TEXT,BOOLEAN,TEXT) TO "+role); err != nil {
+				return err
+			}
 			if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.identity_active(TEXT,TEXT,TEXT) TO "+role); err != nil {
 				return err
 			}
 			if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.identity_context(TEXT,TEXT,TEXT) TO "+role); err != nil {
+				return err
+			}
+		}
+		if _, err := store.Pool.Exec(ctx, "GRANT USAGE ON SCHEMA aa TO "+role); err != nil {
+			return err
+		}
+		if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.mirea_blocked(TEXT) TO "+role); err != nil {
+			return err
+		}
+		if item.role == "aaid" {
+			if _, err := store.Pool.Exec(ctx, "GRANT EXECUTE ON FUNCTION aa.record_login(TEXT,TEXT) TO "+role); err != nil {
 				return err
 			}
 		}

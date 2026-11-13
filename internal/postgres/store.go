@@ -117,6 +117,15 @@ func (s *Store) Write(ctx context.Context, update func(pgx.Tx) error) error {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(6067702)"); err != nil {
 		return err
 	}
+	if uid, _ := ctx.Value(actorContextKey{}).(string); uid != "" {
+		var blocked bool
+		if err = tx.QueryRow(ctx, "SELECT aa.mirea_blocked($1)", uid).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return ErrBlocked
+		}
+	}
 	if err = update(tx); err != nil {
 		return err
 	}

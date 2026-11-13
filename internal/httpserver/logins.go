@@ -25,7 +25,7 @@ func positiveEnv(name string, fallback int) int {
 }
 func (s *Server) initBrowser(ctx context.Context) {
 	if s.config.Browser == nil {
-		s.ownedBrowser = browser.New(ctx, browser.Config{NativeAppAuth: os.Getenv("MIREA_NATIVE_APP_AUTH") != "0", LoginSlots: positiveEnv("LOGIN_SLOTS", 6), RenewSlots: positiveEnv("RENEW_SLOTS", 2)})
+		s.ownedBrowser = browser.New(ctx, browser.Config{NativeAppAuth: os.Getenv("MIREA_NATIVE_APP_AUTH") == "1", LoginSlots: positiveEnv("LOGIN_SLOTS", 6), RenewSlots: positiveEnv("RENEW_SLOTS", 2)})
 		s.config.Browser = s.ownedBrowser
 	}
 	if s.config.Logins == nil {
@@ -85,6 +85,10 @@ func (s *Server) startLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		version := row["session_version"].(int64)
+		if err := s.config.Vault.RequireUnblocked(r.Context(), row["pulse_id"].(string)); err != nil {
+			s.failure(w, err)
+			return
+		}
 		expected = &version
 	}
 	runner := accountLogin{s.config.Browser, s.config.Vault, label, accountID, expected}

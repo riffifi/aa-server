@@ -51,6 +51,13 @@ func (v *Vault) bump(ctx context.Context, tx pgx.Tx, id string) error {
 }
 func (v *Vault) SharePass(ctx context.Context, id, grantee string) error {
 	return v.Write(ctx, func(tx pgx.Tx) error {
+		var blocked bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM aa.accounts WHERE id=ANY($1::text[]) AND aa.mirea_blocked(pulse_id))", []string{id, grantee}).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return ErrBlocked
+		}
 		if _, err := tx.Exec(ctx, "INSERT INTO aa.pass_shares VALUES($1,$2,$3) ON CONFLICT DO NOTHING", id, grantee, v.now()); err != nil {
 			return err
 		}
@@ -86,6 +93,13 @@ func (s *Store) PassShares(ctx context.Context, id string) ([]map[string]any, er
 func (v *Vault) RequestShare(ctx context.Context, id, requester string) (map[string]any, error) {
 	var request map[string]any
 	err := v.Write(ctx, func(tx pgx.Tx) error {
+		var blocked bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM aa.accounts WHERE id=ANY($1::text[]) AND aa.mirea_blocked(pulse_id))", []string{id, requester}).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return ErrBlocked
+		}
 		var shared bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM aa.pass_shares WHERE account_id=$1 AND grantee_id=$2)", id, requester).Scan(&shared); err != nil {
 			return err

@@ -21,6 +21,10 @@ func (s *Server) endSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret, err := v.Secret(row)
+	if err := v.RequireUnblocked(r.Context(), row["pulse_id"].(string)); err != nil {
+		s.failure(w, err)
+		return
+	}
 	if err != nil {
 		s.failure(w, err)
 		return

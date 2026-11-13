@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"aa-server/internal/postgres"
 	"context"
 	"net/http"
 	"strings"
@@ -64,6 +65,12 @@ func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		mirea, _ := claims["mirea"].(string)
+		if mirea != "" {
+			if err := s.config.Vault.RequireUnblocked(r.Context(), mirea); err != nil {
+				s.failure(w, err)
+				return
+			}
+		}
 		if mirea != "" && s.config.RequireIdentityState {
 			sub, _ := claims["sub"].(string)
 			sid, _ := claims["sid"].(string)
@@ -87,6 +94,7 @@ func (s *Server) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 		}
 		r = r.WithContext(context.WithValue(r.Context(), principalKey{}, claims))
 		r = r.WithContext(context.WithValue(r.Context(), authorizedKey{}, true))
+		r = r.WithContext(postgres.WithActor(r.Context(), mirea))
 		count := 300
 		window := time.Minute
 		bucket := "api:" + mirea

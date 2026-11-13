@@ -1,5 +1,32 @@
 # Performance update
 
+## 2.5.0 — private usage records, MIREA bans and normal login recovery
+
+The private panel now lists attendance actor/target/time/lesson/results,
+successful AA ID sign-ins, authorized pass-number requests, enrollment and
+provider-observed presence transitions. Only the provider establishes in/out
+state; the person who physically used NFC is not inferred from a recent number
+request. After a pass-number request, its owner is watched for one hour, no
+more than one ACS probe per five minutes during normal refresh. Viewing logs
+does not initiate upstream requests. SQL indices and 200-row cursor pages bound
+the log response. No bearer, cookie, QR secret, verification code or card number
+is recorded. Existing history is not backfilled.
+
+A durable MIREA-ID ban freezes AA ID, revokes its sessions and site cookies,
+blocks account mutations, provider actions/renewal and third-party pass/mark
+access, and applies before registration. Runtime roles access cross-schema
+state through narrowly granted SECURITY DEFINER functions. Unban permits a
+fresh login but does not revive revoked sessions. The registry survives local
+account deletion. Already forwarded provider requests cannot be recalled.
+
+The nativeApp flow was not validated end-to-end and is no longer enabled by
+default. Explicit opt-in retains a bounded classic renewal fallback; QR login
+also changes to the classic entry if native completion stalls after approval.
+Old requires-login state gets one bounded recovery attempt. The user's live
+login error remains unverified without a real trace; no production connection
+was made. Use MIREA_NATIVE_APP_AUTH=0 in .env.go and recreate containers to
+ensure the experimental mode is disabled after upgrading.
+
 ## 2.4.2 — test the nativeApp login parameter
 
 Both production browser runners (AA ID QR login and sessions login/renewal)

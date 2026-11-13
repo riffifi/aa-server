@@ -26,6 +26,10 @@ func (s *Server) pulseRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret, err := s.config.Vault.Secret(row)
+	if err := s.config.Vault.RequireUnblocked(r.Context(), row["pulse_id"].(string)); err != nil {
+		s.failure(w, err)
+		return
+	}
 	if err != nil {
 		s.failure(w, err)
 		return

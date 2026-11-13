@@ -101,6 +101,19 @@ func TestSiteClassScopeMarkAndToday(t *testing.T) {
 	if w.Code != 200 || len(result["results"].([]any)) != 2 || upstream.marks.Load() != 2 {
 		t.Fatal(w.Body.String())
 	}
+	usage, err := v.UsageList(context.Background(), 0, ownerUID, "attendance")
+	if err != nil || len(usage) != 2 {
+		t.Fatal("attendance statistics missing", err)
+	}
+	for _, event := range usage {
+		details := event["details"].(map[string]any)
+		if details["lesson_start"] == nil || details["subject"] == nil || details["result"] != "approved" || event["actor_mirea"] != ownerUID {
+			t.Fatal("incomplete attendance statistics", event)
+		}
+		if _, exists := details["qr"]; exists {
+			t.Fatal("QR secret recorded")
+		}
+	}
 	w, today := secureRequest(t, s, "GET", "/site/today", "", headers)
 	if w.Code != 200 || len(today["people"].([]any)) != 2 {
 		t.Fatal(w.Body.String())
