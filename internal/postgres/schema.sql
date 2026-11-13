@@ -98,10 +98,6 @@ CREATE TABLE IF NOT EXISTS aa.usage_events(
 CREATE INDEX IF NOT EXISTS usage_events_created ON aa.usage_events(created DESC,id DESC);
 CREATE INDEX IF NOT EXISTS usage_events_actor ON aa.usage_events(actor_mirea,id DESC);
 CREATE INDEX IF NOT EXISTS usage_events_target ON aa.usage_events(target_mirea,id DESC);
-CREATE TABLE IF NOT EXISTS aa.presence_observations(
- pulse_uid TEXT PRIMARY KEY, state BIGINT NOT NULL, event_time DOUBLE PRECISION NOT NULL);
-CREATE TABLE IF NOT EXISTS aa.presence_watch(
- pulse_uid TEXT PRIMARY KEY, until_time DOUBLE PRECISION NOT NULL, next_probe DOUBLE PRECISION NOT NULL DEFAULT 0);
 CREATE OR REPLACE FUNCTION aa.mirea_blocked(TEXT) RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
  SELECT EXISTS(SELECT 1 FROM aa.mirea_bans WHERE pulse_uid=$1 AND blocked)

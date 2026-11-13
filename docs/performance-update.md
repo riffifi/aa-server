@@ -1,5 +1,13 @@
 # Performance update
 
+## 2.5.1 — usage statistics only include AA actions
+
+Removed ACS observation logging and the one-hour background presence watch.
+External attendance and physical-card passages do not produce usage records.
+Existing provider presence records are excluded from both usage pages and totals.
+Pass-number reads record the AA request, never a confirmed turnstile passage.
+
+
 ## 2.5.0 — private usage records, MIREA bans and normal login recovery
 
 The private panel now lists attendance actor/target/time/lesson/results,

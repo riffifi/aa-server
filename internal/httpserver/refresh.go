@@ -166,15 +166,6 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	if updated, readErr := v.Secret(fresh); readErr == nil {
 		cookie, _ = updated["cookie"].(string)
 	}
-	if state == "valid" && cookie != "" {
-		result, watchErr := v.Pool.Exec(ctx, "UPDATE aa.presence_watch SET next_probe=$1 WHERE pulse_uid=$2 AND until_time>$3 AND next_probe<=$3", float64(now.Unix()+300), fresh["pulse_id"], float64(now.Unix()))
-		if watchErr != nil {
-			return nil, watchErr
-		}
-		if result.RowsAffected() > 0 {
-			_, _ = s.pulseRPC(ctx, fresh, "acs-timeline", pulse.ACSTimelineRequest(fresh["pulse_id"].(string), uint64(now.Add(-24*time.Hour).Unix()), uint64(now.Unix())), "")
-		}
-	}
 	if fresh["group_id"] == nil && state == "valid" && cookie != "" {
 		reply, callErr := s.pulseRPC(ctx, fresh, "schedules", pulse.Frame(nil, 0), "")
 		if callErr == nil && reply.Status == 200 {

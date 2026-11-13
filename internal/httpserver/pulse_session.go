@@ -50,10 +50,6 @@ func (s *Server) pulseRPC(ctx context.Context, row map[string]any, method string
 	}
 	if err == nil {
 		err = s.rememberPulseResponse(ctx, row, cookie, reply)
-		if err == nil && method == "acs-timeline" && reply.Status == 200 {
-			events, _ := pulse.ACSEvents(reply.Body, reply.Headers)
-			err = s.config.Vault.ObservePresence(ctx, row["pulse_id"].(string), row["id"].(string), events)
-		}
 	}
 	return reply, err
 }

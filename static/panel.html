@@ -46,8 +46,8 @@
 
     <section id="tab-usage" class="tab" role="tabpanel" hidden>
       <h1 class="title tight">Статистика использования</h1>
-      <p class="caption">Выдача номера пропуска — запрос к серверу, а не доказательство прохода. Переходы 1 (в вузе) ↔ 2 (не в вузе) подтверждены МИРЭА. Время события и время его обнаружения могут различаться.</p>
-      <div class="field"><input id="usage-person" class="input" placeholder="Точный ID МИРЭА участника или владельца"><select id="usage-kind" class="input"><option value="">Все действия</option><option value="attendance">Отметки по QR</option><option value="login">Входы</option><option value="pass_number_read">Выдача пропуска</option><option value="pass_enrolled">Выпуск пропуска</option><option value="presence_transition">В вузе / не в вузе</option><option value="moderation">Блокировки</option></select><button id="usage-reload" class="secondary">Обновить</button></div>
+      <p class="caption">Только действия через AA. Выдача номера пропуска — запрос к серверу, а не доказательство прохода. Отметки и проходы вне AA в статистику не попадают.</p>
+      <div class="field"><input id="usage-person" class="input" placeholder="Точный ID МИРЭА участника или владельца"><select id="usage-kind" class="input"><option value="">Все действия</option><option value="attendance">Отметки по QR</option><option value="login">Входы</option><option value="pass_number_read">Выдача пропуска</option><option value="pass_enrolled">Выпуск пропуска</option><option value="moderation">Блокировки</option></select><button id="usage-reload" class="secondary">Обновить</button></div>
       <p id="usage-count" class="caption"></p><div class="table-wrap"><table id="usage-table" class="grid"></table></div><button id="usage-next" class="secondary" hidden>Следующие 200</button>
     </section>
     <section id="tab-bans" class="tab" role="tabpanel" hidden>

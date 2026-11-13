@@ -153,10 +153,9 @@ async function loadUsage(){
  const data=await api('usage?'+q);if(sequence!==usageSequence)return;
  usageNext=data.next_before;$('usage-next').hidden=!usageNext;
  $('usage-count').textContent=`Показано событий: ${data.events.length}. За 24 часа: ${(data.summary_24h||[]).map(s=>s.kind+': '+s.count).join('; ')||'нет событий'}. Время — Москва.`;
- grid($('usage-table'),['Обнаружено','Действие','Кто (ID МИРЭА)','Чей аккаунт (ID МИРЭА)','Аккаунт','Время пары / события','Пара','Результат / переход'],data.events.map(e=>{
+ grid($('usage-table'),['Время','Действие','Кто (ID МИРЭА)','Чей аккаунт (ID МИРЭА)','Аккаунт','Время пары','Пара','Результат'],data.events.map(e=>{
   const d=e.details||{};
-  const transition=d.new_state===undefined?'':`${d.previous_state??'неизвестно'} → ${d.new_state}`;
-  return [stamp(e.created),e.kind,(e.actor_mirea ? ((e.actor_label || '') + ' · ' + e.actor_mirea) : null)||'не установлен',e.target_mirea||'—',e.target_label||e.account_id||'—',d.event_time?stamp(d.event_time):d.lesson_start?`${stamp(d.lesson_start)} — ${stamp(d.lesson_end)}`:'—',d.subject||'—',transition||d.result||d.channel||(d.blocked===undefined?'':d.blocked?'заблокирован':'разблокирован')];
+  return [stamp(e.created),e.kind,(e.actor_mirea ? ((e.actor_label || '') + ' · ' + e.actor_mirea) : null)||'не установлен',e.target_mirea||'—',e.target_label||e.account_id||'—',d.lesson_start?`${stamp(d.lesson_start)} — ${stamp(d.lesson_end)}`:'—',d.subject||'—',d.result||d.channel||(d.blocked===undefined?'':d.blocked?'заблокирован':'разблокирован')];
  }));
 }
 async function loadBans(){const data=await api('bans');grid($('ban-table'),['ID МИРЭА','Статус','Причина','Изменено'],data.bans.map(b=>[b.pulse_uid,b.blocked?'Заблокирован':'Разблокирован',b.reason,stamp(b.updated_at)]));}

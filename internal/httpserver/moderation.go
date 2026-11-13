@@ -63,7 +63,7 @@ func (s *Server) usageStatistics(w http.ResponseWriter, r *http.Request) {
 	if len(events) == 200 {
 		next = events[len(events)-1]["id"].(int64)
 	}
-	rows, err := s.config.Vault.Pool.Query(r.Context(), `SELECT kind,count(*) AS count FROM aa.usage_events WHERE created>=$1 AND ($2='' OR actor_mirea=$2 OR target_mirea=$2) AND ($3='' OR kind=$3) GROUP BY kind ORDER BY kind`, float64(s.config.Vault.Now().Unix()-86400), uid, kind)
+	rows, err := s.config.Vault.Pool.Query(r.Context(), `SELECT kind,count(*) AS count FROM aa.usage_events WHERE kind IN ('attendance','login','pass_number_read','pass_enrolled','moderation') AND created>=$1 AND ($2='' OR actor_mirea=$2 OR target_mirea=$2) AND ($3='' OR kind=$3) GROUP BY kind ORDER BY kind`, float64(s.config.Vault.Now().Unix()-86400), uid, kind)
 	if err != nil {
 		s.failure(w, err)
 		return

@@ -3,6 +3,7 @@ package httpserver
 import (
 	"aa-server/internal/browser"
 	"aa-server/internal/postgres"
+	"aa-server/internal/pulse"
 	"context"
 	"errors"
 	"fmt"
@@ -154,26 +155,34 @@ func TestBanFreezesExistingAndFutureMireaAccounts(t *testing.T) {
 	}
 }
 
-func TestUsagePresenceTransitionsArePrivateAndDeduplicated(t *testing.T) {
-	s, v := setup(t, nil)
+// ACS history is provider state, not evidence of an action through AA.
+func TestUsageExcludesExternalActions(t *testing.T) {
+	upstream := &fakePulse{}
+	s, v := setup(t, func(c *Config) { c.Pulse = upstream })
 	ctx := context.Background()
-	uid := fmt.Sprintf("presence-%d", time.Now().UnixNano())
+	uid := fmt.Sprintf("usage-scope-%d", time.Now().UnixNano())
 	row := account(t, v, uid)
 	id := row["id"].(string)
-	defer v.Pool.Exec(ctx, "DELETE FROM aa.presence_observations WHERE pulse_uid=$1", uid)
-	events := []map[string]any{{"time": uint64(100), "direction": "in"}, {"time": uint64(200), "direction": "out"}}
-	for i := 0; i < 2; i++ {
-		if err := v.ObservePresence(ctx, uid, id, events); err != nil {
+	defer v.Pool.Exec(ctx, "DELETE FROM aa.usage_events WHERE target_mirea=$1", uid)
+	event := pulse.Field(2, pulse.VField(1, uint64(time.Now().Unix())))
+	event = append(event, pulse.Field(3, pulse.Field(2, []byte("Campus")))...)
+	event = append(event, pulse.VField(5, 1)...)
+	upstream.reply = grpcReply(pulse.Field(1, event))
+	if events, _ := pulse.ACSEvents(upstream.reply.Body, upstream.reply.Headers); len(events) != 1 {
+		t.Fatal("expected a provider passage in test response")
+	}
+	if _, err := s.pulseRPC(ctx, row, "acs-timeline", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := v.Pool.QueryRow(ctx, "SELECT count(*) FROM aa.usage_events WHERE target_mirea=$1", uid).Scan(&count); err != nil || count != 0 {
+		t.Fatal("ACS read imported external activity", count, err)
+	}
+	// Simulate records left by 2.5.0, and a future unknown external source.
+	for _, kind := range []string{"presence_transition", "external_attendance", "attendance"} {
+		if err := v.Usage(ctx, kind, uid, uid, id, map[string]any{"result": "approved"}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	rows, err := v.UsageList(ctx, 0, uid, "presence_transition")
-	if err != nil || len(rows) != 2 {
-		t.Fatal("duplicate provider observations", len(rows), err)
-	}
-	details := rows[0]["details"].(map[string]any)
-	if fmt.Sprint(details["previous_state"]) != "1" || fmt.Sprint(details["new_state"]) != "2" || rows[0]["actor_mirea"] != nil {
-		t.Fatal("invented actor or incorrect transition", rows)
 	}
 	w, _ := secureRequest(t, s, "GET", "/panel/api/usage", "", nil)
 	if w.Code != 401 {
@@ -183,8 +192,23 @@ func TestUsagePresenceTransitionsArePrivateAndDeduplicated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, data := secureRequest(t, s, "GET", "/panel/api/usage?mirea_id="+uid, "", map[string]string{"Cookie": "panel_session=" + token})
-	if w.Code != 200 || len(data["events"].([]any)) != 2 {
-		t.Fatal(w.Body.String())
+	headers := map[string]string{"Cookie": "panel_session=" + token}
+	for _, filter := range []string{"", "&kind=attendance", "&kind=presence_transition", "&kind=external_attendance"} {
+		w, data := secureRequest(t, s, "GET", "/panel/api/usage?mirea_id="+uid+filter, "", headers)
+		if w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		events := data["events"].([]any)
+		summary := data["summary_24h"].([]any)
+		expected := 1
+		if filter == "&kind=presence_transition" || filter == "&kind=external_attendance" {
+			expected = 0
+		}
+		if len(events) != expected || len(summary) != expected {
+			t.Fatalf("external activity visible: %s %s", filter, w.Body.String())
+		}
+		if expected == 1 && (events[0].(map[string]any)["kind"] != "attendance" || summary[0].(map[string]any)["count"] != float64(1)) {
+			t.Fatal("AA action or totals lost", w.Body.String())
+		}
 	}
 }

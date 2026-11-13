@@ -1,4 +1,14 @@
-# Current verification note: 2.5.0
+# Current verification note: 2.5.1
+
+Usage pages and totals exclude legacy provider observations. Reading ACS no longer
+records usage; pass-number reads no longer schedule background ACS polling.
+Go race tests passed for the HTTP server (including Chromium) and PostgreSQL.
+The regression test supplies a valid provider passage, checks that it creates no
+usage event, and verifies that legacy/unknown external records are absent from
+both pages and 24-hour totals, including explicit kind filters. JavaScript syntax
+and the API documentation checker also passed.
+
+## Previous verification: 2.5.0
 
 Full Go race tests passed with four isolated PostgreSQL databases and real
 Chromium, including the new usage/ban panel. Tests cover: anonymous and missing
