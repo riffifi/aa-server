@@ -99,7 +99,7 @@ func (v *Vault) SavePulseCookies(ctx context.Context, id, sent string, sessionVe
 		for key, value := range patch {
 			secret[key] = value
 		}
-		if auth && strings.Contains(patch["cookie"].(string), ".AspNetCore.Cookies=") {
+		if auth && pulse.HasSessionCookie(patch["cookie"].(string)) {
 			finishRenewal(secret, "interrupted", v.now(), nil)
 			secret["renewed_at"] = v.now()
 			if patch["cookie"] != "" {

@@ -98,3 +98,32 @@ func TestMergeSessionCookiesHandlesChunksExpiryAndStorage(t *testing.T) {
 		t.Fatal("foreign cookie accepted", err)
 	}
 }
+
+func TestCurrentPulseCookieRotationAndChunks(t *testing.T) {
+	now := time.Unix(1794604268, 0)
+	secret := map[string]any{"cookie": "Pulse.Auth.Cookie=old; theme=dark", "expires_at": float64(now.Unix() + 3600)}
+	patch, auth, err := MergeSessionCookies(secret, http.Header{"Set-Cookie": {
+		"Pulse.Auth.Cookie=fresh; Path=/; Secure; HttpOnly; Max-Age=1209600",
+		"__ddg9_=challenge; Domain=.mirea.ru; Path=/; Max-Age=1200",
+	}}, now)
+	if err != nil || !auth || patch["expires_at"] != float64(now.Add(14*24*time.Hour).Unix()) || !HasSessionCookie(patch["cookie"].(string)) {
+		t.Fatal("current ticket rotation/expiry lost", err)
+	}
+	chunked := map[string]any{"cookie": "Pulse.Auth.Cookie=chunks-2; Pulse.Auth.CookieC1=old1; Pulse.Auth.CookieC2=old2"}
+	single, auth, err := MergeSessionCookies(chunked, http.Header{"Set-Cookie": {"Pulse.Auth.Cookie=single; Path=/; Max-Age=1209600"}}, now)
+	if err != nil || !auth || strings.Contains(single["cookie"].(string), "CookieC") {
+		t.Fatal("obsolete chunks survived", err)
+	}
+	if _, _, err := MergeSessionCookies(secret, http.Header{"Set-Cookie": {"Pulse.Auth.Cookie=chunks-2; Path=/"}}, now); err == nil {
+		t.Fatal("incomplete current chunks accepted")
+	}
+	deleted, auth, err := MergeSessionCookies(secret, http.Header{"Set-Cookie": {"Pulse.Auth.Cookie=; Path=/; Max-Age=0"}}, now)
+	if err != nil || !auth || HasSessionCookie(deleted["cookie"].(string)) {
+		t.Fatal("deleted current ticket retained", err)
+	}
+	for _, name := range []string{"__ddg9_", "Pulse.Auth.CookieEvil", "Pulse.Auth.CookieC0", "xPulse.Auth.Cookie"} {
+		if IsSessionCookie(name) {
+			t.Fatal("non-auth cookie accepted", name)
+		}
+	}
+}

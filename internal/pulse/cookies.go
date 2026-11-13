@@ -10,7 +10,20 @@ import (
 	"time"
 )
 
-var sessionCookie = regexp.MustCompile(`^\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?$`)
+var sessionCookie = regexp.MustCompile(`^(?:\.AspNetCore\.Cookies|Pulse\.Auth\.Cookie)(?:C[1-9][0-9]*)?$`)
+
+// IsSessionCookie recognizes current Pulse tickets and legacy ASP.NET tickets,
+// including chunks. Challenge/analytics cookies never determine auth expiry.
+func IsSessionCookie(name string) bool { return sessionCookie.MatchString(name) }
+
+func HasSessionCookie(header string) bool {
+	for _, c := range (&http.Request{Header: http.Header{"Cookie": {header}}}).Cookies() {
+		if (c.Name == "Pulse.Auth.Cookie" || c.Name == ".AspNetCore.Cookies") && c.Value != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // MergeSessionCookies mirrors the native WebView's cookie persistence without
 // inventing an upstream session lifetime. Only root cookies issued by Pulse
@@ -47,9 +60,9 @@ func MergeSessionCookies(secret map[string]any, headers http.Header, now time.Ti
 	// A new main ticket replaces its complete chunk family; expired old chunks
 	// must not shadow a newly issued unchunked cookie.
 	for _, c := range patch {
-		if c.Name == ".AspNetCore.Cookies" {
+		if c.Name == ".AspNetCore.Cookies" || c.Name == "Pulse.Auth.Cookie" {
 			for name := range values {
-				if sessionCookie.MatchString(name) {
+				if name == c.Name || strings.HasPrefix(name, c.Name+"C") && sessionCookie.MatchString(name) {
 					delete(values, name)
 				}
 			}
@@ -78,13 +91,17 @@ func MergeSessionCookies(secret map[string]any, headers http.Header, now time.Ti
 			}
 		}
 	}
-	if base := values[".AspNetCore.Cookies"]; strings.HasPrefix(base, "chunks-") {
+	for _, family := range []string{".AspNetCore.Cookies", "Pulse.Auth.Cookie"} {
+		base := values[family]
+		if !strings.HasPrefix(base, "chunks-") {
+			continue
+		}
 		count, err := strconv.Atoi(strings.TrimPrefix(base, "chunks-"))
 		if err != nil || count < 1 || count > 32 {
 			return nil, false, ErrCookie
 		}
 		for i := 1; i <= count; i++ {
-			if values[".AspNetCore.CookiesC"+strconv.Itoa(i)] == "" {
+			if values[family+"C"+strconv.Itoa(i)] == "" {
 				return nil, false, ErrCookie
 			}
 		}

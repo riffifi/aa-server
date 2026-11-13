@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +24,6 @@ var ErrClosed = errors.New("browser is closed")
 var ErrExpired = errors.New("login expired")
 var ErrNotAuthenticated = errors.New("Pulse session is not authenticated")
 var ErrReauthenticationRequired = errors.New("SSO requires a new interactive sign-in")
-var authCookie = regexp.MustCompile(`^\.AspNetCore\.Cookies(?:C[1-9][0-9]*)?$`)
 
 func loginURL(nativeApp bool) string {
 	query := url.Values{"redirectUri": {pulse.Host + "/services"}, "rememberMe": {"True"}}
@@ -251,7 +249,7 @@ func cookieCredentials(cookies []pw.Cookie, now time.Time) (string, any, error) 
 			continue
 		}
 		items = append(items, cookie.Name+"="+cookie.Value)
-		if authCookie.MatchString(cookie.Name) && cookie.Expires > float64(now.UnixMilli())/1000 {
+		if pulse.IsSessionCookie(cookie.Name) && cookie.Expires > float64(now.UnixMilli())/1000 {
 			if expiry == nil || cookie.Expires < expiry.(float64) {
 				expiry = cookie.Expires
 			}

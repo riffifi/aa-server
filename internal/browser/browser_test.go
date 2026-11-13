@@ -46,6 +46,18 @@ func TestCookieCaptureUsesOnlyAuthenticationExpiry(t *testing.T) {
 		t.Fatal("invalid browser cookie accepted")
 	}
 }
+
+func TestCookieCaptureRecognizesCurrentPulseTicket(t *testing.T) {
+	now := time.Unix(1794604268, 0)
+	deadline := float64(now.Add(14 * 24 * time.Hour).Unix())
+	header, expiry, err := cookieCredentials([]pw.Cookie{
+		{Name: "Pulse.Auth.Cookie", Value: "synthetic-auth", Expires: deadline},
+		{Name: "__ddg9_", Value: "challenge", Expires: float64(now.Add(20 * time.Minute).Unix())},
+	}, now)
+	if err != nil || expiry != deadline || !pulse.HasSessionCookie(header) {
+		t.Fatal("current Pulse ticket expiry was lost", expiry, err)
+	}
+}
 func TestBrowserURLGuard(t *testing.T) {
 	for _, value := range []string{"https://pulse.mirea.ru/", "https://sso.mirea.ru/", "https://x.ddos-guard.net/"} {
 		if !AllowedURL(value) {

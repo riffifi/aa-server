@@ -1,5 +1,17 @@
 # Performance update
 
+## 2.5.2 — recognize the current Pulse authentication cookie
+
+Browser capture and response-cookie rotation now recognize Pulse.Auth.Cookie
+and its chunk family, alongside legacy .AspNetCore.Cookies. The actual provider
+expiry is retained; successful ticket rotation updates counters and clears stale
+renewal pauses without treating challenge cookies as authentication.
+A local user-supplied capture showed a 14-day Pulse cookie and a separate
+16-hour SSO cookie, using rememberMe=True without nativeApp. This does not prove
+a 14-day server-side lifetime or establish the cause of production expiry.
+No production requests or live credential replay were performed.
+
+
 ## 2.5.1 — usage statistics only include AA actions
 
 Removed ACS observation logging and the one-hour background presence watch.

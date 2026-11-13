@@ -1,4 +1,16 @@
-# Current verification note: 2.5.1
+# Current verification note: 2.5.2
+
+Current Pulse.Auth.Cookie and legacy authentication cookie names are recognized
+for capture, expiry, chunk replacement/validation, deletion and persisted rotation.
+The user-provided captured profile replies were checked offline using both real
+server decoders: expired before login, valid afterwards. No credential replay or
+production access was used. Cookie Expires alone does not prove upstream validity.
+Go race tests passed for Pulse, browser (real Chromium), PostgreSQL and HTTP API.
+New regression tests cover the observed 14-day cookie expiry, rotation, chunks,
+deletion, challenge-cookie separation, clearing a stale renewal pause and refusing
+stale cookie writes after logout. The API documentation checker passed as well.
+
+## Previous verification: 2.5.1
 
 Usage pages and totals exclude legacy provider observations. Reading ACS no longer
 records usage; pass-number reads no longer schedule background ACS polling.

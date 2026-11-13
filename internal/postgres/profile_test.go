@@ -61,3 +61,37 @@ func TestCookieRotationAndNameFillNeverResurrectOrReplaceManualName(t *testing.T
 		t.Fatal("ended account changed", err)
 	}
 }
+
+func TestCurrentPulseRotationClearsRenewalPause(t *testing.T) {
+	v := testVault(t)
+	ctx := context.Background()
+	uid := fmt.Sprintf("pulse-cookie-%d", time.Now().UnixNano())
+	row, err := v.Upsert(ctx, Upsert{PulseID: uid, Credentials: map[string]any{"cookie": "Pulse.Auth.Cookie=old"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := row["id"].(string)
+	defer v.DeleteAccount(ctx, id)
+	version := row["session_version"].(int64)
+	if err := v.NoteRenewal(ctx, id, version, "requires_login"); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := v.SavePulseCookies(ctx, id, "Pulse.Auth.Cookie=old", version, http.Header{"Set-Cookie": {"Pulse.Auth.Cookie=fresh; Path=/; Max-Age=1209600; Secure; HttpOnly"}})
+	if err != nil || fresh == nil {
+		t.Fatal("rotation not persisted", err)
+	}
+	secret, err := v.Secret(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats := renewalStatistics(secret)
+	if secret["renewal_status"] != nil || stats.CookieRefreshes != 1 || fresh["expires_at"] == nil {
+		t.Fatal("current ticket did not clear stale pause or update expiry")
+	}
+	if _, err := v.EndSession(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := v.SavePulseCookies(ctx, id, "Pulse.Auth.Cookie=fresh", fresh["session_version"].(int64), http.Header{"Set-Cookie": {"Pulse.Auth.Cookie=stale; Path=/; Max-Age=1209600"}}); err != nil || stale != nil {
+		t.Fatal("logout resurrected", err)
+	}
+}
