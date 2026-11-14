@@ -355,6 +355,13 @@ func (e *Engine) run(parent context.Context, state map[string]any, renew bool, u
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+	if renew {
+		var err error
+		state, err = renewalStorage(state)
+		if err != nil {
+			return nil, err
+		}
+	}
 	c, err := e.newContext(state, ctx)
 	if err != nil {
 		return nil, err

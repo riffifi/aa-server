@@ -8,7 +8,10 @@ import (
 	"math"
 )
 
+const RenewalFlowVersion = "fresh-pulse-ticket-v2"
+
 type RenewalAttempt struct {
+	FlowVersion       string   `json:"flow_version,omitempty"`
 	Started           float64  `json:"started"`
 	Finished          float64  `json:"finished"`
 	Result            string   `json:"result"`
@@ -129,7 +132,7 @@ func RenewalView(secret map[string]any) map[string]any {
 	if stats.LastSuccess > 0 {
 		success = stats.LastSuccess
 	}
-	return map[string]any{"status": secret["renewal_status"], "last_attempt": attempt, "last_success": success, "statistics": stats}
+	return map[string]any{"status": secret["renewal_status"], "flow_version": secret["renewal_flow_version"], "last_attempt": attempt, "last_success": success, "statistics": stats}
 }
 
 // Renewal status stays inside the encrypted secret. A stale browser job must
@@ -154,7 +157,7 @@ func (v *Vault) NoteRenewal(ctx context.Context, id string, version int64, statu
 		}
 		now := v.now()
 		if status == "running" {
-			secret["renewal_flow_version"] = "classic-fallback-v1"
+			secret["renewal_flow_version"] = RenewalFlowVersion
 			finishRenewal(secret, "interrupted", now, nil)
 			stats := renewalStatistics(secret)
 			if stats.Since == 0 {
@@ -162,7 +165,7 @@ func (v *Vault) NoteRenewal(ctx context.Context, id string, version int64, statu
 			}
 			stats.Attempts++
 			stats.LastAttempt = now
-			stats.Active = &RenewalAttempt{Started: now, Result: "running", BeforeExpiry: renewalExpiry(row["expires_at"]), PreviouslyExpired: len(observedState) > 0 && observedState[0] == "expired"}
+			stats.Active = &RenewalAttempt{FlowVersion: RenewalFlowVersion, Started: now, Result: "running", BeforeExpiry: renewalExpiry(row["expires_at"]), PreviouslyExpired: len(observedState) > 0 && observedState[0] == "expired"}
 			secret["renewal_statistics"] = stats
 			secret["renewal_attempted_at"] = now
 		} else {

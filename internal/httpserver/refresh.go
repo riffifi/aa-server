@@ -108,7 +108,7 @@ func (s *Server) refreshOne(ctx context.Context, id string) (map[string]any, err
 	}
 	// A successful profile is not proof that the SSO session or its refresh
 	// credentials were renewed. Cookie rotation must not postpone this timer.
-	paused := secret["renewal_status"] == "requires_login" && secret["renewal_flow_version"] == "classic-fallback-v1"
+	paused := secret["renewal_status"] == "requires_login" && secret["renewal_flow_version"] == postgres.RenewalFlowVersion
 	due := cookie != "" && !paused && renewalDue(state, now, row["expires_at"], ssoRenewed, s.config.RenewBefore, s.config.RenewInterval)
 	storage, _ := secret["storage_state"].(map[string]any)
 	if renewer, ok := s.config.Browser.(interface {

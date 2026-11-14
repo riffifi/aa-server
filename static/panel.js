@@ -293,9 +293,9 @@ async function loadRenewalStatistics() {
     fact('Срок не вырос', totals.expiry_unchanged), fact('Срок неизвестен', totals.expiry_unknown),
     fact('Ошибки', totals.failed), fact('Требуется QR', totals.requires_login), fact('Прерваны', totals.interrupted),
     fact('Не завершены', Math.max(0, totals.attempts - completed)));
-  grid($('renewal-table'), ['Аккаунт', 'Cookie МИРЭА', 'Последняя cookie', 'Попытки SSO', 'Успехи SSO', 'Восстановлено', 'Срок вырос', 'Ошибки / QR', 'Последний успех SSO', 'Последняя попытка SSO'], accounts.map(a => {
+  grid($('renewal-table'), ['Аккаунт', 'Сессия МИРЭА', 'Срок cookie', 'Продление', 'Cookie МИРЭА', 'Последняя cookie', 'Попытки SSO', 'Успехи SSO', 'Восстановлено', 'Срок вырос', 'Ошибки / QR', 'Последний успех SSO', 'Последняя попытка SSO'], accounts.map(a => {
     const r = a.renewal || {}, s = r.statistics || {};
-    return [a.label, s.cookie_refreshes || 0, stamp(s.last_cookie_refresh), s.attempts || 0, s.succeeded || 0, s.recovered || 0, s.expiry_extended || 0, `${s.failed || 0} / ${s.requires_login || 0}`, stamp(r.last_success), stamp(r.last_attempt)];
+    return [a.label, STATE[a.state] || a.state || '—', stamp(a.expires_at), RENEWAL_RESULT[r.status] || r.status || '—', s.cookie_refreshes || 0, stamp(s.last_cookie_refresh), s.attempts || 0, s.succeeded || 0, s.recovered || 0, s.expiry_extended || 0, `${s.failed || 0} / ${s.requires_login || 0}`, stamp(r.last_success), stamp(r.last_attempt)];
   }));
   const placeholder = el('option', 'Выберите аккаунт'); placeholder.value = '';
   $('renewal-account').replaceChildren(placeholder, ...accounts.map(a => { const option = el('option', a.label); option.value = a.id; return option; }));
@@ -304,7 +304,7 @@ async function loadRenewalStatistics() {
   const statistics = ((account || {}).renewal || {}).statistics || {};
   const history = [...(statistics.history || [])].reverse();
   if (statistics.active) history.unshift(statistics.active);
-  grid($('renewal-history'), ['Начало', 'Результат', 'До: срок cookie', 'После: срок cookie', 'Изменение срока', 'Длительность', 'Была истекшей'], history.map(h => [stamp(h.started), RENEWAL_RESULT[h.result] || h.result, stamp(h.before_expiry), stamp(h.after_expiry), h.expiry_delta_seconds == null ? 'неизвестно' : `${h.expiry_delta_seconds > 0 ? '+' : ''}${Math.round(h.expiry_delta_seconds)} с`, h.finished ? (h.duration_ms / 1000).toFixed(1) + ' с' : '—', h.previously_expired ? 'да' : 'нет']));
+  grid($('renewal-history'), ['Начало', 'Результат', 'Механизм', 'До: срок cookie', 'После: срок cookie', 'Изменение срока', 'Длительность', 'Была истекшей'], history.map(h => [stamp(h.started), RENEWAL_RESULT[h.result] || h.result, h.flow_version === 'fresh-pulse-ticket-v2' ? 'Новый билет' : 'Прежний', stamp(h.before_expiry), stamp(h.after_expiry), h.expiry_delta_seconds == null ? 'неизвестно' : `${h.expiry_delta_seconds > 0 ? '+' : ''}${Math.round(h.expiry_delta_seconds)} с`, h.finished ? (h.duration_ms / 1000).toFixed(1) + ' с' : '—', h.previously_expired ? 'да' : 'нет']));
   fillRecordAccounts();
 }
 $('renewal-account').addEventListener('change', () => loadRenewalStatistics().catch(error => notice(error.message)));

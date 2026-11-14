@@ -38,6 +38,9 @@ func TestRenewalStatisticsPersistRealOutcomesAndExcludeManualLogins(t *testing.T
 	}
 	secret, _ = v.Secret(row)
 	stats := renewalStatistics(secret)
+	if stats.History[0].FlowVersion != RenewalFlowVersion || RenewalView(secret)["flow_version"] != RenewalFlowVersion {
+		t.Fatal("renewal flow provenance missing")
+	}
 	if stats.Attempts != 1 || stats.Succeeded != 1 || stats.Recovered != 1 || stats.ConfirmedBenefit != 1 || stats.ExpiryExtended != 1 || stats.Active != nil || len(stats.History) != 1 || stats.History[0].DurationMS != 2000 {
 		t.Fatal("outcome counters differ", stats)
 	}

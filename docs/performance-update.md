@@ -1,5 +1,17 @@
 # Performance update
 
+## 2.5.3 — require a fresh Pulse ticket during browser renewal
+
+Silent renewal strips current and legacy Pulse authentication cookies only from
+its disposable browser state. SSO cookies, challenge cookies and local storage
+are preserved; persisted credentials remain untouched unless renewal succeeds.
+This prevents a still-valid old Pulse ticket from masquerading as completed SSO
+renewal. A prior-flow requires_login pause receives one retry under the new flow;
+real interactive-login rejection still stops retries. This corrects a local logic
+flaw, but does not establish the cause of production expiry after one day or
+guarantee a 14-day QR session. No production access or live account replay.
+
+
 ## 2.5.2 — recognize the current Pulse authentication cookie
 
 Browser capture and response-cookie rotation now recognize Pulse.Auth.Cookie

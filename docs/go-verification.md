@@ -1,4 +1,17 @@
-# Current verification note: 2.5.2
+# Current verification note: 2.5.3
+
+Renewal now removes only Pulse authentication ticket families from a deep copy
+of browser storage before navigation. SSO, challenge cookies and local storage
+remain intact; failed renewal cannot alter the saved ticket. A valid old profile
+alone can no longer satisfy renewal in this fresh context.
+No live university account was used; one-day production expiry is not reproduced.
+Go race tests passed for browser (real Chromium), HTTP server and PostgreSQL.
+New tests verify that Pulse tickets/chunks are removed from the disposable state,
+SSO/challenge cookies survive, stored credentials are not mutated and a new ticket
+can be captured. The panel now shows current auth state, ticket expiry and renewal
+status; each new attempt records its flow version to distinguish historical results.
+
+## Previous verification: 2.5.2
 
 Current Pulse.Auth.Cookie and legacy authentication cookie names are recognized
 for capture, expiry, chunk replacement/validation, deletion and persisted rotation.
